@@ -1,0 +1,156 @@
+# Maze
+
+A small first-person maze game in Rust, built on the [Fyrox](https://github.com/FyroxEngine/Fyrox)
+engine and rendered with Vulkan.
+
+Every round is a new maze, put together at random from four tile models: a straight pipe, a
+corner, a T and a crossroads. You start at one end of the longest route through it, and a
+glowing exit waits at the other end. The clock runs until you reach it.
+
+- Random mazes of any size, with loops, built from tiles whose shapes are measured from the models
+  themselves.
+- First-person movement with walking, running and a breath-limited sprint, crouching, crawling,
+  jumping, leaning round corners and looking behind.
+- Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
+- Only what can be seen from where you stand is drawn and lit, so big mazes stay fast.
+- A pause menu, with a switch that turns every light in the maze off and leaves you with your
+  flashlight.
+
+## Requirements
+
+- **A graphics card with Vulkan.** The game checks at startup that it is rendering with Vulkan,
+  and exits if it is not. Ray tracing is used for shadows when the card supports it; without it
+  the game falls back to shadow maps.
+- **Rust 1.94 or newer**, the version the engine requires.
+- **The engine and its effects, checked out next to this project.** Both are dependencies by
+  local path, so the three have to sit side by side:
+
+  ```sh
+  mkdir game_dev && cd game_dev
+  git clone -b vulkan https://github.com/d4140n-4h3-1/Fyrox.git
+  git clone https://github.com/d4140n-4h3-1/fyrox-gfx.git
+  git clone https://github.com/d4140n-4h3-1/MazeGame.git
+  ```
+
+  ```
+  game_dev/
+  ├── Fyrox/       the engine, on its `vulkan` branch
+  ├── fyrox-gfx/   the glass, shadow, reflection and other graphics effects
+  └── MazeGame/    this project
+  ```
+
+  The engine is modified, so upstream Fyrox will not do: the
+  [`vulkan` branch of this fork](https://github.com/d4140n-4h3-1/Fyrox/tree/vulkan) makes the
+  wgpu backend render like the OpenGL one and adds the hardware ray tracing that the traced
+  shadows use. `Fyrox/VULKAN.md` describes every change.
+  [`fyrox-gfx`](https://github.com/d4140n-4h3-1/fyrox-gfx) holds the graphics effects the game
+  adds on top of the engine.
+
+This project is a Cargo workspace of its own. That keeps other crates from switching on the
+engine's OpenGL backend, which it would otherwise pick over Vulkan.
+
+## Running
+
+```sh
+cargo run
+```
+
+It can be started from anywhere; it finds its models in `data/` next to `Cargo.toml`. The engine
+is compiled with optimizations even in a debug build, and the game itself is not, so `cargo run`
+is quick enough to play while still easy to debug. `cargo run --release` optimizes the game as
+well.
+
+## Controls
+
+| Key              | Action                                                        |
+| ---------------- | ------------------------------------------------------------- |
+| W A S D, arrows  | Move                                                          |
+| Mouse            | Look around                                                   |
+| Caps Lock        | Walk or run; it stays as you left it                          |
+| Shift (hold)     | Sprint. Costs breath, and running out leaves you walking      |
+| Space            | Jump                                                          |
+| C                | Crouch, or stand back up                                      |
+| Z                | Crawl, or stand back up                                       |
+| Ctrl (hold)      | Lean round the corner ahead                                   |
+| Q (hold)         | Look behind you while still moving forward                    |
+| F                | Flashlight on or off                                          |
+| R                | New maze                                                      |
+| `[` `]`          | Turn slower or faster                                         |
+| `-` `=`          | Narrower or wider view                                        |
+| Escape           | Pause                                                         |
+
+### Pause menu
+
+Escape pauses the game: the clock, the player and the physics all stop. Switching to another
+window in the middle of a round pauses it too. The menu has:
+
+- **Resume**: carry on where you left off.
+- **Lights**: switch the maze's lights off, or back on. Off, the lamps, the glow of their
+  fixtures, the sun and nearly all the ambient light go out, leaving your flashlight and the
+  exit's own glow. The setting carries over to each new maze.
+- **New maze**: the same as R. **New round** when playing a fixed maze model.
+- **Quit**.
+
+## Options
+
+Options are set with environment variables, for example `MAZE_SIZE=10x10 cargo run`.
+
+| Variable                 | Effect                                                                  |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `MAZE_SIZE=<w>x<d>`      | How many junctions wide and deep the maze is. The default is `20x20`.   |
+| `MAZE_SEED=<n>`          | Makes every maze and round the same, for comparing two runs.            |
+| `MAZE_MODEL=<path>`      | Plays a fixed maze model (`.glb`, `.gltf` or `.fbx`) instead of random mazes. |
+| `MAZE_DEBUG=1`           | Logs the walkable map of each level, and rendering statistics once a second. |
+| `MAZE_VSYNC=0`           | Uncaps the frame rate, for measuring what a frame costs.                |
+| `MAZE_RT=0`              | Shadow maps instead of ray-traced shadows.                              |
+| `MAZE_HARD_SHADOWS=1`    | Ray-traced shadows with sharp edges instead of soft ones.               |
+| `MAZE_SHADOW_BUDGET=0`   | With shadow maps, gives every lamp in range one, not just the nearest.  |
+| `MAZE_SSAO=0`            | Turns ambient occlusion off.                                            |
+| `MAZE_REFLECTIONS=0`     | Turns floor reflections off.                                            |
+
+### Fixed maze models
+
+A model given with `MAZE_MODEL` needs no special structure, but the game reads a few things from
+it:
+
+- Surfaces colored **pure magenta** (255, 0, 255) are the glass of light fixtures. They become
+  refractive glass, and each fixture gets a lamp.
+- Small meshes standing on their own, narrower than 3.5 m, are taken as **something to find**:
+  the round ends there instead of at a random exit.
+- FBX models are taken to be in centimeters and scaled down.
+
+Anything in the model that glows by itself goes dark with the lights.
+
+## Tests
+
+```sh
+cargo test
+```
+
+The tests cover maze generation and tile fitting, what can be seen from where, the walkable grid
+and round planning, and the player's movement, breath, head motion, leaning and keys.
+
+## How it fits together
+
+| Module          | What it does                                                               |
+| --------------- | -------------------------------------------------------------------------- |
+| `main.rs`       | Starts the engine and sets up the graphics effects.                        |
+| `game.rs`       | The game: loading levels, rounds, input, the pause menu, the lights.       |
+| `level.rs`      | A level in the scene: its pieces, collider, lamps and walkable ground.     |
+| `generate.rs`   | Plans random mazes on a grid of junctions and turns them into tiles.       |
+| `tiles.rs`      | Measures the tile models and assembles a maze from them.                   |
+| `layout.rs`     | The walkable grid, and where a round starts and ends.                      |
+| `survey.rs`     | Finds the walkable ground of a level by casting rays into it.              |
+| `culling.rs`    | Hides the pieces and lamps that cannot be seen from where the player is.   |
+| `fixtures.rs`   | Light fixtures: the glass, the lamps, and everything that glows.           |
+| `inward.rs`     | Makes the tiles' surfaces visible from inside and out.                     |
+| `hud.rs`        | The status line and the banner.                                            |
+| `menu.rs`       | The pause menu.                                                            |
+| `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
+| `player/`       | The player, one file per part: posture, movement, breath, head, lean, input and view. |
+
+The tile models are in `data/`.
+
+## License
+
+MIT.
