@@ -1,0 +1,159 @@
+//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z and F each act
+//! once per press, however long the key is held.
+
+use super::Player;
+use fyrox::keyboard::KeyCode;
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(super) struct Keys {
+    pub(super) forward: bool,
+    pub(super) back: bool,
+    pub(super) left: bool,
+    pub(super) right: bool,
+    pub(super) sprint: bool,
+    /// Whether Caps Lock is down, so that key repeat while it is held does not toggle again.
+    gait_toggle: bool,
+    pub(super) jump: bool,
+    /// Whether C and Z are down, so that key repeat while one is held does not toggle again.
+    crouch: bool,
+    crawl: bool,
+    pub(super) look_back: bool,
+    pub(super) lean: bool,
+    /// Whether F is down, so that key repeat does not switch the flashlight again.
+    flashlight: bool,
+}
+
+impl Player {
+    pub fn on_key(&mut self, code: KeyCode, pressed: bool) {
+        match code {
+            KeyCode::KeyW | KeyCode::ArrowUp => self.keys.forward = pressed,
+            KeyCode::KeyS | KeyCode::ArrowDown => self.keys.back = pressed,
+            KeyCode::KeyA | KeyCode::ArrowLeft => self.keys.left = pressed,
+            KeyCode::KeyD | KeyCode::ArrowRight => self.keys.right = pressed,
+            KeyCode::ShiftLeft | KeyCode::ShiftRight => self.keys.sprint = pressed,
+            KeyCode::CapsLock => {
+                if pressed && !self.keys.gait_toggle {
+                    self.running = !self.running;
+                }
+                self.keys.gait_toggle = pressed;
+            }
+            KeyCode::Space => self.keys.jump = pressed,
+            KeyCode::KeyC => {
+                if pressed && !self.keys.crouch {
+                    self.posture = self.posture.crouch_toggled();
+                }
+                self.keys.crouch = pressed;
+            }
+            KeyCode::KeyQ => self.keys.look_back = pressed,
+            KeyCode::ControlLeft | KeyCode::ControlRight => self.keys.lean = pressed,
+            KeyCode::KeyF => {
+                if pressed && !self.keys.flashlight {
+                    self.flashlight_on = !self.flashlight_on;
+                }
+                self.keys.flashlight = pressed;
+            }
+            KeyCode::KeyZ => {
+                if pressed && !self.keys.crawl {
+                    self.posture = self.posture.crawl_toggled();
+                }
+                self.keys.crawl = pressed;
+            }
+            _ => (),
+        }
+    }
+
+    pub fn release_keys(&mut self) {
+        self.keys = Keys::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::player::{
+        posture::{Gait, Posture},
+        press,
+    };
+
+    #[test]
+    fn c_toggles_crouching() {
+        let mut player = Player::default();
+        press(&mut player, KeyCode::KeyC);
+        assert_eq!(player.posture, Posture::Crouching);
+        press(&mut player, KeyCode::KeyC);
+        assert_eq!(player.posture, Posture::Standing);
+    }
+
+    #[test]
+    fn z_toggles_crawling() {
+        let mut player = Player::default();
+        press(&mut player, KeyCode::KeyZ);
+        assert_eq!(player.posture, Posture::Crawling);
+        press(&mut player, KeyCode::KeyZ);
+        assert_eq!(player.posture, Posture::Standing);
+    }
+
+    #[test]
+    fn c_from_a_crawl_crouches_and_z_from_a_crouch_crawls() {
+        let mut player = Player::default();
+        press(&mut player, KeyCode::KeyZ);
+        press(&mut player, KeyCode::KeyC);
+        assert_eq!(player.posture, Posture::Crouching);
+        press(&mut player, KeyCode::KeyZ);
+        assert_eq!(player.posture, Posture::Crawling);
+    }
+
+    #[test]
+    fn a_key_let_go_while_the_window_was_away_still_works_after() {
+        let mut player = Player::default();
+        // Pressed, then the window lost focus before the key came up.
+        player.on_key(KeyCode::KeyC, true);
+        player.release_keys();
+        press(&mut player, KeyCode::KeyC);
+        assert_eq!(player.posture, Posture::Standing, "down, then up again");
+    }
+
+    #[test]
+    fn f_switches_the_flashlight_off_and_on_once_per_press() {
+        let mut player = Player::default();
+        assert!(player.flashlight_on, "on to start with");
+        press(&mut player, KeyCode::KeyF);
+        assert!(!player.flashlight_on);
+        press(&mut player, KeyCode::KeyF);
+        assert!(player.flashlight_on);
+    }
+
+    #[test]
+    fn caps_lock_goes_between_walking_and_running_once_per_press() {
+        let mut player = Player::default();
+        assert_eq!(player.gait(), Gait::Walking, "walking to start with");
+        press(&mut player, KeyCode::CapsLock);
+        assert_eq!(player.gait(), Gait::Running);
+        press(&mut player, KeyCode::CapsLock);
+        assert_eq!(player.gait(), Gait::Walking, "back to a walk");
+    }
+
+    #[test]
+    fn shift_sprints_from_a_walk_or_a_run_and_leaves_the_gait_as_it_was() {
+        let mut player = Player::default();
+        player.on_key(KeyCode::ShiftLeft, true);
+        assert_eq!(player.gait(), Gait::Sprinting, "sprinting from a walk");
+        player.on_key(KeyCode::ShiftLeft, false);
+        assert_eq!(player.gait(), Gait::Walking);
+
+        press(&mut player, KeyCode::CapsLock);
+        player.on_key(KeyCode::ShiftLeft, true);
+        assert_eq!(player.gait(), Gait::Sprinting, "sprinting from a run");
+        player.on_key(KeyCode::ShiftLeft, false);
+        assert_eq!(player.gait(), Gait::Running, "running again once Shift is let go");
+    }
+
+    #[test]
+    fn the_gait_survives_the_window_losing_focus() {
+        let mut player = Player::default();
+        press(&mut player, KeyCode::CapsLock);
+        player.on_key(KeyCode::ShiftLeft, true);
+        player.release_keys();
+        assert_eq!(player.gait(), Gait::Running, "still running, and Shift is no longer held");
+    }
+}

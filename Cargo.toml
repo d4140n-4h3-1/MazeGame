@@ -1,0 +1,27 @@
+[package]
+name = "maze"
+version = "0.1.0"
+edition = "2021"
+description = "A small first-person maze game on Fyrox, rendered with Vulkan."
+license = "MIT"
+
+# A workspace of its own, like iapetus-vulkan: Cargo features add up across a workspace, and the
+# engine picks OpenGL whenever anything enables it.
+[workspace]
+
+[dependencies]
+# The engine's wgpu backend only. On Linux wgpu drives Vulkan.
+fyrox = { path = "../Fyrox/fyrox", default-features = false, features = ["backend_wgpu"] }
+# Only used to confirm at startup which graphics API the renderer actually got.
+fyrox-graphics-wgpu = { path = "../Fyrox/fyrox-graphics-wgpu" }
+wgpu = "30"
+# Refractive glass and other graphics improvements kept outside the engine.
+fyrox-gfx = { path = "../fyrox-gfx", features = ["raytracing"] }
+
+# Optimized engine, debuggable game code. The engine's own debug assertions and overflow checks
+# cost more than they are worth here: with them on, a `cargo run` build spends about four times
+# longer per frame than a release build.
+[profile.dev.package."*"]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
