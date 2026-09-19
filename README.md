@@ -49,6 +49,57 @@ glowing exit waits at the other end. The clock runs until you reach it.
 This project is a Cargo workspace of its own. That keeps other crates from switching on the
 engine's OpenGL backend, which it would otherwise pick over Vulkan.
 
+## What's changed
+
+### The engine, compared with upstream Fyrox
+
+The fork's `vulkan` branch is two commits on top of upstream Fyrox as of 13 September 2026:
+
+1. **Make the wgpu (Vulkan) backend render like the OpenGL one.** Fixes found by rendering the
+   same scenes on both backends and comparing the frames:
+   - clip depth is remapped to wgpu's range;
+   - textures sampled from projected positions (shadows, SSAO, decals, rendered cube maps) and
+     UI rendered into textures are no longer upside down;
+   - light volumes and bloom line up with the G-buffer;
+   - a GPU hang from stale uniforms is fixed, and integer vertex attributes, pipeline caching,
+     scissors, readback padding and rendering into mip levels are corrected;
+   - uniform pages are capped at 1 MB, where a 2 GB limit reported by the driver froze loading.
+
+   The `fyrox` crate also stops pulling in the OpenGL backend by default, so choosing
+   `backend_wgpu` takes effect.
+2. **Add hardware ray-traced shadows and further wgpu fixes.**
+   - Hardware ray tracing, where the graphics card has it, traces every light's shadows. It is off
+     unless a game asks for it.
+   - Point and spot lights are drawn only over the part of the screen they can reach.
+   - The soft-shadow filter no longer leaves a hard edge, on both backends.
+   - With FXAA off, the frame is no longer upside down.
+   - glTF meshes without a material come out plain white instead of dark white metal.
+   - Animations saved by older engine versions load their property paths.
+
+`VULKAN.md` in the fork explains each change in detail.
+
+### fyrox-gfx
+
+Graphics effects the game adds on top of the engine, kept out of it: refractive glass, softer
+shadow edges, temporal anti-aliasing, further-reaching ambient occlusion, screen-space
+reflections, a budget that keeps shadow maps for the nearest lamps only, and the ray-traced
+shadows (its `raytracing` feature).
+
+### The game
+
+19 September 2026:
+
+- **Pause menu.** Escape now opens a menu with Resume, Lights, New maze and Quit, and stops the
+  clock, the player and the physics. It used to only release the mouse. A round in play also
+  pauses when the window loses focus.
+- **Lights switch.** From the pause menu, the lamps, the glow of their fixtures, the sun and nearly
+  all the ambient light can be turned off, leaving the flashlight to see by. The setting carries
+  over to each new maze.
+- **The end-of-round banner** is now centred on the window.
+- **The code is split into modules** - `game`, `level`, `culling`, `fixtures`, `survey`, `hud`,
+  `menu`, `diagnostics` and a `player/` folder - instead of one large `main.rs` and
+  `player.rs`. Nothing about how the game plays changed with it.
+
 ## Running
 
 ```sh
