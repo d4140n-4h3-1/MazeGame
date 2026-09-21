@@ -11,12 +11,12 @@ license = "MIT"
 
 [dependencies]
 # The engine's wgpu backend only. On Linux wgpu drives Vulkan.
-fyrox = { path = "../Fyrox/fyrox", default-features = false, features = ["backend_wgpu"] }
+fyrox = { git = "https://github.com/d4140n-4h3-1/Fyrox.git", branch = "vulkan", default-features = false, features = ["backend_wgpu"] }
 # Only used to confirm at startup which graphics API the renderer actually got.
-fyrox-graphics-wgpu = { path = "../Fyrox/fyrox-graphics-wgpu" }
+fyrox-graphics-wgpu = { git = "https://github.com/d4140n-4h3-1/Fyrox.git", branch = "vulkan" }
 wgpu = "30"
 # Refractive glass and other graphics improvements kept outside the engine.
-fyrox-gfx = { path = "../fyrox-gfx", features = ["raytracing"] }
+fyrox-gfx = { git = "https://github.com/d4140n-4h3-1/fyrox-gfx.git", branch = "main", features = ["raytracing"] }
 
 # Optimized engine, debuggable game code. The engine's own debug assertions and overflow checks
 # cost more than they are worth here: with them on, a `cargo run` build spends about four times
