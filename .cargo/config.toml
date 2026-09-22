@@ -1,0 +1,5 @@
+# Fetch git dependencies with the system `git` binary instead of libgit2. The engine fork is
+# ~400 MB, and libgit2 cannot resume an interrupted transfer: it throws the partial pack away
+# and starts over, which shows up as "spurious network error" retry loops. `git` resumes.
+[net]
+git-fetch-with-cli = true
