@@ -1,6 +1,6 @@
 //! Looking around with the mouse, and the view's settings: how fast it turns and how wide it is.
 
-use super::Player;
+use super::{third_person::PITCH_LIMIT, Player};
 use fyrox::{
     graph::SceneGraph,
     scene::{
@@ -26,10 +26,16 @@ const FOV_RANGE: std::ops::RangeInclusive<f32> = 45.0..=100.0;
 pub(super) const NEAR_PLANE: f32 = 0.1;
 
 impl Player {
+    /// Turns the view by a mouse movement - or, with the middle button held, swings the camera
+    /// round the droid instead, leaving the droid facing as it was.
     pub fn look(&mut self, dx: f32, dy: f32) {
-        self.yaw -= dx * self.sensitivity;
-        self.pitch =
-            (self.pitch + dy * self.sensitivity).clamp(-85f32.to_radians(), 85f32.to_radians());
+        let (across, up) = (-dx * self.sensitivity, dy * self.sensitivity);
+        if self.orbit.held {
+            self.orbit.swing(across, up, self.pitch);
+            return;
+        }
+        self.yaw += across;
+        self.pitch = (self.pitch + up).clamp(-PITCH_LIMIT, PITCH_LIMIT);
     }
 
     /// Multiplies how far the view turns per mouse count, and returns the new value.

@@ -9,11 +9,14 @@ use fyrox::{
 
 /// How fast each posture moves, in meters per second: walking, running and sprinting. Every
 /// posture does all three, and each posture is slower than the one above it at every gait.
-const STANDING_SPEEDS: (f32, f32, f32) = (2.9, 5.0, 6.5);
-const CROUCHING_SPEEDS: (f32, f32, f32) = (1.5, 2.5, 3.2);
-const CRAWLING_SPEEDS: (f32, f32, f32) = (0.75, 1.25, 1.6);
+///
+/// These are only for when the droid has not loaded. With it, the droid's feet set the speeds -
+/// see [`Avatar::pace`](super::avatar::Avatar::pace) - and these are roughly what they come to.
+const STANDING_SPEEDS: (f32, f32, f32) = (0.6, 2.0, 4.1);
+const CROUCHING_SPEEDS: (f32, f32, f32) = (0.55, 0.75, 0.95);
+const CRAWLING_SPEEDS: (f32, f32, f32) = (0.3, 0.4, 0.45);
 /// How hard each posture can change how fast it is going, in meters per second squared.
-/// Standing, that is about a third of a second to a walk and four fifths to a sprint; crouched
+/// Standing, that is next to no time to a walk and half a second to a sprint; crouched
 /// or down on the floor there is much less to push off with.
 pub(super) const STANDING_ACCELERATION: f32 = 8.0;
 const CROUCHING_ACCELERATION: f32 = 5.0;

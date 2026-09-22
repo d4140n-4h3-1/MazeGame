@@ -14,8 +14,8 @@
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
 //!
-//! The head is not carried perfectly level. It rises and falls in step with the stride, dips as
-//! the knees take a landing, and rolls into sideways movement and into turns.
+//! The head is not carried perfectly level. It dips as the knees take a landing, and rolls into
+//! sideways movement and into turns.
 //!
 //! F switches the flashlight on and off.
 //!
@@ -28,16 +28,24 @@
 //! Holding Q looks behind: the head turns round over the shoulder while the body keeps going the
 //! way it was facing, so the player can see what is following them without stopping.
 //!
+//! The player is seen from behind, as a droid (see [`avatar`]), with the camera held back over its
+//! shoulder; V goes between that and seeing through its eyes, and holding the middle mouse button
+//! swings the camera round it - see [`third_person`].
+//!
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
+mod avatar;
 mod breath;
 mod head;
 mod input;
 mod lean;
 mod movement;
 mod posture;
+mod third_person;
 mod view;
 
+pub use avatar::DROID_MODEL;
+use avatar::Avatar;
 use fyrox::{
     core::{
         algebra::{Point3, UnitQuaternion, Vector3},
@@ -58,6 +66,7 @@ use fyrox::{
 use head::LookBack;
 use input::Keys;
 use posture::Posture;
+use third_person::{Orbit, BOOM_LENGTH};
 use view::{DEFAULT_FOV, DEFAULT_SENSITIVITY, NEAR_PLANE};
 
 /// Where the feet are, relative to the middle of the body when standing. The body's origin stays
@@ -83,10 +92,6 @@ pub struct Player {
     grounded: bool,
     /// How fast the body was falling last frame, in meters per second, for the landing to read.
     fall_speed: f32,
-    /// Where the head is in its stride, from 0 to 1, and how far it is swinging: eased, so that
-    /// setting off and stopping do not switch the bob on and off.
-    stride: f32,
-    swing: f32,
     /// How far the knees are still bent under a landing, in meters.
     landing: f32,
     /// How far the head is rolled into its movement, in radians.
@@ -110,6 +115,18 @@ pub struct Player {
     pitch: f32,
     sensitivity: f32,
     fov: f32,
+    /// The droid the player is seen as, once its model has loaded.
+    avatar: Option<Avatar>,
+    /// Whether the player is seen from behind rather than through their own eyes. It stays as
+    /// the player left it from one round to the next.
+    third_person: bool,
+    /// How far behind the head the camera is right now, in meters: all the way back, or pulled
+    /// in by a wall.
+    boom: f32,
+    /// How far the camera is swung round the droid with the middle mouse button.
+    orbit: Orbit,
+    /// Where the droid's feet were the last time the graphics effects were told.
+    last_seen: Option<Vector3<f32>>,
     keys: Keys,
 }
 
@@ -126,8 +143,6 @@ impl Default for Player {
             winded: false,
             grounded: false,
             fall_speed: 0.0,
-            stride: 0.0,
-            swing: 0.0,
             landing: 0.0,
             roll: 0.0,
             last_yaw: 0.0,
@@ -141,6 +156,11 @@ impl Default for Player {
             pitch: 0.0,
             sensitivity: DEFAULT_SENSITIVITY,
             fov: DEFAULT_FOV,
+            avatar: None,
+            third_person: true,
+            boom: BOOM_LENGTH,
+            orbit: Orbit::default(),
+            last_seen: None,
             keys: Default::default(),
         }
     }
@@ -239,10 +259,11 @@ impl Player {
         self.stamina = 1.0;
         self.winded = false;
         self.fall_speed = 0.0;
-        self.stride = 0.0;
-        self.swing = 0.0;
         self.landing = 0.0;
         self.roll = 0.0;
+        self.boom = BOOM_LENGTH;
+        // A new round puts the body somewhere else rather than moving it there.
+        self.last_seen = None;
     }
 
     /// Applies input for this frame. With `can_move` off the player only looks around.
@@ -278,7 +299,21 @@ impl Player {
         let horizontal = self.drive(graph, rotation * Vector3::z(), right, can_move, dt);
 
         self.carry_head(horizontal, right, dt);
-        self.place_head(graph);
+        self.place_head(graph, dt);
+        let gait = self.gait();
+        if let Some(avatar) = self.avatar.as_mut() {
+            avatar.animate(graph, horizontal.norm(), self.posture, gait, self.grounded, dt);
+        }
+    }
+
+    /// How fast the player goes at `gait` in the posture they are in, in meters per second: as
+    /// fast as the droid's feet go (see [`Avatar::pace`]), or without the droid, the posture's
+    /// own speeds.
+    fn top_speed(&self, gait: posture::Gait) -> f32 {
+        self.avatar
+            .as_ref()
+            .and_then(|avatar| avatar.pace(self.posture, gait))
+            .unwrap_or_else(|| self.posture.speed(gait))
     }
 
     /// How far a ray from `from` goes in `direction` before hitting something other than the

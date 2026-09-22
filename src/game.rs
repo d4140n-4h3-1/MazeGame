@@ -7,7 +7,7 @@ use crate::{
     layout::Rng,
     level::Level,
     menu::{Choice, PauseMenu},
-    player::Player,
+    player::{Player, DROID_MODEL},
     survey,
     tiles::{self, Measured, Prefabs},
 };
@@ -21,7 +21,7 @@ use fyrox::{
         visitor::prelude::*,
     },
     engine::GraphicsContext,
-    event::{ElementState, Event, WindowEvent},
+    event::{ElementState, Event, MouseButton, WindowEvent},
     graph::SceneGraph,
     gui::{message::UiMessage, UserInterface},
     keyboard::{KeyCode, PhysicalKey},
@@ -98,6 +98,14 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     player: Player,
+    /// What moves in the scene, for the graphics effects: the droid.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    moving: fyrox_gfx::MovingThings,
+    /// The droid the player is seen as, until it has loaded and joined the player.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    droid: Option<ModelResource>,
     exit: Handle<Node>,
     sun: Handle<Node>,
     /// Whether the player has switched the maze's lights off, leaving the flashlight to see by.
@@ -129,6 +137,14 @@ pub struct MazeGame {
 }
 
 impl MazeGame {
+    /// The game, telling the graphics effects what moves through `moving`.
+    pub fn new(moving: fyrox_gfx::MovingThings) -> Self {
+        Self {
+            moving,
+            ..Default::default()
+        }
+    }
+
     fn build_scene(&mut self, ctx: &mut PluginContext) {
         let mut scene = Scene::new();
         scene.rendering_options.ambient_lighting_color = AMBIENT;
@@ -194,6 +210,7 @@ impl MazeGame {
         self.player = Player::spawn(&mut scene.graph);
         self.scene = ctx.scenes.add(scene);
         let resources = &ctx.resource_manager;
+        self.droid = Some(resources.request::<Model>(DROID_MODEL));
         match std::env::var("MAZE_MODEL") {
             Ok(path) => self.model = Some(resources.request::<Model>(path)),
             Err(_) => self.prefabs = Some(Prefabs::request(resources)),
@@ -474,6 +491,15 @@ impl Plugin for MazeGame {
     }
 
     fn update(&mut self, ctx: &mut PluginContext) -> GameResult {
+        // The droid joins the player whenever it has loaded; the game goes on without it if it
+        // cannot, seen through the player's own eyes.
+        if let Some(droid) = self.droid.take_if(|droid| droid.is_ok()) {
+            self.player.attach_avatar(&mut ctx.scenes[self.scene], &droid);
+        } else if self.droid.as_ref().is_some_and(|d| d.is_failed_to_load()) {
+            Log::err(format!("Could not load {DROID_MODEL}; playing in first person"));
+            self.droid = None;
+        }
+
         match self.phase {
             // While the menu is open nothing happens: no loading, no clock, no player.
             _ if self.menu.is_open() => (),
@@ -567,6 +593,12 @@ impl Plugin for MazeGame {
             }
         }
 
+        let droid = match self.phase {
+            Phase::Playing | Phase::Won => self.player.moving(&ctx.scenes[self.scene].graph),
+            _ => None,
+        };
+        self.moving.set(droid);
+
         if self.want_mouse && !self.mouse_captured && self.focused {
             self.set_mouse_captured(ctx, true);
         }
@@ -616,6 +648,21 @@ impl Plugin for MazeGame {
                         if pressed && !input.repeat {
                             self.on_key(&mut ctx, code);
                         }
+                    }
+                }
+                WindowEvent::MouseInput {
+                    button: MouseButton::Middle,
+                    state,
+                    ..
+                } => {
+                    // Held, the mouse swings the camera round the droid. Let go counts even
+                    // with the menu open, so the camera is not left swung round.
+                    let held = *state == ElementState::Pressed;
+                    if !held || (!self.menu.is_open() && self.mouse_captured) {
+                        self.player.set_orbiting(held);
+                    }
+                    if held && !self.menu.is_open() {
+                        self.want_mouse = true;
                     }
                 }
                 WindowEvent::MouseInput {

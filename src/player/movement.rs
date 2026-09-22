@@ -76,7 +76,7 @@ impl Player {
                 wish -= right;
             }
         }
-        let speed = self.posture.speed(self.gait());
+        let speed = self.top_speed(self.gait());
         let target = wish
             .try_normalize(f32::EPSILON)
             .map_or(Vector3::zeros(), |dir| dir.scale(speed));

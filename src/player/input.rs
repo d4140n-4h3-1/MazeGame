@@ -1,4 +1,4 @@
-//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z and F each act
+//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z, F and V each act
 //! once per press, however long the key is held.
 
 use super::Player;
@@ -21,6 +21,8 @@ pub(super) struct Keys {
     pub(super) lean: bool,
     /// Whether F is down, so that key repeat does not switch the flashlight again.
     flashlight: bool,
+    /// Whether V is down, so that key repeat does not switch the view again.
+    view: bool,
 }
 
 impl Player {
@@ -52,6 +54,12 @@ impl Player {
                 }
                 self.keys.flashlight = pressed;
             }
+            KeyCode::KeyV => {
+                if pressed && !self.keys.view {
+                    self.toggle_view();
+                }
+                self.keys.view = pressed;
+            }
             KeyCode::KeyZ => {
                 if pressed && !self.keys.crawl {
                     self.posture = self.posture.crawl_toggled();
@@ -64,6 +72,7 @@ impl Player {
 
     pub fn release_keys(&mut self) {
         self.keys = Keys::default();
+        self.orbit.held = false;
     }
 }
 
@@ -121,6 +130,16 @@ mod tests {
         assert!(!player.flashlight_on);
         press(&mut player, KeyCode::KeyF);
         assert!(player.flashlight_on);
+    }
+
+    #[test]
+    fn v_goes_between_third_and_first_person_once_per_press() {
+        let mut player = Player::default();
+        assert!(player.third_person, "seen from behind to start with");
+        press(&mut player, KeyCode::KeyV);
+        assert!(!player.third_person);
+        press(&mut player, KeyCode::KeyV);
+        assert!(player.third_person);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Maze: a small first-person maze game, rendered with Vulkan.
+//! Maze: a small maze game, played as a droid seen from behind, rendered with Vulkan.
 //!
 //! Every round is a new maze, put together at random from the tile models in `data/` (see
 //! [`generate`] and [`tiles`]). The player starts at one end of the longest route through it and a
@@ -7,8 +7,8 @@
 //! Controls: WASD to move, Caps Lock to go between walking and running, Shift to sprint while
 //! it is held - which costs breath, and leaves the player walking once it runs out - Space to
 //! jump, mouse to look, C to crouch, Z to crawl (each toggles), hold Q to look behind, hold Ctrl
-//! to lean round the corner ahead, F for the flashlight, R for a new maze, Escape to pause. Run
-//! with `cargo run` from this directory;
+//! to lean round the corner ahead, F for the flashlight, V for third or first person, R for a new
+//! maze, Escape to pause. Run with `cargo run` from this directory;
 //! `MAZE_SIZE=<w>x<d>` sets how many junctions wide and deep the maze is, `MAZE_DEBUG=1` also prints
 //! the walkable map the game made of the level, `MAZE_SEED=<n>` makes every maze identical, and
 //! `MAZE_MODEL=<path>` plays a fixed maze model instead, such as `data/maze_full.fbx`.
@@ -50,8 +50,11 @@ fn main() {
             named_objects: false,
         },
     );
-    executor.add_plugin(graphics_effects());
-    executor.add_plugin(MazeGame::default());
+    let effects = graphics_effects();
+    // The game tells the effects what moves, so anti-aliasing does not leave a ghost behind it.
+    let moving = effects.moving_things();
+    executor.add_plugin(effects);
+    executor.add_plugin(MazeGame::new(moving));
     executor.run()
 }
 

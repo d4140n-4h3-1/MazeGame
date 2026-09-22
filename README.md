@@ -1,6 +1,6 @@
 # Maze
 
-A small first-person maze game in Rust, built on the [Fyrox](https://github.com/FyroxEngine/Fyrox)
+A small maze game in Rust, built on the [Fyrox](https://github.com/FyroxEngine/Fyrox)
 engine and rendered with Vulkan.
 
 Every round is a new maze, put together at random from four tile models: a straight pipe, a
@@ -9,7 +9,10 @@ glowing exit waits at the other end. The clock runs until you reach it.
 
 - Random mazes of any size, with loops, built from tiles whose shapes are measured from the models
   themselves.
-- First-person movement with walking, running and a breath-limited sprint, crouching, crawling,
+- A droid to play as, seen from behind over its shoulder, that walks, runs, sprints and crouches
+  with you, as fast as its feet carry it. V switches to seeing through its eyes; holding the
+  middle mouse button swings the camera round it.
+- Movement with walking, running and a breath-limited sprint, crouching, crawling,
   jumping, leaning round corners and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
 - Only what can be seen from where you stand is drawn and lit, so big mazes stay fast.
@@ -87,6 +90,18 @@ shadows (its `raytracing` feature).
 
 ### The game
 
+22 September 2026:
+
+- **A droid to play as.** The player is seen from behind as a droid (`data/droid_full_deform.glb`),
+  with the camera over its shoulder and pulled in when a wall is in the way. V switches to first
+  person, and holding the middle mouse button swings the camera round the droid.
+- **Its feet set the speed.** Walking, running, sprinting and crouching each play the droid's own
+  cycle, and each gait goes as fast as that cycle's stride, so the feet stay on the floor. That
+  makes every gait slower than before.
+- **No more head bob.** The camera is held steady; the droid's cycles show the stride.
+- The droid is not yet in the traced shadows, which are gathered once and would leave its shadow
+  where it started.
+
 19 September 2026:
 
 - **Pause menu.** Escape now opens a menu with Resume, Lights, New maze and Quit, and stops the
@@ -125,6 +140,8 @@ well.
 | Ctrl (hold)      | Lean round the corner ahead                                   |
 | Q (hold)         | Look behind you while still moving forward                    |
 | F                | Flashlight on or off                                          |
+| V                | Third person (behind the droid) or first person               |
+| Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
 | R                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |
@@ -198,9 +215,9 @@ and round planning, and the player's movement, breath, head motion, leaning and 
 | `hud.rs`        | The status line and the banner.                                            |
 | `menu.rs`       | The pause menu.                                                            |
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
-| `player/`       | The player, one file per part: posture, movement, breath, head, lean, input and view. |
+| `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`) and the camera behind it (`third_person`). |
 
-The tile models are in `data/`.
+The tile models and the droid (`droid_full_deform.glb`) are in `data/`.
 
 ## License
 
