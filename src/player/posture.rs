@@ -27,7 +27,7 @@ pub(super) const EYE_EASING: f32 = 12.0;
 
 /// How the player holds themselves.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Posture {
+pub(crate) enum Posture {
     #[default]
     Standing,
     Crouching,
@@ -96,7 +96,7 @@ impl Posture {
 
 /// How fast the player is going, apart from their posture.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Gait {
+pub(crate) enum Gait {
     #[default]
     Walking,
     Running,

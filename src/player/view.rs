@@ -26,16 +26,10 @@ const FOV_RANGE: std::ops::RangeInclusive<f32> = 45.0..=100.0;
 pub(super) const NEAR_PLANE: f32 = 0.1;
 
 impl Player {
-    /// Turns the view by a mouse movement - or, with the middle button held, swings the camera
-    /// round the droid instead, leaving the droid facing as it was.
+    /// Turns the view by a mouse movement.
     pub fn look(&mut self, dx: f32, dy: f32) {
-        let (across, up) = (-dx * self.sensitivity, dy * self.sensitivity);
-        if self.orbit.held {
-            self.orbit.swing(across, up, self.pitch);
-            return;
-        }
-        self.yaw += across;
-        self.pitch = (self.pitch + up).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+        self.yaw -= dx * self.sensitivity;
+        self.pitch = (self.pitch + dy * self.sensitivity).clamp(-PITCH_LIMIT, PITCH_LIMIT);
     }
 
     /// Multiplies how far the view turns per mouse count, and returns the new value.

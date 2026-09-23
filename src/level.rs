@@ -200,6 +200,14 @@ impl Level {
         }
     }
 
+    /// Whether anything at `position` could be seen from where the player is: anywhere, unless
+    /// the level is culled.
+    pub fn can_see(&self, position: Vector3<f32>) -> bool {
+        self.culling
+            .as_ref()
+            .is_none_or(|culling| culling.can_see(position))
+    }
+
     /// Removes the level from the scene, so a new one can be built.
     pub fn clear(&mut self, scene: &mut Scene) {
         for handle in self.nodes.drain(..) {

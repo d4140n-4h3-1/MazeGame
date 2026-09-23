@@ -11,6 +11,8 @@
 //! and off the ground there is barely anything to push against, so a jump mostly keeps the way it
 //! was going.
 //!
+//! Space jumps: tapped, a low jump, and held, a high one. Each press jumps once.
+//!
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
 //!
@@ -29,23 +31,22 @@
 //! way it was facing, so the player can see what is following them without stopping.
 //!
 //! The player is seen from behind, as a droid (see [`avatar`]), with the camera held back over its
-//! shoulder; V goes between that and seeing through its eyes, and holding the middle mouse button
-//! swings the camera round it - see [`third_person`].
+//! shoulder; V goes between that and seeing through its eyes - see [`third_person`].
 //!
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
-mod avatar;
+pub(crate) mod avatar;
 mod breath;
 mod head;
 mod input;
 mod lean;
 mod movement;
-mod posture;
+pub(crate) mod posture;
 mod third_person;
 mod view;
 
 pub use avatar::DROID_MODEL;
-use avatar::Avatar;
+use avatar::{heading, Avatar, Going};
 use fyrox::{
     core::{
         algebra::{Point3, UnitQuaternion, Vector3},
@@ -66,7 +67,7 @@ use fyrox::{
 use head::LookBack;
 use input::Keys;
 use posture::Posture;
-use third_person::{Orbit, BOOM_LENGTH};
+use third_person::BOOM_LENGTH;
 use view::{DEFAULT_FOV, DEFAULT_SENSITIVITY, NEAR_PLANE};
 
 /// Where the feet are, relative to the middle of the body when standing. The body's origin stays
@@ -92,6 +93,11 @@ pub struct Player {
     grounded: bool,
     /// How fast the body was falling last frame, in meters per second, for the landing to read.
     fall_speed: f32,
+    /// Whether this press of Space has been jumped on already: it has to be let go to jump again.
+    jump_spent: bool,
+    /// How long ago the body pushed off, in seconds, while Space is still held from it and it
+    /// could yet be a tap.
+    since_jump: Option<f32>,
     /// How far the knees are still bent under a landing, in meters.
     landing: f32,
     /// How far the head is rolled into its movement, in radians.
@@ -123,8 +129,6 @@ pub struct Player {
     /// How far behind the head the camera is right now, in meters: all the way back, or pulled
     /// in by a wall.
     boom: f32,
-    /// How far the camera is swung round the droid with the middle mouse button.
-    orbit: Orbit,
     /// Where the droid's feet were the last time the graphics effects were told.
     last_seen: Option<Vector3<f32>>,
     keys: Keys,
@@ -143,6 +147,8 @@ impl Default for Player {
             winded: false,
             grounded: false,
             fall_speed: 0.0,
+            jump_spent: false,
+            since_jump: None,
             landing: 0.0,
             roll: 0.0,
             last_yaw: 0.0,
@@ -159,7 +165,6 @@ impl Default for Player {
             avatar: None,
             third_person: true,
             boom: BOOM_LENGTH,
-            orbit: Orbit::default(),
             last_seen: None,
             keys: Default::default(),
         }
@@ -236,6 +241,11 @@ impl Player {
         graph[self.body].global_position()
     }
 
+    /// Where the player's feet are.
+    pub fn feet(&self, graph: &Graph) -> Vector3<f32> {
+        self.position(graph) + Vector3::new(0.0, FEET, 0.0)
+    }
+
     pub fn teleport(&mut self, graph: &mut Graph, position: Vector3<f32>, yaw: f32) {
         self.start_fresh(yaw);
         let body = &mut graph[self.body];
@@ -259,6 +269,7 @@ impl Player {
         self.stamina = 1.0;
         self.winded = false;
         self.fall_speed = 0.0;
+        self.since_jump = None;
         self.landing = 0.0;
         self.roll = 0.0;
         self.boom = BOOM_LENGTH;
@@ -296,13 +307,26 @@ impl Player {
         graph[self.body]
             .local_transform_mut()
             .set_rotation(rotation);
-        let horizontal = self.drive(graph, rotation * Vector3::z(), right, can_move, dt);
+        let skid = self.avatar.as_ref().and_then(Avatar::travel);
+        let (horizontal, jumped, low) =
+            self.drive(graph, rotation * Vector3::z(), right, can_move, skid, dt);
 
         self.carry_head(horizontal, right, dt);
         self.place_head(graph, dt);
         let gait = self.gait();
+        let keys = &self.keys;
+        let going = Going {
+            heading: can_move.then(|| heading(keys.forward, keys.back, keys.left, keys.right)),
+            speed: horizontal.norm(),
+            posture: self.posture,
+            gait,
+            grounded: self.grounded,
+            jumped,
+            low,
+            falling: self.fall_speed,
+        };
         if let Some(avatar) = self.avatar.as_mut() {
-            avatar.animate(graph, horizontal.norm(), self.posture, gait, self.grounded, dt);
+            avatar.animate(graph, going, dt);
         }
     }
 

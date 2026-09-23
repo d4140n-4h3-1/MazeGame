@@ -7,7 +7,13 @@ use fyrox::{core::algebra::Vector3, scene::graph::Graph};
 /// How much harder the player slows down than speeds up: stopping only needs the feet planted,
 /// where getting going has to push a whole body along.
 const BRAKING: f32 = 1.6;
+/// How fast a jump leaves the ground, in meters per second: a high jump, about a meter.
 const JUMP_SPEED: f32 = 4.5;
+/// How long Space can be held, in seconds, and still be a tap, for a low jump.
+const TAP: f32 = 0.15;
+/// How fast a low jump is still rising once Space is let go, in meters per second, at most: it
+/// tops out about half a meter up.
+const LOW_JUMP_SPEED: f32 = 1.5;
 /// How far below the feet to look for a floor, in meters. Slack enough that resting on one, with
 /// the small overlaps the solver leaves, still reads as standing on it.
 const GROUND_REACH: f32 = 0.15;
@@ -50,16 +56,19 @@ impl Player {
     }
 
     /// Pushes the body the way the keys ask for this frame, and jumps if they ask for that.
-    /// `forward` and `right` are the body's own. Returns how fast the body is now travelling
-    /// along the floor.
+    /// `forward` and `right` are the body's own. A droid's `skid` under way carries the body
+    /// instead, at its own speed, while the feet are on the ground. Returns how fast the body is
+    /// now travelling along the floor, whether it jumped, and whether the jump it is in turned
+    /// out to be a tap, and so a low one.
     pub(super) fn drive(
         &mut self,
         graph: &mut Graph,
         forward: Vector3<f32>,
         right: Vector3<f32>,
         can_move: bool,
+        skid: Option<Vector3<f32>>,
         dt: f32,
-    ) -> Vector3<f32> {
+    ) -> (Vector3<f32>, bool, bool) {
         let mut wish = Vector3::zeros();
         if can_move {
             let keys = &self.keys;
@@ -92,19 +101,44 @@ impl Player {
         } else {
             self.posture.acceleration() * AIR_CONTROL
         };
-        let horizontal = ramp(
-            Vector3::new(velocity.x, 0.0, velocity.z),
-            target,
-            push,
-            dt,
-        );
+        let horizontal = match skid.filter(|_| self.grounded) {
+            Some(skid) => Vector3::new(skid.x, 0.0, skid.z),
+            None => ramp(
+                Vector3::new(velocity.x, 0.0, velocity.z),
+                target,
+                push,
+                dt,
+            ),
+        };
         velocity.x = horizontal.x;
         velocity.z = horizontal.z;
-        if can_move && self.keys.jump && self.posture == Posture::Standing && self.grounded {
+        // Every jump starts high. Let go of quickly, it is cut short into a low one.
+        let mut low = false;
+        if let Some(since) = self.since_jump.as_mut() {
+            *since += dt;
+            if !self.keys.jump {
+                if *since < TAP && velocity.y > LOW_JUMP_SPEED {
+                    velocity.y = LOW_JUMP_SPEED;
+                    low = true;
+                }
+                self.since_jump = None;
+            } else if *since >= TAP {
+                self.since_jump = None;
+            }
+        }
+        self.jump_spent &= self.keys.jump;
+        let jumped = can_move
+            && self.keys.jump
+            && !self.jump_spent
+            && self.posture == Posture::Standing
+            && self.grounded;
+        if jumped {
             velocity.y = JUMP_SPEED;
+            self.jump_spent = true;
+            self.since_jump = Some(0.0);
         }
         body.set_lin_vel(velocity);
-        horizontal
+        (horizontal, jumped, low)
     }
 }
 

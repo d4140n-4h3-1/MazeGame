@@ -4,6 +4,7 @@ use crate::{
     diagnostics::{self, FrameStats},
     generate::Maze,
     hud::{self, Hud, Status},
+    inhabitants::Inhabitants,
     layout::Rng,
     level::Level,
     menu::{Choice, PauseMenu},
@@ -21,7 +22,7 @@ use fyrox::{
         visitor::prelude::*,
     },
     engine::GraphicsContext,
-    event::{ElementState, Event, MouseButton, WindowEvent},
+    event::{ElementState, Event, WindowEvent},
     graph::SceneGraph,
     gui::{message::UiMessage, UserInterface},
     keyboard::{KeyCode, PhysicalKey},
@@ -106,6 +107,14 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     droid: Option<ModelResource>,
+    /// The same droid, loaded, for the maze's inhabitants.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    droid_model: Option<ModelResource>,
+    /// Droids going about the maze by themselves.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    inhabitants: Inhabitants,
     exit: Handle<Node>,
     sun: Handle<Node>,
     /// Whether the player has switched the maze's lights off, leaving the flashlight to see by.
@@ -324,6 +333,8 @@ impl MazeGame {
         // Face into the maze: towards the open floor nearby. Starts are at the ends of the
         // longest route, often at an opening in the outer wall, and facing the sky is no start.
         let into_maze = survey::open_direction(grid, *origin, start);
+        // Everyone is put down afresh for the new round, away from where the player starts.
+        self.inhabitants.clear(&mut scene.graph);
         self.player.teleport(
             &mut scene.graph,
             start_position + Vector3::new(0.0, 1.2, 0.0),
@@ -416,6 +427,9 @@ impl MazeGame {
         }
         self.set_paused(ctx, false);
         if self.prefabs.is_some() {
+            // Out of the way first: the new maze's survey would take them for walls.
+            self.inhabitants
+                .clear(&mut ctx.scenes[self.scene].graph);
             self.level.clear(&mut ctx.scenes[self.scene]);
             self.set_banner(ctx, "");
             self.phase = Phase::Loading;
@@ -434,6 +448,24 @@ impl MazeGame {
         scene.graph[self.sun].set_visibility(on);
         self.level.set_lights(&mut scene.graph, on);
         self.menu.set_lights(ctx.user_interfaces.first(), on);
+    }
+
+    /// Puts the maze's inhabitants into it once there is a droid to make them from, and moves
+    /// them along.
+    fn update_inhabitants(&mut self, ctx: &mut PluginContext) {
+        let (Some(model), Some((grid, origin)), Some(rng)) =
+            (&self.droid_model, &self.level.grid, self.rng.as_mut())
+        else {
+            return;
+        };
+        let scene = &mut ctx.scenes[self.scene];
+        let player = self.player.feet(&scene.graph);
+        if !self.inhabitants.is_populated() {
+            self.inhabitants
+                .populate(scene, model, (grid, *origin), player, rng);
+        }
+        self.inhabitants
+            .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt);
     }
 
     /// Opens the pause menu and stops the world, or closes it and carries on.
@@ -495,6 +527,7 @@ impl Plugin for MazeGame {
         // cannot, seen through the player's own eyes.
         if let Some(droid) = self.droid.take_if(|droid| droid.is_ok()) {
             self.player.attach_avatar(&mut ctx.scenes[self.scene], &droid);
+            self.droid_model = Some(droid);
         } else if self.droid.as_ref().is_some_and(|d| d.is_failed_to_load()) {
             Log::err(format!("Could not load {DROID_MODEL}; playing in first person"));
             self.droid = None;
@@ -549,6 +582,8 @@ impl Plugin for MazeGame {
                 self.round_time += ctx.dt;
                 let scene = &mut ctx.scenes[self.scene];
                 self.player.update(&mut scene.graph, ctx.dt, self.focused);
+                self.update_inhabitants(ctx);
+                let scene = &mut ctx.scenes[self.scene];
                 let exit = scene.graph[self.exit].global_position();
                 let player = self.player.position(&scene.graph);
                 let flat = Vector3::new(exit.x - player.x, 0.0, exit.z - player.z);
@@ -571,6 +606,7 @@ impl Plugin for MazeGame {
             Phase::Won => {
                 let scene = &mut ctx.scenes[self.scene];
                 self.player.update(&mut scene.graph, ctx.dt, false);
+                self.update_inhabitants(ctx);
             }
         }
 
@@ -580,6 +616,7 @@ impl Plugin for MazeGame {
             let scene = &mut ctx.scenes[self.scene];
             let player = self.player.position(&scene.graph);
             self.level.cull(&mut scene.graph, player);
+            self.inhabitants.show(&mut scene.graph, &self.level);
         }
 
         // The exit bobs so it catches the eye.
@@ -593,11 +630,18 @@ impl Plugin for MazeGame {
             }
         }
 
-        let droid = match self.phase {
-            Phase::Playing | Phase::Won => self.player.moving(&ctx.scenes[self.scene].graph),
-            _ => None,
+        // The effects follow only so many things: the player's droid, and the nearest of the rest.
+        let moving = match self.phase {
+            Phase::Playing | Phase::Won => {
+                let graph = &ctx.scenes[self.scene].graph;
+                let player = self.player.position(graph);
+                let droid = self.player.moving(graph);
+                let inhabitant = self.inhabitants.moving(graph, player);
+                droid.into_iter().chain(inhabitant).collect()
+            }
+            _ => Vec::new(),
         };
-        self.moving.set(droid);
+        self.moving.set(moving);
 
         if self.want_mouse && !self.mouse_captured && self.focused {
             self.set_mouse_captured(ctx, true);
@@ -648,21 +692,6 @@ impl Plugin for MazeGame {
                         if pressed && !input.repeat {
                             self.on_key(&mut ctx, code);
                         }
-                    }
-                }
-                WindowEvent::MouseInput {
-                    button: MouseButton::Middle,
-                    state,
-                    ..
-                } => {
-                    // Held, the mouse swings the camera round the droid. Let go counts even
-                    // with the menu open, so the camera is not left swung round.
-                    let held = *state == ElementState::Pressed;
-                    if !held || (!self.menu.is_open() && self.mouse_captured) {
-                        self.player.set_orbiting(held);
-                    }
-                    if held && !self.menu.is_open() {
-                        self.want_mouse = true;
                     }
                 }
                 WindowEvent::MouseInput {

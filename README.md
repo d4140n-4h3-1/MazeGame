@@ -10,8 +10,8 @@ glowing exit waits at the other end. The clock runs until you reach it.
 - Random mazes of any size, with loops, built from tiles whose shapes are measured from the models
   themselves.
 - A droid to play as, seen from behind over its shoulder, that walks, runs, sprints and crouches
-  with you, as fast as its feet carry it. V switches to seeing through its eyes; holding the
-  middle mouse button swings the camera round it.
+  with you, as fast as its feet carry it. V switches to seeing through its eyes.
+- Other droids living in the maze, wandering its corridors on their own.
 - Movement with walking, running and a breath-limited sprint, crouching, crawling,
   jumping, leaning round corners and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
@@ -94,10 +94,22 @@ shadows (its `raytracing` feature).
 
 - **A droid to play as.** The player is seen from behind as a droid (`data/droid_full_deform.glb`),
   with the camera over its shoulder and pulled in when a wall is in the way. V switches to first
-  person, and holding the middle mouse button swings the camera round the droid.
+  person.
 - **Its feet set the speed.** Walking, running, sprinting and crouching each play the droid's own
   cycle, and each gait goes as fast as that cycle's stride, so the feet stay on the floor. That
   makes every gait slower than before.
+- **It faces the way it goes, and skids round.** The droid turns to face whichever way the keys
+  send it, and stands idling when still. Turning round at a run or a sprint, it skids to a stop,
+  swings round and sets off the other way.
+- **It jumps, low or high.** Tap Space for a low jump, hold it for a high one; each press jumps
+  once. From standing still the droid springs straight up and lands on the spot; on the move it
+  leaps in its stride and lands running. It lands hard from a high jump or a long drop, lightly
+  otherwise, and falling off an edge it flies and lands the same way.
+- **Inhabitants.** Six more droids live in the maze, made from the same model. Each wanders off
+  somewhere, keeping to the middle of the corridors, idles a while when it gets there, and sets
+  off again. They are solid and make way for each other: walking, they veer to their right round
+  whoever is ahead, and standing about, they step aside for anyone coming straight at them.
+  `MAZE_INHABITANTS` sets how many.
 - **No more head bob.** The camera is held steady; the droid's cycles show the stride.
 - The droid is not yet in the traced shadows, which are gathered once and would leave its shadow
   where it started.
@@ -134,14 +146,13 @@ well.
 | Mouse            | Look around                                                   |
 | Caps Lock        | Walk or run; it stays as you left it                          |
 | Shift (hold)     | Sprint. Costs breath, and running out leaves you walking      |
-| Space            | Jump                                                          |
+| Space            | Jump: tap for a low jump, hold for a high one                 |
 | C                | Crouch, or stand back up                                      |
 | Z                | Crawl, or stand back up                                       |
 | Ctrl (hold)      | Lean round the corner ahead                                   |
 | Q (hold)         | Look behind you while still moving forward                    |
 | F                | Flashlight on or off                                          |
 | V                | Third person (behind the droid) or first person               |
-| Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
 | R                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |
@@ -168,6 +179,7 @@ Options are set with environment variables, for example `MAZE_SIZE=10x10 cargo r
 | `MAZE_SIZE=<w>x<d>`      | How many junctions wide and deep the maze is. The default is `20x20`.   |
 | `MAZE_SEED=<n>`          | Makes every maze and round the same, for comparing two runs.            |
 | `MAZE_MODEL=<path>`      | Plays a fixed maze model (`.glb`, `.gltf` or `.fbx`) instead of random mazes. |
+| `MAZE_INHABITANTS=<n>`   | How many droids live in the maze. The default is 6.                     |
 | `MAZE_DEBUG=1`           | Logs the walkable map of each level, and rendering statistics once a second. |
 | `MAZE_VSYNC=0`           | Uncaps the frame rate, for measuring what a frame costs.                |
 | `MAZE_RT=0`              | Shadow maps instead of ray-traced shadows.                              |

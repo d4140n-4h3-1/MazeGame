@@ -72,7 +72,6 @@ impl Player {
 
     pub fn release_keys(&mut self) {
         self.keys = Keys::default();
-        self.orbit.held = false;
     }
 }
 

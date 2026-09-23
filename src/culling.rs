@@ -29,6 +29,8 @@ pub struct Culling {
     lamps: Vec<(Handle<Node>, (i32, i32))>,
     /// The cell the player was last seen in.
     at: Option<(i32, i32)>,
+    /// What can be seen from the cell the player is in, and the cells next to it.
+    seen: HashSet<(i32, i32)>,
     /// What can be seen from each cell the player has been in, so going back is free.
     seen_from: HashMap<(i32, i32), HashSet<(i32, i32)>>,
     /// Whether the lamps are switched on at all. Switched off, none of them is shown, wherever
@@ -53,6 +55,7 @@ impl Culling {
                 .collect(),
             lamps: Vec::new(),
             at: None,
+            seen: HashSet::new(),
             seen_from: Default::default(),
             lamps_on: true,
         }
@@ -70,6 +73,12 @@ impl Culling {
     pub fn set_lamps_on(&mut self, on: bool) {
         self.lamps_on = on;
         self.at = None;
+    }
+
+    /// Whether anything at `position` could be seen from where the player was at the last
+    /// update. Everything could, before the first.
+    pub fn can_see(&self, position: Vector3<f32>) -> bool {
+        self.at.is_none() || self.seen.contains(&self.cell_of(position))
     }
 
     fn cell_of(&self, position: Vector3<f32>) -> (i32, i32) {
@@ -113,5 +122,6 @@ impl Culling {
         for (lamp, cell) in &self.lamps {
             graph[*lamp].set_visibility(self.lamps_on && lit.contains(cell));
         }
+        self.seen = seen;
     }
 }

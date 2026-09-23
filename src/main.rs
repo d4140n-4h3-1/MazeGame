@@ -19,6 +19,7 @@ mod fixtures;
 mod game;
 mod generate;
 mod hud;
+mod inhabitants;
 mod inward;
 mod layout;
 mod level;

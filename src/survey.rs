@@ -49,8 +49,9 @@ pub fn survey(
     for z in 0..depth {
         for x in 0..width {
             let spot = cell_center(origin, x, z);
-            if is_open_floor(graph, maze, spot) {
+            if let Some(floor) = open_floor(graph, maze, spot) {
                 grid.set(x, z, true);
+                grid.set_floor(x, z, floor);
                 walkable += 1;
             }
         }
@@ -70,6 +71,18 @@ pub fn cell_center(origin: Vector3<f32>, x: usize, z: usize) -> Vector3<f32> {
             0.0,
             (z as f32 + 0.5) * CELL_SIZE,
         )
+}
+
+/// The cell of `grid` that `position` is in, if it is on the grid at all.
+pub fn cell_at(
+    grid: &WalkGrid,
+    origin: Vector3<f32>,
+    position: Vector3<f32>,
+) -> Option<(usize, usize)> {
+    let x = ((position.x - origin.x) / CELL_SIZE).floor();
+    let z = ((position.z - origin.z) / CELL_SIZE).floor();
+    (x >= 0.0 && z >= 0.0 && (x as usize) < grid.width && (z as usize) < grid.depth)
+        .then_some((x as usize, z as usize))
 }
 
 /// The walkable cell nearest to a point, which is where the player can stand to reach it.
@@ -128,25 +141,22 @@ pub fn draw_map(grid: &WalkGrid, start: (usize, usize), exit: (usize, usize)) ->
     text
 }
 
-/// Whether a person could stand at `spot`, which is inside the maze's tubes: there is maze floor
-/// just below, maze ceiling somewhere above, and room around the point.
-fn is_open_floor(graph: &Graph, maze: Handle<Collider>, spot: Vector3<f32>) -> bool {
+/// How high the floor is at `spot`, if a person could stand there inside the maze's tubes: there
+/// is maze floor just below, maze ceiling somewhere above, and room around the point.
+fn open_floor(graph: &Graph, maze: Handle<Collider>, spot: Vector3<f32>) -> Option<f32> {
     let probe = Vector3::new(spot.x, 1.0, spot.z);
     let on_maze = |hit: Option<(Vector3<f32>, Handle<Collider>)>| {
         hit.filter(|&(_, collider)| collider == maze)
             .map(|(position, _)| position)
     };
-    let Some(ground) = on_maze(first_hit(graph, probe, -Vector3::y(), 1.5)) else {
-        return false;
-    };
-    if on_maze(first_hit(graph, probe, Vector3::y(), 20.0)).is_none() {
-        // Open sky: this is outside the tubes.
-        return false;
-    }
+    let ground = on_maze(first_hit(graph, probe, -Vector3::y(), 1.5))?;
+    // Open sky: this is outside the tubes.
+    on_maze(first_hit(graph, probe, Vector3::y(), 20.0))?;
     let chest = Vector3::new(spot.x, ground.y + 1.0, spot.z);
     [Vector3::x(), -Vector3::x(), Vector3::z(), -Vector3::z()]
         .iter()
         .all(|dir| first_hit(graph, chest, *dir, 0.45).is_none())
+        .then_some(ground.y)
 }
 
 fn first_hit(
