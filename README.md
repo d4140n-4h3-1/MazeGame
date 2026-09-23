@@ -26,27 +26,23 @@ glowing exit waits at the other end. The clock runs until you reach it.
   and exits if it is not. Ray tracing is used for shadows when the card supports it; without it
   the game falls back to shadow maps.
 - **Rust 1.94 or newer**, the version the engine requires.
-- **The engine and its effects, checked out next to this project.** Both are dependencies by
-  local path, so the three have to sit side by side:
+- **`git`, and a network connection for the first build.** Cargo downloads the engine and its
+  effects by itself, straight from GitHub, so all there is to get is this project:
 
   ```sh
-  mkdir game_dev && cd game_dev
-  git clone -b vulkan https://github.com/d4140n-4h3-1/Fyrox.git
-  git clone https://github.com/d4140n-4h3-1/fyrox-gfx.git
   git clone https://github.com/d4140n-4h3-1/MazeGame.git
+  cd MazeGame
+  cargo run
   ```
 
-  ```
-  game_dev/
-  ├── Fyrox/       the engine, on its `vulkan` branch
-  ├── fyrox-gfx/   the glass, shadow, reflection and other graphics effects
-  └── MazeGame/    this project
-  ```
+  The engine fork is about 400 MB. `.cargo/config.toml` has Cargo fetch it with the system `git`
+  rather than its own library, which can resume an interrupted download instead of starting it
+  over. `Cargo.lock` pins the commits used; `cargo update` moves to the latest of each branch.
 
   The engine is modified, so upstream Fyrox will not do: the
   [`vulkan` branch of this fork](https://github.com/d4140n-4h3-1/Fyrox/tree/vulkan) makes the
   wgpu backend render like the OpenGL one and adds the hardware ray tracing that the traced
-  shadows use. `Fyrox/VULKAN.md` describes every change.
+  shadows use. `VULKAN.md` in the fork describes every change.
   [`fyrox-gfx`](https://github.com/d4140n-4h3-1/fyrox-gfx) holds the graphics effects the game
   adds on top of the engine.
 
