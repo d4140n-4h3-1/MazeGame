@@ -105,9 +105,10 @@ pub(crate) enum Gait {
 
 impl Player {
     /// How fast the player is going: sprinting while Shift is held, and otherwise whichever of
-    /// walking and running Caps Lock last left them in. Out of breath, they only walk.
+    /// walking and running Caps Lock last left them in. Out of breath, or edging along a wall in
+    /// cover, they only walk.
     pub(super) fn gait(&self) -> Gait {
-        match (self.winded, self.keys.sprint, self.running) {
+        match (self.winded || self.in_cover(), self.keys.sprint, self.running) {
             (true, _, _) => Gait::Walking,
             (false, true, _) => Gait::Sprinting,
             (false, false, true) => Gait::Running,

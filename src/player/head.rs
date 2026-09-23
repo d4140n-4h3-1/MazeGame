@@ -116,10 +116,16 @@ impl Player {
             &Vector3::z_axis(),
             leaning * LEAN_TILT.to_radians() + self.roll,
         );
-        let turn = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.look_back.angle())
-            * UnitQuaternion::from_axis_angle(&Vector3::x_axis(), self.pitch)
-            * tilt;
-        self.place_camera(graph, head, turn, dt);
+        let turned = |yaw: f32, pitch: f32| {
+            UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.look_back.angle() + yaw)
+                * UnitQuaternion::from_axis_angle(&Vector3::x_axis(), self.pitch + pitch)
+                * tilt
+        };
+        // The camera swings round the droid with the middle mouse button; the head does not.
+        self.orbit.settle(dt);
+        let turn = turned(self.orbit.yaw, self.orbit.pitch);
+        let aim = turned(0.0, 0.0);
+        self.place_camera(graph, head, turn, aim, dt);
     }
 }
 

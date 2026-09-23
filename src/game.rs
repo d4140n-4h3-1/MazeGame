@@ -22,7 +22,7 @@ use fyrox::{
         visitor::prelude::*,
     },
     engine::GraphicsContext,
-    event::{ElementState, Event, WindowEvent},
+    event::{ElementState, Event, MouseButton, WindowEvent},
     graph::SceneGraph,
     gui::{message::UiMessage, UserInterface},
     keyboard::{KeyCode, PhysicalKey},
@@ -692,6 +692,21 @@ impl Plugin for MazeGame {
                         if pressed && !input.repeat {
                             self.on_key(&mut ctx, code);
                         }
+                    }
+                }
+                WindowEvent::MouseInput {
+                    button: MouseButton::Middle,
+                    state,
+                    ..
+                } => {
+                    // Held, the mouse swings the camera round the droid. Let go counts even
+                    // with the menu open, so the camera is not left swung round.
+                    let held = *state == ElementState::Pressed;
+                    if !held || (!self.menu.is_open() && self.mouse_captured) {
+                        self.player.set_orbiting(held);
+                    }
+                    if held && !self.menu.is_open() {
+                        self.want_mouse = true;
                     }
                 }
                 WindowEvent::MouseInput {

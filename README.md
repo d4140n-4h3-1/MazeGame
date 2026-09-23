@@ -10,10 +10,11 @@ glowing exit waits at the other end. The clock runs until you reach it.
 - Random mazes of any size, with loops, built from tiles whose shapes are measured from the models
   themselves.
 - A droid to play as, seen from behind over its shoulder, that walks, runs, sprints and crouches
-  with you, as fast as its feet carry it. V switches to seeing through its eyes.
+  with you, as fast as its feet carry it. V switches to seeing through its eyes; holding the
+  middle mouse button swings the camera round it.
 - Other droids living in the maze, wandering its corridors on their own.
 - Movement with walking, running and a breath-limited sprint, crouching, crawling,
-  jumping, leaning round corners and looking behind.
+  jumping, taking cover and leaning round corners, and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
 - Only what can be seen from where you stand is drawn and lit, so big mazes stay fast.
 - A pause menu, with a switch that turns every light in the maze off and leaves you with your
@@ -94,7 +95,7 @@ shadows (its `raytracing` feature).
 
 - **A droid to play as.** The player is seen from behind as a droid (`data/droid_full_deform.glb`),
   with the camera over its shoulder and pulled in when a wall is in the way. V switches to first
-  person.
+  person, and holding the middle mouse button swings the camera round the droid.
 - **Its feet set the speed.** Walking, running, sprinting and crouching each play the droid's own
   cycle, and each gait goes as fast as that cycle's stride, so the feet stay on the floor. That
   makes every gait slower than before.
@@ -110,6 +111,11 @@ shadows (its `raytracing` feature).
   off again. They are solid and make way for each other: walking, they veer to their right round
   whoever is ahead, and standing about, they step aside for anyone coming straight at them.
   `MAZE_INHABITANTS` sets how many.
+- **Cover.** Tab puts the droid up against the wall ahead. A and D then slide it along the wall,
+  facing the way it goes, as far as the wall's edge - the corner to take cover behind. Holding A
+  or D on past the edge leans out round the corner; Ctrl no longer leans. Tab again, pushing away
+  from the wall, or jumping leaves cover. Until there are cover animations (`droid_cover_idle`,
+  `droid_cover_walk`, picked up once the model has them) it idles and walks as usual.
 - **No more head bob.** The camera is held steady; the droid's cycles show the stride.
 - The droid is not yet in the traced shadows, which are gathered once and would leave its shadow
   where it started.
@@ -149,10 +155,12 @@ well.
 | Space            | Jump: tap for a low jump, hold for a high one                 |
 | C                | Crouch, or stand back up                                      |
 | Z                | Crawl, or stand back up                                       |
-| Ctrl (hold)      | Lean round the corner ahead                                   |
 | Q (hold)         | Look behind you while still moving forward                    |
+| Tab              | Take cover against the wall ahead, or leave it                |
+| A / D in cover   | Slide along the wall; hold on past its edge to lean round it  |
 | F                | Flashlight on or off                                          |
 | V                | Third person (behind the droid) or first person               |
+| Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
 | R                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |

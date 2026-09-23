@@ -6,9 +6,9 @@
 //!
 //! Controls: WASD to move, Caps Lock to go between walking and running, Shift to sprint while
 //! it is held - which costs breath, and leaves the player walking once it runs out - Space to
-//! jump, mouse to look, C to crouch, Z to crawl (each toggles), hold Q to look behind, hold Ctrl
-//! to lean round the corner ahead, F for the flashlight, V for third or first person, R for a new
-//! maze, Escape to pause. Run with `cargo run` from this directory;
+//! jump, mouse to look, C to crouch, Z to crawl (each toggles), hold Q to look behind, Tab to
+//! take cover against a wall - A and D slide along it, and lean round its corner at the edge - F
+//! for the flashlight, V for third or first person, R for a new maze, Escape to pause. Run with `cargo run` from this directory;
 //! `MAZE_SIZE=<w>x<d>` sets how many junctions wide and deep the maze is, `MAZE_DEBUG=1` also prints
 //! the walkable map the game made of the level, `MAZE_SEED=<n>` makes every maze identical, and
 //! `MAZE_MODEL=<path>` plays a fixed maze model instead, such as `data/maze_full.fbx`.

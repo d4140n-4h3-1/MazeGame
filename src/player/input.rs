@@ -1,5 +1,5 @@
-//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z, F and V each act
-//! once per press, however long the key is held.
+//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z, F, V and Tab each
+//! act once per press, however long the key is held.
 
 use super::Player;
 use fyrox::keyboard::KeyCode;
@@ -18,11 +18,14 @@ pub(super) struct Keys {
     crouch: bool,
     crawl: bool,
     pub(super) look_back: bool,
-    pub(super) lean: bool,
     /// Whether F is down, so that key repeat does not switch the flashlight again.
     flashlight: bool,
     /// Whether V is down, so that key repeat does not switch the view again.
     view: bool,
+    /// Whether Tab is down, so that key repeat does not take cover or let go again.
+    cover: bool,
+    /// Whether Tab has been pressed since the last update, to take cover or let go.
+    pub(super) take_cover: bool,
 }
 
 impl Player {
@@ -47,7 +50,6 @@ impl Player {
                 self.keys.crouch = pressed;
             }
             KeyCode::KeyQ => self.keys.look_back = pressed,
-            KeyCode::ControlLeft | KeyCode::ControlRight => self.keys.lean = pressed,
             KeyCode::KeyF => {
                 if pressed && !self.keys.flashlight {
                     self.flashlight_on = !self.flashlight_on;
@@ -59,6 +61,12 @@ impl Player {
                     self.toggle_view();
                 }
                 self.keys.view = pressed;
+            }
+            KeyCode::Tab => {
+                if pressed && !self.keys.cover {
+                    self.keys.take_cover = true;
+                }
+                self.keys.cover = pressed;
             }
             KeyCode::KeyZ => {
                 if pressed && !self.keys.crawl {
@@ -72,6 +80,7 @@ impl Player {
 
     pub fn release_keys(&mut self) {
         self.keys = Keys::default();
+        self.orbit.held = false;
     }
 }
 

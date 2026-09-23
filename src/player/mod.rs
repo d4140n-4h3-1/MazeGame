@@ -13,6 +13,9 @@
 //!
 //! Space jumps: tapped, a low jump, and held, a high one. Each press jumps once.
 //!
+//! Tab takes cover against the wall ahead, and A and D slide along it to its edge - see
+//! [`cover`].
+//!
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
 //!
@@ -21,22 +24,22 @@
 //!
 //! F switches the flashlight on and off.
 //!
-//! Holding Ctrl leans: the head moves out to the side and tilts, to see past something without
-//! stepping out from behind it. The side is picked when Ctrl goes down - a left corner leans
-//! left, a right corner leans right - by measuring how much room there is either side the whole
-//! way to the wall in front: see [`Player::choose_lean_side`] and `pick_side` in [`lean`]. It
-//! never leans into a wall.
+//! In cover at the edge of the wall, holding the key that would go on past leans: the head moves
+//! out round the corner and tilts, to see past it without stepping out from behind it - see
+//! [`lean`]. It never leans into a wall.
 //!
 //! Holding Q looks behind: the head turns round over the shoulder while the body keeps going the
 //! way it was facing, so the player can see what is following them without stopping.
 //!
 //! The player is seen from behind, as a droid (see [`avatar`]), with the camera held back over its
-//! shoulder; V goes between that and seeing through its eyes - see [`third_person`].
+//! shoulder; V goes between that and seeing through its eyes, and holding the middle mouse button
+//! swings the camera round it - see [`third_person`].
 //!
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
 pub(crate) mod avatar;
 mod breath;
+mod cover;
 mod head;
 mod input;
 mod lean;
@@ -67,7 +70,7 @@ use fyrox::{
 use head::LookBack;
 use input::Keys;
 use posture::Posture;
-use third_person::BOOM_LENGTH;
+use third_person::{Orbit, BOOM_LENGTH};
 use view::{DEFAULT_FOV, DEFAULT_SENSITIVITY, NEAR_PLANE};
 
 /// Where the feet are, relative to the middle of the body when standing. The body's origin stays
@@ -110,13 +113,12 @@ pub struct Player {
     /// How high the eyes are above the feet right now, on their way to the posture's height.
     eyes: f32,
     look_back: LookBack,
-    /// How far the head is leaning right now, in meters. Which way round the sign goes follows
-    /// `TO_LEFT` and `TO_RIGHT` in [`lean`]; the tilt is taken from the same number, so the head
-    /// always tips the way it is leaning whichever that is.
+    /// How far the head is leaning right now, in meters, along the body's `right` (see
+    /// [`Player::fit_lean`]); the tilt is taken from the same number, so the head always tips the
+    /// way it is leaning.
     lean: f32,
-    /// The multiplier on the body's `right` for the lean going on - `TO_LEFT` or `TO_RIGHT`;
-    /// picked once per press of Ctrl, so it does not swap sides halfway through.
-    lean_side: Option<f32>,
+    /// The wall the droid is in cover against, if it is.
+    cover: Option<cover::Cover>,
     yaw: f32,
     pitch: f32,
     sensitivity: f32,
@@ -129,6 +131,8 @@ pub struct Player {
     /// How far behind the head the camera is right now, in meters: all the way back, or pulled
     /// in by a wall.
     boom: f32,
+    /// How far the camera is swung round the droid with the middle mouse button.
+    orbit: Orbit,
     /// Where the droid's feet were the last time the graphics effects were told.
     last_seen: Option<Vector3<f32>>,
     keys: Keys,
@@ -157,7 +161,7 @@ impl Default for Player {
             eyes: Posture::Standing.eyes(),
             look_back: LookBack::default(),
             lean: 0.0,
-            lean_side: None,
+            cover: None,
             yaw: 0.0,
             pitch: 0.0,
             sensitivity: DEFAULT_SENSITIVITY,
@@ -165,6 +169,7 @@ impl Default for Player {
             avatar: None,
             third_person: true,
             boom: BOOM_LENGTH,
+            orbit: Orbit::default(),
             last_seen: None,
             keys: Default::default(),
         }
@@ -265,7 +270,7 @@ impl Player {
         self.eyes = Posture::Standing.eyes();
         self.look_back = LookBack::default();
         self.lean = 0.0;
-        self.lean_side = None;
+        self.cover = None;
         self.stamina = 1.0;
         self.winded = false;
         self.fall_speed = 0.0;
@@ -298,16 +303,15 @@ impl Player {
         }
         let rotation = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.yaw);
         let right = rotation * -Vector3::x();
-        let facing = UnitQuaternion::from_axis_angle(
-            &Vector3::y_axis(),
-            self.yaw + self.look_back.angle(),
-        ) * Vector3::z();
-        self.fit_lean(graph, right, facing, dt);
+        self.fit_lean(graph, right, dt);
 
         graph[self.body]
             .local_transform_mut()
             .set_rotation(rotation);
         let skid = self.avatar.as_ref().and_then(Avatar::travel);
+        if std::mem::take(&mut self.keys.take_cover) && can_move {
+            self.toggle_cover(graph, rotation * Vector3::z());
+        }
         let (horizontal, jumped, low) =
             self.drive(graph, rotation * Vector3::z(), right, can_move, skid, dt);
 
@@ -316,13 +320,17 @@ impl Player {
         let gait = self.gait();
         let keys = &self.keys;
         let going = Going {
-            heading: can_move.then(|| heading(keys.forward, keys.back, keys.left, keys.right)),
+            heading: can_move.then(|| {
+                self.cover_heading()
+                    .unwrap_or_else(|| heading(keys.forward, keys.back, keys.left, keys.right))
+            }),
             speed: horizontal.norm(),
             posture: self.posture,
             gait,
             grounded: self.grounded,
             jumped,
             low,
+            cover: self.in_cover(),
             falling: self.fall_speed,
         };
         if let Some(avatar) = self.avatar.as_mut() {

@@ -86,9 +86,11 @@ impl Player {
             }
         }
         let speed = self.top_speed(self.gait());
-        let target = wish
-            .try_normalize(f32::EPSILON)
-            .map_or(Vector3::zeros(), |dir| dir.scale(speed));
+        // In cover, the wall has its say in where the body goes.
+        let target = self.keep_cover(graph, wish, speed).unwrap_or_else(|| {
+            wish.try_normalize(f32::EPSILON)
+                .map_or(Vector3::zeros(), |dir| dir.scale(speed))
+        });
 
         let body = &mut graph[self.body];
         let mut velocity = body.lin_vel();
@@ -133,6 +135,7 @@ impl Player {
             && self.posture == Posture::Standing
             && self.grounded;
         if jumped {
+            self.cover = None;
             velocity.y = JUMP_SPEED;
             self.jump_spent = true;
             self.since_jump = Some(0.0);

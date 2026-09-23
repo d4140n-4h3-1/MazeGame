@@ -432,6 +432,7 @@ impl Inhabitants {
                 jumped: false,
                 low: false,
                 falling: 0.0,
+                cover: false,
             };
             droid.avatar.animate(graph, going, dt);
         }

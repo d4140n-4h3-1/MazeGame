@@ -1,18 +1,18 @@
 //! The droid the player is seen as in third person, and the maze's inhabitants are too: its
 //! model, and the cycles it walks, runs, sprints and crouches along with.
 //!
-//! The droid's feet set the pace. Its cycles were made walking forward through the scene - the
-//! bones at the top of the rig travel a stride each time round - and how far they travel over how
-//! long a cycle lasts is how fast the droid goes when its feet stay put on the floor. That is what
-//! each gait's speed is (see [`Avatar::pace`]), and at any speed along the way, speeding up or
-//! slowing down, a cycle is played exactly as fast as the floor goes by under it. The travel
-//! itself is taken back out, since the body does the moving.
+//! The droid's feet set the pace. However a cycle was made - walking on the spot, or forward
+//! through the scene - its hips go past whichever foot is planted on the floor as fast as the
+//! droid goes when that foot stays put, and that is what each gait's speed is (see
+//! [`Avatar::pace`]). At any speed along the way, speeding up or slowing down, a cycle is played
+//! exactly as fast as the floor goes by under it. Any travel built into it is taken back out,
+//! since the body does the moving.
 //!
 //! Each gait standing has a cycle of its own: walking, running with Caps Lock, sprinting with
 //! Shift. Crouching and crawling share the crouch, played faster for the quicker gaits and slower
 //! down on the floor. Standing still, the droid settles into its idle, or its rest pose if it has
-//! none; crouched, it holds the crouch where it stopped. Going from one cycle to another, it carries on at the same
-//! point in the stride.
+//! none; crouched, it holds the crouch where it stopped. Going from one cycle to another, it
+//! carries on at the same point in the stride.
 //!
 //! The droid turns to face the way the keys held send it - ahead, to either side, back, or along
 //! any of the diagonals between - turning the short way round; let go, it turns back to face
@@ -31,6 +31,9 @@
 //! from its lowest point, since the body leaves the ground the moment the key goes down. Falling
 //! off an edge it flies the same way, once it has been in the air long enough to be more than a
 //! step down. It lands hard or lightly as it was falling fast or not.
+//!
+//! In cover against a wall, it plays its cover idle and its cover walk, edging along the wall,
+//! in place of the usual ones - once it has them. Until then it idles and walks as ever.
 //!
 //! Its meshes cast no shadows. The traced shadows are gathered once, when meshes are added or
 //! removed, so a droid in them would leave its shadow behind where it was first put down.
@@ -78,7 +81,7 @@ const SKID_SPEED: f32 = 0.75;
 /// is left of it is setting off the other way, which the cycles do anyway.
 const SKID_TURNED: f32 = 150.0 * std::f32::consts::PI / 180.0;
 /// How long at the start of a skid, in seconds, its speed going in is measured over.
-const SKID_ENTRY: f32 = 0.1;
+const SKID_ENTRY: f32 = 0.2;
 /// The droid's jumps, standing still and on the move, each low and high: pushing off, in the air,
 /// and landing.
 const LEAPS: [[[&str; 3]; 2]; 2] = [
@@ -113,22 +116,31 @@ const HARD_LANDING: f32 = 3.2;
 /// Above this speed along the ground, in meters per second, the droid jumps and lands on the
 /// move rather than standing still.
 const LEAP_MOVING: f32 = 0.5;
-/// How far a jump's animation can shift the droid, in the rig's own meters, and still be one
-/// that stays where it is: landing on the spot shuffles the feet a little.
-const IN_PLACE: f32 = 0.05;
+/// How fast a jump's animation can carry the droid along the ground, in meters per second, and
+/// still be one that stays where it is: landing on the spot shuffles the feet a little.
+const IN_PLACE: f32 = 0.3;
 /// How long the droid is in the air, in seconds, before going off an edge counts as a fall rather
 /// than a step down.
 const FALLING_AFTER: f32 = 0.2;
 /// The droid's idle, played standing still. It stays where it is, so has no travel to take out.
 const IDLE: &str = "droid_idle_cycle";
+/// Its idle and its walk in cover, up against a wall, if it has them.
+const COVER_IDLE: &str = "droid_cover_idle";
+const COVER_WALK: &str = "droid_cover_walk";
 /// How fast the crouch is played for each gait - walking, running, sprinting - crouched, and
 /// down on the floor crawling, as a multiple of how it was made. Each is slower than the one
 /// above it, as every gait is slower the lower the posture.
 const CROUCHING_RATES: [f32; 3] = [1.0, 1.3, 1.6];
 const CRAWLING_RATES: [f32; 3] = [0.5, 0.65, 0.8];
-/// The bone whose travel over a cycle is the cycle's stride. The bones at the top of the rig all
-/// travel together, so any of them would do; the spine is the one the rest hang off.
-const ANCHOR: &str = "DEF-spine";
+/// The droid's hips, which its speed is measured by, and which way it faces goes by.
+const HIPS: &str = "DEF-spine";
+/// Its feet, one of which is planted on the floor at a time, walking.
+const FEET: [&str; 2] = ["DEF-foot.L", "DEF-foot.R"];
+/// How near the floor, in the model's own meters, a foot has to be to be planted on it: as low as
+/// either foot gets in the animation, give or take.
+const FOOT_DOWN: f32 = 0.03;
+/// How often an animation is sampled to measure it, in seconds.
+const SAMPLE: f32 = 1.0 / 120.0;
 /// Below this speed along the ground, in meters per second, the droid is standing still.
 const STILL: f32 = 0.05;
 /// How long going from one cycle to another, or to and from rest, takes, in seconds.
@@ -161,6 +173,14 @@ struct Bone {
 }
 
 impl Bone {
+    /// No move and no turn.
+    fn identity() -> Self {
+        Self {
+            position: Vector3::zeros(),
+            rotation: UnitQuaternion::identity(),
+        }
+    }
+
     fn of(node: &Node) -> Self {
         let transform = node.local_transform();
         Self {
@@ -191,6 +211,129 @@ struct Cycle {
     speed: f32,
 }
 
+/// Where the hips and the feet are, in the model's own terms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Stance {
+    hips: Bone,
+    feet: [Vector3<f32>; 2],
+}
+
+/// How far the hips went past the planted foot, along the ground, from `before` to `after`, in
+/// the model's own terms: how far the droid went, with that foot staying put. None unless the
+/// same foot is down, as low as `ground`, both times.
+fn stride(before: &Stance, after: &Stance, ground: f32) -> Option<Vector3<f32>> {
+    let lower = usize::from(before.feet[1].y < before.feet[0].y);
+    let down = |stance: &Stance| stance.feet[lower].y - ground < FOOT_DOWN;
+    (down(before) && down(after)).then(|| {
+        let hips = after.hips.position - before.hips.position;
+        let went = hips - (after.feet[lower] - before.feet[lower]);
+        Vector3::new(went.x, 0.0, went.z)
+    })
+}
+
+/// How fast the droid goes along the ground over `stances`, taken `SAMPLE` apart, in the model's
+/// meters per second and which way, going by how far the hips go past the planted foot while
+/// one is. None if neither ever is.
+fn pace_of(stances: &[Stance], ground: f32) -> Option<Vector3<f32>> {
+    let (went, planted) = stances
+        .windows(2)
+        .filter_map(|pair| stride(&pair[0], &pair[1], ground))
+        .fold((Vector3::zeros(), 0), |(went, planted), stride| (went + stride, planted + 1));
+    (planted > 0).then(|| went / (planted as f32 * SAMPLE))
+}
+
+/// How low the feet get in `stances`: the floor they are planted on.
+fn ground(stances: &[Stance]) -> f32 {
+    stances
+        .iter()
+        .flat_map(|stance| stance.feet.map(|foot| foot.y))
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// The bones from the droid's top down to its hips and to each foot, to find where those are in
+/// the model's own terms whatever the rig puts above them.
+#[derive(Debug, Clone, PartialEq)]
+struct Skeleton {
+    hips: Vec<Handle<Node>>,
+    feet: [Vec<Handle<Node>>; 2],
+}
+
+/// The bones from just under `top` down to `node`, top first, going up by `parent_of`.
+fn chain(
+    parent_of: impl Fn(Handle<Node>) -> Handle<Node>,
+    top: Handle<Node>,
+    node: Handle<Node>,
+) -> Vec<Handle<Node>> {
+    let mut chain = Vec::new();
+    let mut at = node;
+    while at != top && at.is_some() {
+        chain.push(at);
+        at = parent_of(at);
+    }
+    chain.reverse();
+    chain
+}
+
+/// Where the end of `chain` is and how it is turned, in the droid's own terms, with each bone
+/// along it posed by `pose`.
+fn place(chain: &[Handle<Node>], pose: impl Fn(Handle<Node>) -> Bone) -> Bone {
+    chain.iter().fold(Bone::identity(), |above, &bone| {
+        let bone = pose(bone);
+        Bone {
+            position: above.position + above.rotation * bone.position,
+            rotation: above.rotation * bone.rotation,
+        }
+    })
+}
+
+impl Skeleton {
+    /// Where the hips and feet are with every bone posed by `pose`.
+    fn stance(&self, pose: impl Fn(Handle<Node>) -> Bone + Copy) -> Stance {
+        Stance {
+            hips: place(&self.hips, pose),
+            feet: self.feet.each_ref().map(|foot| place(foot, pose).position),
+        }
+    }
+
+    /// Where the hips and feet are in `animation` as it stands, with whatever it does not move at
+    /// `rest`.
+    fn stance_in(&self, animation: &Animation, rest: &FxHashMap<Handle<Node>, Bone>) -> Stance {
+        self.stance(|bone| {
+            let rest = rest.get(&bone).copied().unwrap_or_else(Bone::identity);
+            let (position, rotation) = posed(animation, bone);
+            Bone {
+                position: position.unwrap_or(rest.position),
+                rotation: rotation.unwrap_or(rest.rotation),
+            }
+        })
+    }
+
+    /// Where the hips and feet are all the way through `animation`, `SAMPLE` apart, with the time
+    /// each is at.
+    fn stances(
+        &self,
+        animation: &mut Animation,
+        rest: &FxHashMap<Handle<Node>, Bone>,
+    ) -> Vec<(f32, Stance)> {
+        let slice = animation.time_slice();
+        let looped = animation.is_loop();
+        // Not looping for now, so that the end is the end rather than wrapped round to the start.
+        animation.set_loop(false);
+        let stances = (0..)
+            .map(|step| slice.start + step as f32 * SAMPLE)
+            .take_while(|&time| time <= slice.end)
+            .map(|time| {
+                animation.set_time_position(time);
+                animation.tick(0.0);
+                (time, self.stance_in(animation, rest))
+            })
+            .collect();
+        animation.set_loop(looped);
+        animation.rewind();
+        stances
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Skid {
     animation: Handle<Animation>,
@@ -199,6 +342,8 @@ struct Skid {
     speed: f32,
     /// The time in it at which it has swung the droid round.
     turned: f32,
+    /// How low its feet get: the floor they are planted on.
+    ground: f32,
 }
 
 /// One way through the air: an animation for each part of a jump.
@@ -247,8 +392,11 @@ struct Skidding {
     heading: f32,
     /// How fast it is played, as a multiple of how it was made.
     rate: f32,
-    /// Where it had the anchor, going forward, last frame.
-    last: f32,
+    /// Where it had the hips and feet last frame.
+    last: Stance,
+    /// How fast its feet were carrying the droid last they were on the floor, in the model's
+    /// meters per second: it slides on at that between steps.
+    velocity: Vector3<f32>,
 }
 
 /// What the body is doing, for the droid to go along with.
@@ -268,6 +416,8 @@ pub(crate) struct Going {
     pub(crate) low: bool,
     /// How fast it is falling, in meters per second.
     pub(crate) falling: f32,
+    /// Whether it is in cover, up against a wall.
+    pub(crate) cover: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -279,6 +429,12 @@ pub(crate) struct Avatar {
     cycles: Vec<Cycle>,
     /// Played standing still, when the droid has one.
     idle: Option<Handle<Animation>>,
+    /// Played in cover in place of the idle, and of the walk, as an index into `cycles`, when
+    /// the droid has them.
+    cover_idle: Option<Handle<Animation>>,
+    cover_walk: Option<usize>,
+    /// Whether it was in cover as of the last frame.
+    covered: bool,
     /// Its skids round to the left and to the right, as far as it has them.
     skids: [Option<Skid>; 2],
     skidding: Option<Skidding>,
@@ -294,11 +450,13 @@ pub(crate) struct Avatar {
     travel: Option<Vector3<f32>>,
     /// Every bone, at rest.
     rest: FxHashMap<Handle<Node>, Bone>,
-    /// The bones at the top of the rig, which carry the cycles' travel.
-    top: Vec<Handle<Node>>,
-    /// The node they hang off.
-    rig: Handle<Node>,
-    anchor: Handle<Node>,
+    skeleton: Skeleton,
+    /// The hips at rest, in the model's own terms.
+    rest_hips: Bone,
+    /// The highest bones the animations move, each with where the bone it hangs off is in the
+    /// droid's own terms. They carry any travel built into an animation, and everything else
+    /// with them.
+    tops: Vec<(Handle<Node>, Bone)>,
     /// The cycle playing, as an index into `cycles`; none is the idle, or the rest pose.
     playing: Option<usize>,
     /// Where the bones were when the change to what is playing now began, and how far through it
@@ -322,7 +480,7 @@ pub(super) fn heading(forward: bool, back: bool, left: bool, right: bool) -> f32
 }
 
 /// `angle`, in radians, the short way round: from -PI to PI.
-fn wrap(angle: f32) -> f32 {
+pub(super) fn wrap(angle: f32) -> f32 {
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
 
@@ -405,68 +563,54 @@ fn take_pose(animation: &Animation, target: &mut FxHashMap<Handle<Node>, Bone>) 
     }
 }
 
-/// How far `node` travels forward over one time round `animation`, in the rig's own meters.
-fn travel(animation: &mut Animation, node: Handle<Node>) -> Option<f32> {
-    let slice = animation.time_slice();
-    // Not looping for now, so that the end is the end rather than wrapped round to the start.
-    animation.set_loop(false);
-    let mut z_at = |time: f32| {
-        animation.set_time_position(time);
-        animation.tick(0.0);
-        posed(animation, node).0.map(|p| p.z)
+/// Starts `animation` at its first key rather than at none: a model's frames count from one, and
+/// the time before the first is only its pose held still - a hitch every time round a cycle, and
+/// a stretch of going nowhere to anything measuring it.
+fn trim(animation: &mut Animation) {
+    let first = {
+        let state = animation.tracks_data().state();
+        let Some(data) = state.data_ref() else {
+            return;
+        };
+        data.tracks
+            .iter()
+            .flat_map(|track| track.data_container().curves_ref())
+            .filter_map(|curve| curve.keys().first().map(|key| key.location))
+            .fold(f32::INFINITY, f32::min)
     };
-    let distance = z_at(slice.end)
-        .zip(z_at(slice.start))
-        .map(|(end, start)| end - start);
-    animation.set_loop(true);
-    animation.rewind();
-    distance
-}
-
-/// When through `animation` `anchor` is at its lowest.
-fn lowest(animation: &mut Animation, anchor: Handle<Node>) -> Option<f32> {
     let slice = animation.time_slice();
-    let mut lowest: Option<(f32, f32)> = None;
-    let mut time = slice.start;
-    while time <= slice.end {
-        animation.set_time_position(time);
-        animation.tick(0.0);
-        if let Some(y) = posed(animation, anchor).0.map(|p| p.y) {
-            if lowest.is_none_or(|(_, low)| y < low) {
-                lowest = Some((time, y));
-            }
-        }
-        time += 1.0 / 60.0;
+    if first > slice.start && first < slice.end {
+        animation.set_time_slice(first..slice.end);
     }
-    animation.rewind();
-    lowest.map(|(time, _)| time)
 }
 
-/// How fast `animation`, a skid, has `anchor` going forward as it begins, in the rig's own meters
-/// per second, and the time in it at which it has turned the anchor round from its `rest`.
-fn measure_skid(
-    animation: &mut Animation,
-    anchor: Handle<Node>,
-    rest: UnitQuaternion<f32>,
-) -> Option<(f32, f32)> {
-    let slice = animation.time_slice();
-    animation.set_loop(false);
-    animation.set_speed(1.0);
-    let mut at = |time: f32| {
-        animation.set_time_position(time);
-        animation.tick(0.0);
-        posed(animation, anchor)
-    };
-    let speed = at(slice.start + SKID_ENTRY)
-        .0
-        .zip(at(slice.start).0)
-        .map(|(early, start)| (early.z - start.z) / SKID_ENTRY);
-    let turned = (0..)
-        .map(|frame| slice.start + frame as f32 / 60.0)
-        .take_while(|&time| time <= slice.end)
-        .find(|&time| at(time).1.is_some_and(|r| yaw(r * rest.inverse()).abs() >= SKID_TURNED));
-    animation.rewind();
-    speed.filter(|s| *s > 1.0e-3).zip(turned)
+/// The time in `stances` at which the hips are at their lowest.
+fn lowest(stances: &[(f32, Stance)]) -> Option<f32> {
+    stances
+        .iter()
+        .min_by(|a, b| a.1.hips.position.y.total_cmp(&b.1.hips.position.y))
+        .map(|&(time, _)| time)
+}
+
+/// How fast a skid going by `stances` has the droid going as it begins, in the model's meters
+/// per second, the time in it at which it has swung the hips round from `rest`, and how low the
+/// feet get.
+fn measure_skid(stances: &[(f32, Stance)], rest: Bone) -> Option<(f32, f32, f32)> {
+    let ground = ground(&stances.iter().map(|(_, s)| *s).collect::<Vec<_>>());
+    let start = stances.first()?.0;
+    let entry: Vec<Stance> = stances
+        .iter()
+        .take_while(|(time, _)| *time <= start + SKID_ENTRY)
+        .map(|(_, stance)| *stance)
+        .collect();
+    let speed = pace_of(&entry, ground)?.z;
+    let turned = stances
+        .iter()
+        .find(|(_, stance)| {
+            yaw(stance.hips.rotation * rest.rotation.inverse()).abs() >= SKID_TURNED
+        })?
+        .0;
+    (speed > 1.0e-3).then_some((speed, turned, ground))
 }
 
 impl Avatar {
@@ -517,14 +661,23 @@ impl Avatar {
             }
         }
 
-        let (anchor, _) = graph.find_by_name(root, ANCHOR)?;
-        let rig = graph[anchor].parent();
-        let top = graph[rig].children().to_vec();
+        // Everything is measured in the model's own terms: those of its root, which the droid
+        // turns and scales as a whole, whatever the rig puts between that and the bones.
+        let (hips, _) = graph.find_by_name(root, HIPS)?;
+        let [left, right] = FEET.map(|name| graph.find_by_name(root, name).map(|(foot, _)| foot));
+        let parent_of = |node: Handle<Node>| graph[node].parent();
+        let skeleton = Skeleton {
+            hips: chain(parent_of, root, hips),
+            feet: [chain(parent_of, root, left?), chain(parent_of, root, right?)],
+        };
         let rest = graph
-            .traverse_handle_iter(rig)
-            .filter(|&bone| bone != rig)
+            .traverse_handle_iter(root)
+            .filter(|&bone| bone != root)
             .map(|bone| (bone, Bone::of(&graph[bone])))
             .collect::<FxHashMap<_, _>>();
+        let rest_hips = place(&skeleton.hips, |bone| rest[&bone]);
+        let parents: FxHashMap<Handle<Node>, Handle<Node>> =
+            rest.keys().map(|&bone| (bone, graph[bone].parent())).collect();
 
         let animations = nodes
             .iter()
@@ -540,19 +693,28 @@ impl Avatar {
         let container = player.animations_mut().get_value_mut_silent();
         for animation in container.iter_mut() {
             animation.set_enabled(false);
+            trim(animation);
         }
+        // How fast an animation carries the droid along the ground, forward, in meters per
+        // second at its size in the game.
+        let speed_of = |animation: &mut Animation| {
+            let stances: Vec<Stance> = skeleton
+                .stances(animation, &rest)
+                .into_iter()
+                .map(|(_, stance)| stance)
+                .collect();
+            pace_of(&stances, ground(&stances)).map(|pace| pace.z * SCALE)
+        };
         let mut cycles = Vec::new();
         for (name, gait) in CYCLES {
             let Some((handle, animation)) = container.find_by_name_mut(name) else {
                 warn(format!("Droid: it has no {name}"));
                 continue;
             };
-            let length = animation.length();
-            let Some(distance) = travel(animation, anchor).filter(|d| *d > 1.0e-3) else {
+            let Some(speed) = speed_of(animation).filter(|s| *s > STILL) else {
                 warn(format!("Droid: its {name} goes nowhere"));
                 continue;
             };
-            let speed = distance * SCALE / length;
             info(format!("Droid: its {name} goes {speed:.2} m/s"));
             cycles.push(Cycle {
                 animation: handle,
@@ -562,6 +724,43 @@ impl Avatar {
         }
         if cycles.is_empty() {
             return None;
+        }
+        // The highest bones the cycles move: the walk's, or whichever cycle came first.
+        let tops: Vec<(Handle<Node>, Bone)> = {
+            let animation = &mut container[cycles[0].animation];
+            animation.tick(0.0);
+            let moves = |bone: Handle<Node>| {
+                let (position, rotation) = posed(animation, bone);
+                position.is_some() || rotation.is_some()
+            };
+            rest.keys()
+                .copied()
+                .filter(|&bone| moves(bone) && !parents.get(&bone).is_some_and(|&p| moves(p)))
+                .map(|bone| {
+                    let above = chain(|node| parents[&node], root, parents[&bone]);
+                    (bone, place(&above, |bone| rest[&bone]))
+                })
+                .collect()
+        };
+        // In cover: made or not yet, so there is nothing to warn about without them.
+        let cover_walk = container.find_by_name_mut(COVER_WALK).and_then(|(handle, animation)| {
+            let speed = speed_of(animation).filter(|s| *s > STILL)?;
+            info(format!("Droid: its {COVER_WALK} goes {speed:.2} m/s"));
+            cycles.push(Cycle {
+                animation: handle,
+                gait: Some(Gait::Walking),
+                speed,
+            });
+            Some(cycles.len() - 1)
+        });
+        let cover_idle = container.find_by_name_mut(COVER_IDLE).map(|(handle, animation)| {
+            animation.set_loop(true);
+            handle
+        });
+        if cover_walk.is_none() || cover_idle.is_none() {
+            info(format!(
+                "Droid: in cover it walks and idles as usual, without {COVER_WALK} and {COVER_IDLE}"
+            ));
         }
         let idle = match container.find_by_name_mut(IDLE) {
             Some((handle, animation)) => {
@@ -579,10 +778,7 @@ impl Avatar {
                     warn(format!("Droid: it has no {name}"));
                     return None;
                 };
-                let length = animation.length();
-                let speed = travel(animation, anchor)
-                    .filter(|d| *d > IN_PLACE)
-                    .map(|distance| distance * SCALE / length);
+                let speed = speed_of(animation).filter(|s| *s > IN_PLACE);
                 Some(Move {
                     animation: handle,
                     speed,
@@ -594,7 +790,7 @@ impl Avatar {
             // Pushing off and landing are played once through; flying, for as long as it lasts.
             container[start.animation].set_loop(false);
             container[land.animation].set_loop(false);
-            let push_off = lowest(&mut container[start.animation], anchor)?;
+            let push_off = lowest(&skeleton.stances(&mut container[start.animation], &rest))?;
             Some(Leap {
                 start,
                 flight,
@@ -607,8 +803,9 @@ impl Avatar {
                 warn(format!("Droid: it has no {name}"));
                 return None;
             };
-            let Some((speed, turned)) = measure_skid(animation, anchor, rest[&anchor].rotation)
-            else {
+            animation.set_loop(false);
+            let stances = skeleton.stances(animation, &rest);
+            let Some((speed, turned, ground)) = measure_skid(&stances, rest_hips) else {
                 warn(format!("Droid: its {name} never skids round"));
                 return None;
             };
@@ -618,6 +815,7 @@ impl Avatar {
                 animation: handle,
                 speed,
                 turned,
+                ground,
             })
         });
 
@@ -627,6 +825,9 @@ impl Avatar {
             animations,
             cycles,
             idle,
+            cover_idle,
+            cover_walk,
+            covered: false,
             skids,
             skidding: None,
             leaps,
@@ -635,9 +836,9 @@ impl Avatar {
             fall: 0.0,
             travel: None,
             rest,
-            top,
-            rig,
-            anchor,
+            skeleton,
+            rest_hips,
+            tops,
             playing: None,
             from: Default::default(),
             fade: 1.0,
@@ -720,15 +921,15 @@ impl Avatar {
         self.fade = 0.0;
     }
 
-    /// Takes `animation`'s travel back out of `target`: the anchor stays where it rests, going
-    /// forward, and the rest of the top of the rig goes with it - the bones `animation` moves,
-    /// that is. The skinned mesh hangs off the rig too, and is left where it is.
+    /// Takes any travel built into `animation` back out of `target`: the hips stay where they
+    /// rest, going forward, and everything the highest bones it moves carry goes with them.
     fn hold_in_place(&self, animation: &Animation, target: &mut FxHashMap<Handle<Node>, Bone>) {
-        let drift = target[&self.anchor].position.z - self.rest[&self.anchor].position.z;
-        for bone in &self.top {
+        let hips = place(&self.skeleton.hips, |bone| target[&bone]);
+        let drift = Vector3::new(0.0, 0.0, hips.position.z - self.rest_hips.position.z);
+        for (bone, above) in &self.tops {
             if posed(animation, *bone).0.is_some() {
                 if let Some(pose) = target.get_mut(bone) {
-                    pose.position.z -= drift;
+                    pose.position -= above.rotation.inverse() * drift;
                 }
             }
         }
@@ -771,7 +972,19 @@ impl Avatar {
         }
 
         let crouched = going.posture != Posture::Standing;
-        let wanted = choose(&self.gaits(), going.gait, crouched, going.speed >= STILL);
+        let mut wanted = choose(&self.gaits(), going.gait, crouched, going.speed >= STILL);
+        // In cover, edging along the wall in place of walking.
+        let walking = |i: usize| self.cycles[i].gait == Some(Gait::Walking);
+        if going.cover && !crouched && wanted.is_some_and(walking) {
+            wanted = self.cover_walk.or(wanted);
+        }
+        // Standing still, going into cover or out of it changes one idle for the other.
+        if wanted.is_none() && self.playing.is_none() && going.cover != self.covered {
+            self.covered = going.cover;
+            self.rewind_idle(graph);
+            self.fade_from_here(graph);
+        }
+        self.covered = going.cover;
         if wanted != self.playing {
             // The new cycle picks up at the same point in the stride, so the feet carry on.
             if let (Some(old), Some(new)) = (self.playing, wanted) {
@@ -808,7 +1021,7 @@ impl Avatar {
             animation.tick(dt);
             take_pose(animation, &mut target);
             self.hold_in_place(animation, &mut target);
-        } else if let Some(idle) = self.idle {
+        } else if let Some(idle) = self.idle_now() {
             let Some(container) = self.container(graph) else {
                 return;
             };
@@ -820,9 +1033,18 @@ impl Avatar {
         self.put(graph, target, dt);
     }
 
+    /// The idle to play standing still: the one for cover, in cover, if the droid has it.
+    fn idle_now(&self) -> Option<Handle<Animation>> {
+        if self.covered {
+            self.cover_idle.or(self.idle)
+        } else {
+            self.idle
+        }
+    }
+
     /// The idle starts from the top each time the droid comes to a stop.
     fn rewind_idle(&self, graph: &mut Graph) {
-        if let Some(idle) = self.idle {
+        if let Some(idle) = self.idle_now() {
             if let Some(container) = self.container(graph) {
                 container[idle].rewind();
             }
@@ -854,15 +1076,15 @@ impl Avatar {
         animation.set_speed(1.0);
         animation.rewind();
         animation.tick(0.0);
-        let Some(last) = posed(animation, self.anchor).0.map(|p| p.z) else {
-            return false;
-        };
+        let last = self.skeleton.stance_in(animation, &self.rest);
+        // Going into it as fast as the body is going, so the feet carry on.
+        let rate = going.speed / skid.speed;
         self.skidding = Some(Skidding {
             skid: index,
             heading: self.heading,
-            // Going into it as fast as the body is going, so the feet carry on.
-            rate: going.speed / skid.speed,
+            rate,
             last,
+            velocity: Vector3::new(0.0, 0.0, going.speed / SCALE),
         });
         self.fade_from_here(graph);
         true
@@ -895,16 +1117,20 @@ impl Avatar {
         animation.tick(dt);
         let mut target = self.rest.clone();
         take_pose(animation, &mut target);
-        let along = target[&self.anchor].position.z;
+        let now = self.skeleton.stance_in(animation, &self.rest);
         self.hold_in_place(animation, &mut target);
         if dt > 0.0 {
-            // The rig's forward, in the world, is as long as one of its meters there.
-            let forward = graph[self.rig]
-                .global_transform()
-                .transform_vector(&Vector3::z());
-            self.travel = Some(forward * ((along - skidding.last) / dt));
+            if let Some(stride) = stride(&skidding.last, &now, skid.ground) {
+                skidding.velocity = stride / dt;
+            }
+            // The model's terms, in the world: turned as the droid is, and as large.
+            self.travel = Some(
+                graph[self.root]
+                    .global_transform()
+                    .transform_vector(&skidding.velocity),
+            );
         }
-        skidding.last = along;
+        skidding.last = now;
         self.skidding = Some(skidding);
         self.put(graph, target, dt);
         true
@@ -1077,26 +1303,18 @@ impl Avatar {
         let Some(skidding) = self.skidding.take() else {
             return;
         };
-        let turned = yaw(
-            **graph[self.anchor].local_transform().rotation()
-                * self.rest[&self.anchor].rotation.inverse(),
-        );
+        let hips = place(&self.skeleton.hips, |bone| Bone::of(&graph[bone]));
+        let turned = yaw(hips.rotation * self.rest_hips.rotation.inverse());
         let back = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), -turned);
-        let animation = self.skids[skidding.skid].map(|skid| skid.animation);
-        let moved: Vec<Handle<Node>> = match (animation, self.container(graph)) {
-            (Some(animation), Some(container)) => self
-                .top
-                .iter()
-                .copied()
-                .filter(|&bone| posed(&container[animation], bone).1.is_some())
-                .collect(),
-            _ => Vec::new(),
-        };
-        for bone in moved {
+        for &(bone, above) in &self.tops {
+            // Turned back about the droid's own middle, in its own terms, and put back in those
+            // of the bone it hangs off.
             let pose = Bone::of(&graph[bone]);
+            let position = back * (above.position + above.rotation * pose.position);
+            let rotation = back * above.rotation * pose.rotation;
             let transform = graph[bone].local_transform_mut();
-            transform.set_position(back * pose.position);
-            transform.set_rotation(back * pose.rotation);
+            transform.set_position(above.rotation.inverse() * (position - above.position));
+            transform.set_rotation(above.rotation.inverse() * rotation);
         }
         self.heading = wrap(skidding.heading + turned);
         self.face(graph);
@@ -1166,6 +1384,43 @@ mod tests {
         // Facing back-left, going forward-left is round to the right.
         assert_eq!(skid(3.0 * FRAC_PI_4, FRAC_PI_4 - 0.2), None);
         assert_eq!(skid(3.0 * FRAC_PI_4, -FRAC_PI_4 + 0.1), right);
+    }
+
+    /// Standing with its hips at `hips` along the way, its left foot at `left` along the way and
+    /// `left_up` off the floor, and its right foot lifted.
+    fn stance(hips: f32, left: f32, left_up: f32) -> Stance {
+        Stance {
+            hips: Bone {
+                position: Vector3::new(0.0, 1.0, hips),
+                rotation: UnitQuaternion::identity(),
+            },
+            feet: [Vector3::new(0.1, left_up, left), Vector3::new(-0.1, 0.3, 0.0)],
+        }
+    }
+
+    #[test]
+    fn the_hips_going_past_a_planted_foot_is_going_along_the_ground() {
+        // Walking on the spot: the foot goes back under still hips.
+        let on_the_spot = stride(&stance(0.0, 0.2, 0.0), &stance(0.0, 0.1, 0.0), 0.0);
+        assert_eq!(on_the_spot, Some(Vector3::new(0.0, 0.0, 0.1)));
+        // Walking through the scene: the hips go on over a foot that stays put.
+        let through = stride(&stance(0.0, 0.2, 0.0), &stance(0.1, 0.2, 0.0), 0.0);
+        assert_eq!(through, Some(Vector3::new(0.0, 0.0, 0.1)));
+        // With the foot off the floor, it says nothing about the ground.
+        assert_eq!(stride(&stance(0.0, 0.2, 0.2), &stance(0.0, 0.1, 0.2), 0.0), None);
+    }
+
+    #[test]
+    fn the_pace_counts_only_the_time_a_foot_is_down() {
+        // Half the time on the floor, the foot going back 1 cm a sample; half in the air.
+        let stances: Vec<Stance> = (0..20)
+            .map(|i| {
+                let up = if i < 10 { 0.0 } else { 0.3 };
+                stance(0.0, -0.01 * i as f32, up)
+            })
+            .collect();
+        let pace = pace_of(&stances, ground(&stances)).unwrap();
+        assert!((pace.z - 0.01 / SAMPLE).abs() < 1e-3, "{pace:?}");
     }
 
     #[test]
