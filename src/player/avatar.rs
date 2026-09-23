@@ -21,8 +21,10 @@
 //! Running or sprinting flat out, turning round - from going forward to going back, say - skids:
 //! the droid digs its feet in, slides to a stop and swings round, whichever way round is shorter,
 //! and sets off the other way. The skid carries the body while it lasts, as far and as fast as
-//! its feet slide, and hands back to the cycles once the droid has swung round. Leaving the
-//! ground or crouching cuts it short.
+//! its feet slide, on the way it was going, and hands back to the cycles once the droid has swung
+//! round. A skid that swings the droid round by itself is left to; one made skidding to a stop
+//! on the spot is swung round here, while it is down in the slide. Leaving the ground or
+//! crouching cuts it short.
 //!
 //! Jumping, the droid pushes off, flies with its legs tucked and takes the landing in its knees,
 //! standing or on the move as it is going at the time: from standing still it springs straight
@@ -82,6 +84,8 @@ const SKID_SPEED: f32 = 0.75;
 const SKID_TURNED: f32 = 150.0 * std::f32::consts::PI / 180.0;
 /// How long at the start of a skid, in seconds, its speed going in is measured over.
 const SKID_ENTRY: f32 = 0.2;
+/// How far the hips have to go down in a skid, in the model's own meters, for it to be sliding.
+const SLIDE_DIP: f32 = 0.05;
 /// The droid's jumps, standing still and on the move, each low and high: pushing off, in the air,
 /// and landing.
 const LEAPS: [[[&str; 3]; 2]; 2] = [
@@ -344,6 +348,31 @@ struct Skid {
     turned: f32,
     /// How low its feet get: the floor they are planted on.
     ground: f32,
+    /// For a skid that does not swing the droid round by itself, the times in it over which it
+    /// is swung round here: while it is down in the slide.
+    spin: Option<(f32, f32)>,
+}
+
+/// When through a skid, made going by `heights` - how high the hips are at each time - the droid
+/// is down in the slide: from when the hips are halfway down to their lowest, to when they are
+/// halfway back up. None if they never go down far enough to be sliding.
+fn slide(heights: &[(f32, f32)]) -> Option<(f32, f32)> {
+    let &(_, start) = heights.first()?;
+    let low = heights.iter().map(|&(_, y)| y).fold(f32::INFINITY, f32::min);
+    if start - low < SLIDE_DIP {
+        return None;
+    }
+    let halfway = (start + low) / 2.0;
+    let down = heights.iter().find(|&&(_, y)| y < halfway)?.0;
+    let up = heights.iter().rev().find(|&&(_, y)| y < halfway)?.0;
+    (up > down).then_some((down, up))
+}
+
+/// How far through swinging round the droid is at `time`, from 0 to 1, over `spin`: slowly at
+/// first and at the last, and fastest halfway.
+fn spun(time: f32, (from, to): (f32, f32)) -> f32 {
+    let t = ((time - from) / (to - from)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// One way through the air: an animation for each part of a jump.
@@ -592,10 +621,15 @@ fn lowest(stances: &[(f32, Stance)]) -> Option<f32> {
         .map(|&(time, _)| time)
 }
 
-/// How fast a skid going by `stances` has the droid going as it begins, in the model's meters
-/// per second, the time in it at which it has swung the hips round from `rest`, and how low the
-/// feet get.
-fn measure_skid(stances: &[(f32, Stance)], rest: Bone) -> Option<(f32, f32, f32)> {
+/// The skid in `animation`, going by its `stances`: how fast it has the droid going as it begins,
+/// the time in it at which the droid has swung round, how low the feet get, and - if the skid
+/// does not swing the hips round from `rest` by itself - when to swing it round. None if it
+/// neither swings round nor slides.
+fn measure_skid(
+    animation: Handle<Animation>,
+    stances: &[(f32, Stance)],
+    rest: Bone,
+) -> Option<Skid> {
     let ground = ground(&stances.iter().map(|(_, s)| *s).collect::<Vec<_>>());
     let start = stances.first()?.0;
     let entry: Vec<Stance> = stances
@@ -604,13 +638,27 @@ fn measure_skid(stances: &[(f32, Stance)], rest: Bone) -> Option<(f32, f32, f32)
         .map(|(_, stance)| *stance)
         .collect();
     let speed = pace_of(&entry, ground)?.z;
-    let turned = stances
-        .iter()
-        .find(|(_, stance)| {
-            yaw(stance.hips.rotation * rest.rotation.inverse()).abs() >= SKID_TURNED
-        })?
-        .0;
-    (speed > 1.0e-3).then_some((speed, turned, ground))
+    let turns = stances.iter().find(|(_, stance)| {
+        yaw(stance.hips.rotation * rest.rotation.inverse()).abs() >= SKID_TURNED
+    });
+    let (turned, spin) = match turns {
+        Some(&(time, _)) => (time, None),
+        None => {
+            let heights: Vec<(f32, f32)> = stances
+                .iter()
+                .map(|(time, stance)| (*time, stance.hips.position.y))
+                .collect();
+            let spin = slide(&heights)?;
+            (spin.1, Some(spin))
+        }
+    };
+    (speed > 1.0e-3).then_some(Skid {
+        animation,
+        speed: speed * SCALE,
+        turned,
+        ground,
+        spin,
+    })
 }
 
 impl Avatar {
@@ -805,18 +853,16 @@ impl Avatar {
             };
             animation.set_loop(false);
             let stances = skeleton.stances(animation, &rest);
-            let Some((speed, turned, ground)) = measure_skid(&stances, rest_hips) else {
-                warn(format!("Droid: its {name} never skids round"));
+            let Some(skid) = measure_skid(handle, &stances, rest_hips) else {
+                warn(format!("Droid: its {name} neither turns round nor slides"));
                 return None;
             };
-            let speed = speed * SCALE;
-            info(format!("Droid: its {name} goes into a skid at {speed:.2} m/s"));
-            Some(Skid {
-                animation: handle,
-                speed,
-                turned,
-                ground,
-            })
+            let how = match skid.spin {
+                Some(_) => "swung round by the game",
+                None => "swinging round by itself",
+            };
+            info(format!("Droid: its {name} goes into a skid at {:.2} m/s, {how}", skid.speed));
+            Some(skid)
         });
 
         Some(Self {
@@ -1090,8 +1136,9 @@ impl Avatar {
         true
     }
 
-    /// Plays the skid under way for another `dt`, facing the way the droid faced as it began,
-    /// since the skid turns it round itself. False once it is over.
+    /// Plays the skid under way for another `dt`, swinging the droid round if the skid does not
+    /// do it by itself, and otherwise leaving it facing the way it faced as it began. False once
+    /// it is over.
     fn skid(&mut self, graph: &mut Graph, going: Going, dt: f32) -> bool {
         let Some(mut skidding) = self.skidding else {
             return false;
@@ -1115,19 +1162,34 @@ impl Avatar {
         }
         animation.set_speed(skidding.rate);
         animation.tick(dt);
+        let time = animation.time_position();
         let mut target = self.rest.clone();
         take_pose(animation, &mut target);
         let now = self.skeleton.stance_in(animation, &self.rest);
         self.hold_in_place(animation, &mut target);
+        if let Some(spin) = skid.spin {
+            // The left skid swings round to the left, which is the positive way.
+            let way = if skidding.skid == 0 { 1.0 } else { -1.0 };
+            let round = way * std::f32::consts::PI * spun(time, spin);
+            self.heading = wrap(skidding.heading + round);
+            self.face(graph);
+        }
         if dt > 0.0 {
             if let Some(stride) = stride(&skidding.last, &now, skid.ground) {
                 skidding.velocity = stride / dt;
             }
-            // The model's terms, in the world: turned as the droid is, and as large.
+            // The model's terms, in the world, and as large - but turned as the droid was as it
+            // went in, however far it has swung round since: it slides on the way it was going.
+            let unturn = self.upright.inverse()
+                * UnitQuaternion::from_axis_angle(
+                    &Vector3::y_axis(),
+                    skidding.heading - self.heading,
+                )
+                * self.upright;
             self.travel = Some(
                 graph[self.root]
                     .global_transform()
-                    .transform_vector(&skidding.velocity),
+                    .transform_vector(&(unturn * skidding.velocity)),
             );
         }
         skidding.last = now;
@@ -1296,13 +1358,13 @@ impl Avatar {
         }
     }
 
-    /// Hands back from the skid under way, if any, to the cycles. The skid has turned the bones
-    /// round, not the droid: the droid is turned as far instead, and the bones back again by as
-    /// much, so that it stands just as it did.
+    /// Hands back from the skid under way, if any, to the cycles. However far the skid has turned
+    /// the bones round, rather than the droid, the droid is turned as far instead, and the bones
+    /// back again by as much, so that it stands just as it did.
     fn end_skid(&mut self, graph: &mut Graph) {
-        let Some(skidding) = self.skidding.take() else {
+        if self.skidding.take().is_none() {
             return;
-        };
+        }
         let hips = place(&self.skeleton.hips, |bone| Bone::of(&graph[bone]));
         let turned = yaw(hips.rotation * self.rest_hips.rotation.inverse());
         let back = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), -turned);
@@ -1316,7 +1378,8 @@ impl Avatar {
             transform.set_position(above.rotation.inverse() * (position - above.position));
             transform.set_rotation(above.rotation.inverse() * rotation);
         }
-        self.heading = wrap(skidding.heading + turned);
+        // On top of however far the droid itself has been swung round.
+        self.heading = wrap(self.heading + turned);
         self.face(graph);
         self.playing = None;
         self.rewind_idle(graph);
@@ -1421,6 +1484,32 @@ mod tests {
             .collect();
         let pace = pace_of(&stances, ground(&stances)).unwrap();
         assert!((pace.z - 0.01 / SAMPLE).abs() < 1e-3, "{pace:?}");
+    }
+
+    #[test]
+    fn a_skid_is_swung_round_while_it_is_down_in_the_slide() {
+        // Running in at 1 m, down to 0.8 m from 0.4 s to 1.0 s, and back up.
+        let heights = [
+            (0.0, 1.0),
+            (0.2, 0.95),
+            (0.4, 0.85),
+            (0.6, 0.8),
+            (1.0, 0.85),
+            (1.2, 0.95),
+            (1.4, 1.0),
+        ];
+        assert_eq!(slide(&heights), Some((0.4, 1.0)));
+        // Hardly going down at all is running, not sliding.
+        assert_eq!(slide(&[(0.0, 1.0), (0.5, 0.98), (1.0, 1.0)]), None);
+    }
+
+    #[test]
+    fn it_swings_round_smoothly_from_start_to_finish() {
+        let spin = (0.4, 1.0);
+        assert_eq!(spun(0.0, spin), 0.0, "not yet");
+        assert!((spun(0.7, spin) - 0.5).abs() < 1e-5, "halfway at halfway");
+        assert_eq!(spun(2.0, spin), 1.0, "all the way round, and no further");
+        assert!(spun(0.45, spin) < 0.1 && spun(0.95, spin) > 0.9, "easing in and out");
     }
 
     #[test]
