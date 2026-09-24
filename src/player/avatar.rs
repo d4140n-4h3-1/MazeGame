@@ -25,13 +25,19 @@
 //! going, it turns only by what is left over, a few degrees. Without a strafe back it plays its
 //! cycle backwards, and without the others it turns as far as it has to, up to side on.
 //!
-//! Running or sprinting flat out, turning round - from going forward to going back, say - skids:
-//! the droid digs its feet in, slides to a stop and swings round, whichever way round is shorter,
-//! and sets off the other way. The skid carries the body while it lasts, as far and as fast as
-//! its feet slide, on the way it was going, and hands back to the cycles once the droid has swung
-//! round. A skid that swings the droid round by itself is left to; one made skidding to a stop
-//! on the spot is swung round here, while it is down in the slide. Leaving the ground,
-//! crouching or strafing cuts it short, and strafing the droid never skids.
+//! Running or sprinting flat out, the droid skids. Turning round - from going forward to going
+//! back, say - it digs its feet in, slides, swings round whichever way is shorter and runs out
+//! the other way, out of a sprint in a skid of its own. Turning a quarter of the way round, it
+//! cuts across. Letting go of the keys, it slides to a standstill and idles. Which it does goes
+//! by how fast it is going rather than the keys, so letting go of Shift with the rest still
+//! stops out of a sprint.
+//!
+//! The skids are made on the spot; [`MOTION`] has where each takes the droid and how far round,
+//! frame by frame. The skid carries the body along that path, as far as it goes for how fast
+//! the droid went in, and swings the droid round with it. A turn hands back to the cycles as it
+//! runs out, and a stop to the idle, which it ends on. Leaving the ground, crouching, strafing or
+//! taking cover cuts a skid short, as does setting off again in a stop, and strafing or in cover
+//! the droid never skids.
 //!
 //! Jumping, the droid pushes off, flies with its legs tucked and takes the landing in its knees,
 //! standing or on the move as it is going at the time: from standing still it springs straight
@@ -115,20 +121,25 @@ const STRAFE_GAITS: [Option<Gait>; 3] = [Some(Gait::Walking), Some(Gait::Running
 /// How much nearer the way it is going another step has to be, in radians, for the droid to
 /// change to it strafing, so that going just about halfway between two it does not keep changing.
 const STRAFE_MARGIN: f32 = 10.0 * std::f32::consts::PI / 180.0;
-/// The droid's skids round, to its left and to its right.
-const SKIDS: [&str; 2] = ["droid_skid_turn_L", "droid_skid_turn_R"];
-/// How far round the keys have to swing the droid, in radians, for it to skid: from ahead to
-/// straight back, or to either of the diagonals behind.
+/// Where the droid's animations take it and how far round, frame by frame, as they were made:
+/// the skids, made on the spot, go by it.
+pub const MOTION: &str = "data/droid_motion.json";
+/// The droid's skids round, out of a run and out of a sprint, each to its left and to its right.
+const TURNS: [[&str; 2]; 2] = [
+    ["droid_skid_turn_L", "droid_skid_turn_R"],
+    ["droid_skid_sprint_turn_L", "droid_skid_sprint_turn_R"],
+];
+/// Its quarter turns cut across, to its left and to its right.
+const CUTS: [&str; 2] = ["droid_skid_turn90_L", "droid_skid_turn90_R"];
+/// Its slides to a standstill, out of a run and out of a sprint.
+const STOPS: [&str; 2] = ["droid_skid_stop", "droid_skid_sprint_stop"];
+/// How far round the keys have to swing the droid, in radians, for it to skid round: from ahead
+/// to straight back, or to either of the diagonals behind.
 const SKID_ANGLE: f32 = 0.75 * std::f32::consts::PI - 1.0e-3;
-/// How near its gait's full pace the droid has to be going to skid, as a share of it.
+/// How far round they have to swing it to cut across: a quarter of the way.
+const CUT_ANGLE: f32 = 0.5 * std::f32::consts::PI - 1.0e-3;
+/// How near a gait's full pace the droid has to be going to skid out of it, as a share of it.
 const SKID_SPEED: f32 = 0.75;
-/// How far round a skid swings the droid, in radians, before it hands back to the cycles. What
-/// is left of it is setting off the other way, which the cycles do anyway.
-const SKID_TURNED: f32 = 150.0 * std::f32::consts::PI / 180.0;
-/// How long at the start of a skid, in seconds, its speed going in is measured over.
-const SKID_ENTRY: f32 = 0.2;
-/// How far the hips have to go down in a skid, in the model's own meters, for it to be sliding.
-const SLIDE_DIP: f32 = 0.05;
 /// The droid's jumps, standing still and on the move, each low and high: pushing off, in the air,
 /// and landing.
 const LEAPS: [[[&str; 3]; 2]; 2] = [
@@ -415,41 +426,111 @@ impl Skeleton {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// An animation's motion as [`MOTION`] has it.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+struct Clip {
+    fps: f32,
+    /// How far forward, how far to the left and how far round to the left, in the model's own
+    /// meters and in degrees, each frame is from the first, in the way the droid faced then.
+    forward_m: Vec<f32>,
+    left_m: Vec<f32>,
+    turn_left_deg: Vec<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+struct Motions {
+    clips: std::collections::HashMap<String, Clip>,
+}
+
+/// What [`MOTION`] has, read once for every droid; none if it cannot be read.
+fn motions() -> Option<&'static Motions> {
+    static MOTIONS: std::sync::OnceLock<Option<Motions>> = std::sync::OnceLock::new();
+    MOTIONS
+        .get_or_init(|| {
+            let read = std::fs::read_to_string(MOTION).map_err(|e| e.to_string());
+            match read.and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string())) {
+                Ok(motions) => Some(motions),
+                Err(error) => {
+                    Log::err(format!("Droid: could not read {MOTION}: {error}"));
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+/// A skid: an animation played once through, and where it takes the droid.
+#[derive(Debug, Clone, PartialEq)]
 struct Skid {
     animation: Handle<Animation>,
-    /// How fast the droid is going as the skid begins, in meters per second at the droid's size
-    /// in the game.
-    speed: f32,
-    /// The time in it at which it has swung the droid round.
-    turned: f32,
-    /// How low its feet get: the floor they are planted on.
-    ground: f32,
-    /// For a skid that does not swing the droid round by itself, the times in it over which it
-    /// is swung round here: while it is down in the slide.
-    spin: Option<(f32, f32)>,
+    /// Where each frame takes the droid, from the first: how far forward and to the left, in the
+    /// model's own meters, and how far round to the left, in radians - all in the way it faced as
+    /// it went in.
+    path: Vec<Vector3<f32>>,
+    /// Frames a second.
+    fps: f32,
+    /// How fast it goes in, in the model's own meters per second.
+    entry: f32,
 }
 
-/// When through a skid, made going by `heights` - how high the hips are at each time - the droid
-/// is down in the slide: from when the hips are halfway down to their lowest, to when they are
-/// halfway back up. None if they never go down far enough to be sliding.
-fn slide(heights: &[(f32, f32)]) -> Option<(f32, f32)> {
-    let &(_, start) = heights.first()?;
-    let low = heights.iter().map(|&(_, y)| y).fold(f32::INFINITY, f32::min);
-    if start - low < SLIDE_DIP {
-        return None;
+impl Skid {
+    /// The skid in `animation`, going by its `clip`. None if it does not go in on the move.
+    fn new(animation: Handle<Animation>, clip: &Clip) -> Option<Self> {
+        let path: Vec<Vector3<f32>> = clip
+            .forward_m
+            .iter()
+            .zip(&clip.left_m)
+            .zip(&clip.turn_left_deg)
+            .map(|((&forward, &left), &turn)| Vector3::new(forward, left, turn.to_radians()))
+            .collect();
+        let entry = match path.as_slice() {
+            [first, second, ..] => (second.xy() - first.xy()).norm() * clip.fps,
+            _ => 0.0,
+        };
+        (entry > 1.0e-3 && clip.fps > 0.0).then_some(Self {
+            animation,
+            path,
+            fps: clip.fps,
+            entry,
+        })
     }
-    let halfway = (start + low) / 2.0;
-    let down = heights.iter().find(|&&(_, y)| y < halfway)?.0;
-    let up = heights.iter().rev().find(|&&(_, y)| y < halfway)?.0;
-    (up > down).then_some((down, up))
+
+    /// Where the skid has taken the droid `time` seconds in, like `path`: between frames, part
+    /// of the way from one to the next; after the last, where that leaves it.
+    fn at(&self, time: f32) -> Vector3<f32> {
+        let frame = (time * self.fps).max(0.0);
+        let last = self.path.len().saturating_sub(1);
+        let before = (frame.floor() as usize).min(last);
+        let after = (before + 1).min(last);
+        self.path[before].lerp(&self.path[after], (frame - before as f32).min(1.0))
+    }
 }
 
-/// How far through swinging round the droid is at `time`, from 0 to 1, over `spin`: slowly at
-/// first and at the last, and fastest halfway.
-fn spun(time: f32, (from, to): (f32, f32)) -> f32 {
-    let t = ((time - from) / (to - from)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+/// Which way a skid goes: round, cut across, or to a stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkidKind {
+    Round,
+    Cut,
+    Stop,
+}
+
+/// The skids, by name, the droid could go into flat out at `gait`, from facing `from` towards
+/// `to`, in radians, left positive, with the keys sending it anywhere or not - the gait's own
+/// first, and failing that the other's. None for going on as it is.
+fn skid_for(gait: Gait, from: f32, to: f32, pushing: bool) -> Option<(SkidKind, [&'static str; 2])> {
+    let sprinting = usize::from(gait == Gait::Sprinting);
+    let ours_first = |pair: [&'static str; 2]| [pair[sprinting], pair[1 - sprinting]];
+    let left = wrap(to - from);
+    let side = usize::from(left < 0.0);
+    if !pushing {
+        Some((SkidKind::Stop, ours_first(STOPS)))
+    } else if left.abs() >= SKID_ANGLE {
+        Some((SkidKind::Round, ours_first([TURNS[0][side], TURNS[1][side]])))
+    } else if left.abs() >= CUT_ANGLE {
+        Some((SkidKind::Cut, [CUTS[side]; 2]))
+    } else {
+        None
+    }
 }
 
 /// One way through the air: an animation for each part of a jump.
@@ -492,17 +573,18 @@ struct Leaping {
 /// A skid under way.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Skidding {
-    /// Which of the skids, as an index into `skids`.
-    skid: usize,
+    /// Which skid, by name.
+    skid: &'static str,
+    kind: SkidKind,
     /// Which way the droid faced as it began, like [`Avatar::heading`].
     heading: f32,
-    /// How fast it is played, as a multiple of how it was made.
-    rate: f32,
-    /// Where it had the hips and feet last frame.
-    last: Stance,
-    /// How fast its feet were carrying the droid last they were on the floor, in the model's
-    /// meters per second: it slides on at that between steps.
-    velocity: Vector3<f32>,
+    /// Where one of the model's meters forward and to the left along the skid's path takes the
+    /// body, across the world: the way the droid faced as it began, and as far as makes the
+    /// skid go in as fast as the body did.
+    forward: Vector3<f32>,
+    left: Vector3<f32>,
+    /// Where along the path it was last frame, like [`Skid::path`].
+    last: Vector3<f32>,
 }
 
 /// What the body is doing, for the droid to go along with.
@@ -524,6 +606,8 @@ pub(crate) struct Going {
     pub(crate) falling: f32,
     /// Whether it is in cover, up against a wall.
     pub(crate) cover: bool,
+    /// Whether the keys send it anywhere.
+    pub(crate) pushing: bool,
     /// Whether it is strafing: keeping facing ahead whichever way it goes.
     pub(crate) strafing: bool,
     /// Which way it is actually going along the ground, in radians from the way it faces, left
@@ -554,8 +638,8 @@ pub(crate) struct Avatar {
     stepping: Option<Step>,
     /// Whether it was in cover as of the last frame.
     covered: bool,
-    /// Its skids round to the left and to the right, as far as it has them.
-    skids: [Option<Skid>; 2],
+    /// Its skids by name, as far as it has them.
+    skids: FxHashMap<&'static str, Skid>,
     skidding: Option<Skidding>,
     /// Its jumps standing still and on the move, each low and high, as far as it has them.
     leaps: [[Option<Leap>; 2]; 2],
@@ -601,25 +685,6 @@ pub(super) fn heading(forward: bool, back: bool, left: bool, right: bool) -> f32
 /// `angle`, in radians, the short way round: from -PI to PI.
 pub(super) fn wrap(angle: f32) -> f32 {
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
-}
-
-/// Which way `rotation` turns forward, in radians, left positive.
-fn yaw(rotation: UnitQuaternion<f32>) -> f32 {
-    let forward = rotation * Vector3::z();
-    forward.x.atan2(forward.z)
-}
-
-/// Which of the skids, as an index into [`SKIDS`], turns the droid from facing `from` to facing
-/// `to`, in radians, left positive: none unless it is turning round.
-fn skid_for(from: f32, to: f32) -> Option<usize> {
-    let left = wrap(to - from);
-    if left.abs() < SKID_ANGLE {
-        None
-    } else if left > 0.0 {
-        Some(0)
-    } else {
-        Some(1)
-    }
 }
 
 /// Which of the cycles, for the gaits in `cycles`, to play: the crouch when `crouched`, and
@@ -731,46 +796,6 @@ fn lowest(stances: &[(f32, Stance)]) -> Option<f32> {
         .iter()
         .min_by(|a, b| a.1.hips.position.y.total_cmp(&b.1.hips.position.y))
         .map(|&(time, _)| time)
-}
-
-/// The skid in `animation`, going by its `stances`: how fast it has the droid going as it begins,
-/// the time in it at which the droid has swung round, how low the feet get, and - if the skid
-/// does not swing the hips round from `rest` by itself - when to swing it round. None if it
-/// neither swings round nor slides.
-fn measure_skid(
-    animation: Handle<Animation>,
-    stances: &[(f32, Stance)],
-    rest: Bone,
-) -> Option<Skid> {
-    let ground = ground(&stances.iter().map(|(_, s)| *s).collect::<Vec<_>>());
-    let start = stances.first()?.0;
-    let entry: Vec<Stance> = stances
-        .iter()
-        .take_while(|(time, _)| *time <= start + SKID_ENTRY)
-        .map(|(_, stance)| *stance)
-        .collect();
-    let speed = pace_of(&entry, ground)?.z;
-    let turns = stances.iter().find(|(_, stance)| {
-        yaw(stance.hips.rotation * rest.rotation.inverse()).abs() >= SKID_TURNED
-    });
-    let (turned, spin) = match turns {
-        Some(&(time, _)) => (time, None),
-        None => {
-            let heights: Vec<(f32, f32)> = stances
-                .iter()
-                .map(|(time, stance)| (*time, stance.hips.position.y))
-                .collect();
-            let spin = slide(&heights)?;
-            (spin.1, Some(spin))
-        }
-    };
-    (speed > 1.0e-3).then_some(Skid {
-        animation,
-        speed: speed * SCALE,
-        turned,
-        ground,
-        spin,
-    })
 }
 
 impl Avatar {
@@ -991,24 +1016,29 @@ impl Avatar {
                 push_off,
             })
         }));
-        let skids = SKIDS.map(|name| {
+        let motions = motions();
+        let mut skids = FxHashMap::default();
+        for &name in TURNS.iter().flatten().chain(&CUTS).chain(&STOPS) {
             let Some((handle, animation)) = container.find_by_name_mut(name) else {
                 warn(format!("Droid: it has no {name}"));
-                return None;
+                continue;
             };
             animation.set_loop(false);
-            let stances = skeleton.stances(animation, &rest);
-            let Some(skid) = measure_skid(handle, &stances, rest_hips) else {
-                warn(format!("Droid: its {name} neither turns round nor slides"));
-                return None;
+            let Some(clip) = motions.and_then(|motions| motions.clips.get(name)) else {
+                warn(format!("Droid: {MOTION} has nothing for its {name}"));
+                continue;
             };
-            let how = match skid.spin {
-                Some(_) => "swung round by the game",
-                None => "swinging round by itself",
+            let Some(skid) = Skid::new(handle, clip) else {
+                warn(format!("Droid: its {name} does not go in on the move"));
+                continue;
             };
-            info(format!("Droid: its {name} goes into a skid at {:.2} m/s, {how}", skid.speed));
-            Some(skid)
-        });
+            let turn = skid.path.last().map_or(0.0, |at| at.z.to_degrees());
+            info(format!(
+                "Droid: its {name} goes in at {:.2} m/s and turns {turn:.0} degrees",
+                skid.entry * SCALE
+            ));
+            skids.insert(name, skid);
+        }
 
         Some(Self {
             upright: **graph[root].local_transform().rotation(),
@@ -1313,52 +1343,71 @@ impl Avatar {
         }
     }
 
-    /// Starts a skid if the droid is going flat out and the keys turn it round. Whether it did.
+    /// The fastest of its gaits the droid is going flat out at, going `speed` along the ground:
+    /// sprinting or running. None if it is going slower than either.
+    fn flat_out(&self, speed: f32) -> Option<Gait> {
+        [Gait::Sprinting, Gait::Running].into_iter().find(|&gait| {
+            self.cycles[..self.gaited]
+                .iter()
+                .find(|cycle| cycle.gait == Some(gait))
+                .is_some_and(|cycle| speed >= SKID_SPEED * cycle.speed)
+        })
+    }
+
+    /// Starts a skid if the droid is going flat out and the keys turn it sharply, or send it
+    /// nowhere. Whether it did.
     fn start_skid(&mut self, graph: &mut Graph, going: Going) -> bool {
         let Some(heading) = going.heading else {
             return false;
         };
         if going.posture != Posture::Standing
             || !going.grounded
-            || going.gait == Gait::Walking
             || going.strafing
+            || going.cover
+            || self.leaping.is_some()
         {
             return false;
         }
-        let pace = self.pace(Posture::Standing, going.gait).unwrap_or(f32::INFINITY);
-        if going.speed < SKID_SPEED * pace {
-            return false;
-        }
-        let Some(index) = skid_for(self.heading, heading) else {
+        let Some(gait) = self.flat_out(going.speed) else {
             return false;
         };
-        let Some(skid) = self.skids[index] else {
+        let Some((kind, names)) = skid_for(gait, self.heading, heading, going.pushing) else {
+            return false;
+        };
+        let Some((name, animation, entry)) = names.into_iter().find_map(|name| {
+            let skid = self.skids.get(name)?;
+            Some((name, skid.animation, skid.entry))
+        }) else {
             return false;
         };
         let Some(container) = self.container(graph) else {
             return false;
         };
-        let animation = &mut container[skid.animation];
+        let animation = &mut container[animation];
         animation.set_speed(1.0);
         animation.rewind();
-        animation.tick(0.0);
-        let last = self.skeleton.stance_in(animation, &self.rest);
-        // Going into it as fast as the body is going, so the feet carry on.
-        let rate = going.speed / skid.speed;
+        // Along the way the droid faces, and as far as makes it go in as fast as the body does.
+        let frame = graph[self.root].global_transform();
+        let scale = going.speed / entry;
+        let along = |axis: Vector3<f32>| {
+            let way = frame.transform_vector(&axis);
+            Vector3::new(way.x, 0.0, way.z).try_normalize(1.0e-6).unwrap_or_default() * scale
+        };
         self.skidding = Some(Skidding {
-            skid: index,
+            skid: name,
+            kind,
             heading: self.heading,
-            rate,
-            last,
-            velocity: Vector3::new(0.0, 0.0, going.speed / SCALE),
+            forward: along(Vector3::z()),
+            left: along(Vector3::x()),
+            last: Vector3::zeros(),
         });
+        self.stepping = None;
         self.fade_from_here(graph);
         true
     }
 
-    /// Plays the skid under way for another `dt`, swinging the droid round if the skid does not
-    /// do it by itself, and otherwise leaving it facing the way it faced as it began. False once
-    /// it is over.
+    /// Plays the skid under way for another `dt`, carrying the body along its path and swinging
+    /// the droid round with it. False once it is over, or cut short.
     fn skid(&mut self, graph: &mut Graph, going: Going, dt: f32) -> bool {
         let Some(mut skidding) = self.skidding else {
             return false;
@@ -1367,53 +1416,34 @@ impl Avatar {
             || !going.grounded
             || going.jumped
             || going.strafing
+            || going.cover
             || going.posture != Posture::Standing
+            || (skidding.kind == SkidKind::Stop && going.pushing)
         {
             return false;
         }
-        let Some(skid) = self.skids[skidding.skid] else {
+        let Some(skid) = self.skids.get(skidding.skid) else {
             return false;
         };
         let Some(container) = self.container(graph) else {
             return false;
         };
         let animation = &mut container[skid.animation];
-        if animation.time_position() >= skid.turned {
+        if animation.has_ended() {
             return false;
         }
-        animation.set_speed(skidding.rate);
         animation.tick(dt);
-        let time = animation.time_position();
+        // Made on the spot, so there is no travel to take out.
         let mut target = self.rest.clone();
         take_pose(animation, &mut target);
-        let now = self.skeleton.stance_in(animation, &self.rest);
-        self.hold_in_place(animation, &mut target, 0.0);
-        if let Some(spin) = skid.spin {
-            // The left skid swings round to the left, which is the positive way.
-            let way = if skidding.skid == 0 { 1.0 } else { -1.0 };
-            let round = way * std::f32::consts::PI * spun(time, spin);
-            self.heading = wrap(skidding.heading + round);
-            self.face(graph);
-        }
+        let at = skid.at(animation.time_position() - animation.time_slice().start);
+        self.heading = wrap(skidding.heading + at.z);
+        self.face(graph);
         if dt > 0.0 {
-            if let Some(stride) = stride(&skidding.last, &now, skid.ground) {
-                skidding.velocity = stride / dt;
-            }
-            // The model's terms, in the world, and as large - but turned as the droid was as it
-            // went in, however far it has swung round since: it slides on the way it was going.
-            let unturn = self.upright.inverse()
-                * UnitQuaternion::from_axis_angle(
-                    &Vector3::y_axis(),
-                    skidding.heading - self.heading,
-                )
-                * self.upright;
-            self.travel = Some(
-                graph[self.root]
-                    .global_transform()
-                    .transform_vector(&(unturn * skidding.velocity)),
-            );
+            let moved = at - skidding.last;
+            self.travel = Some((skidding.forward * moved.x + skidding.left * moved.y) / dt);
         }
-        skidding.last = now;
+        skidding.last = at;
         self.skidding = Some(skidding);
         self.put(graph, target, dt);
         true
@@ -1579,29 +1609,13 @@ impl Avatar {
         }
     }
 
-    /// Hands back from the skid under way, if any, to the cycles. However far the skid has turned
-    /// the bones round, rather than the droid, the droid is turned as far instead, and the bones
-    /// back again by as much, so that it stands just as it did.
+    /// Hands back from the skid under way, if any: from a stop to the idle, which it ends on, and
+    /// from a turn to the cycles, as it runs out - whichever goes with how fast the body is
+    /// going now.
     fn end_skid(&mut self, graph: &mut Graph) {
         if self.skidding.take().is_none() {
             return;
         }
-        let hips = place(&self.skeleton.hips, |bone| Bone::of(&graph[bone]));
-        let turned = yaw(hips.rotation * self.rest_hips.rotation.inverse());
-        let back = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), -turned);
-        for &(bone, above) in &self.tops {
-            // Turned back about the droid's own middle, in its own terms, and put back in those
-            // of the bone it hangs off.
-            let pose = Bone::of(&graph[bone]);
-            let position = back * (above.position + above.rotation * pose.position);
-            let rotation = back * above.rotation * pose.rotation;
-            let transform = graph[bone].local_transform_mut();
-            transform.set_position(above.rotation.inverse() * (position - above.position));
-            transform.set_rotation(above.rotation.inverse() * rotation);
-        }
-        // On top of however far the droid itself has been swung round.
-        self.heading = wrap(self.heading + turned);
-        self.face(graph);
         self.playing = None;
         self.rewind_idle(graph);
         self.fade_from_here(graph);
@@ -1656,18 +1670,63 @@ mod tests {
     }
 
     #[test]
-    fn it_skids_only_to_turn_round_and_the_short_way() {
+    fn it_skids_round_cuts_across_or_stops_and_the_short_way() {
         use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
-        let skid = |from: f32, to: f32| skid_for(from, to).map(|i| SKIDS[i]);
-        let (left, right) = (Some(SKIDS[0]), Some(SKIDS[1]));
-        assert_eq!(skid(0.0, FRAC_PI_2), None, "a quarter turn is only a turn");
-        assert_eq!(skid(0.0, 3.0 * FRAC_PI_4), left, "W to S+A");
-        assert_eq!(skid(0.0, -3.0 * FRAC_PI_4), right, "W to S+D");
-        assert!(skid(0.0, PI).is_some(), "W to S, one way or the other");
-        assert!(skid(FRAC_PI_4, -3.0 * FRAC_PI_4).is_some(), "W+A to S+D is straight back too");
+        let skid = |gait: Gait, from: f32, to: f32, pushing: bool| {
+            skid_for(gait, from, to, pushing).map(|(kind, names)| (kind, names[0]))
+        };
+        let running = |from: f32, to: f32| skid(Gait::Running, from, to, true);
+        let round = |name| Some((SkidKind::Round, name));
+        assert_eq!(running(0.0, FRAC_PI_4), None, "an eighth of the way round is only a turn");
+        assert_eq!(running(0.0, FRAC_PI_2), Some((SkidKind::Cut, CUTS[0])), "W to A");
+        assert_eq!(running(FRAC_PI_4, -FRAC_PI_4), Some((SkidKind::Cut, CUTS[1])), "W+A to W+D");
+        assert_eq!(running(0.0, 3.0 * FRAC_PI_4), round(TURNS[0][0]), "W to S+A");
+        assert_eq!(running(0.0, -3.0 * FRAC_PI_4), round(TURNS[0][1]), "W to S+D");
+        assert!(running(0.0, PI).is_some_and(|(kind, _)| kind == SkidKind::Round), "W to S");
         // Facing back-left, going forward-left is round to the right.
-        assert_eq!(skid(3.0 * FRAC_PI_4, FRAC_PI_4 - 0.2), None);
-        assert_eq!(skid(3.0 * FRAC_PI_4, -FRAC_PI_4 + 0.1), right);
+        assert_eq!(running(3.0 * FRAC_PI_4, -FRAC_PI_4 + 0.1), round(TURNS[0][1]));
+    }
+
+    #[test]
+    fn sprinting_it_skids_its_own_way_and_falls_back_on_the_run() {
+        use std::f32::consts::PI;
+        let (kind, names) = skid_for(Gait::Sprinting, 0.0, 0.9 * PI, true).unwrap();
+        assert_eq!((kind, names), (SkidKind::Round, [TURNS[1][0], TURNS[0][0]]));
+        let (_, names) = skid_for(Gait::Running, 0.0, 0.9 * PI, true).unwrap();
+        assert_eq!(names, [TURNS[0][0], TURNS[1][0]], "running, the run's first");
+    }
+
+    #[test]
+    fn letting_go_at_full_speed_stops_whichever_way_it_faced() {
+        for to in [0.0, 1.0, 3.0] {
+            assert_eq!(
+                skid_for(Gait::Sprinting, 0.0, to, false),
+                Some((SkidKind::Stop, [STOPS[1], STOPS[0]]))
+            );
+        }
+        assert_eq!(skid_for(Gait::Running, 0.0, 0.0, false).unwrap().1[0], STOPS[0]);
+    }
+
+    #[test]
+    fn a_skid_goes_along_its_path_between_frames_and_stays_at_the_end() {
+        let clip = Clip {
+            fps: 10.0,
+            forward_m: vec![0.0, 0.2, 0.3],
+            left_m: vec![0.0, 0.0, 0.1],
+            turn_left_deg: vec![0.0, 45.0, 90.0],
+        };
+        let skid = Skid::new(Handle::NONE, &clip).unwrap();
+        assert!((skid.entry - 2.0).abs() < 1e-5, "0.2 m in the first tenth of a second");
+        let halfway = skid.at(0.15);
+        assert!((halfway - Vector3::new(0.25, 0.05, 67.5f32.to_radians())).norm() < 1e-5);
+        assert_eq!(skid.at(5.0), skid.at(0.2), "stays where the last frame leaves it");
+        let on_the_spot = Clip {
+            forward_m: vec![0.0, 0.0],
+            left_m: vec![0.0, 0.0],
+            turn_left_deg: vec![0.0, 0.0],
+            ..clip
+        };
+        assert!(Skid::new(Handle::NONE, &on_the_spot).is_none(), "not going in on the move");
     }
 
     /// Standing with its hips at `hips` along the way, its left foot at `left` along the way and
@@ -1705,39 +1764,6 @@ mod tests {
             .collect();
         let pace = pace_of(&stances, ground(&stances)).unwrap();
         assert!((pace.z - 0.01 / SAMPLE).abs() < 1e-3, "{pace:?}");
-    }
-
-    #[test]
-    fn a_skid_is_swung_round_while_it_is_down_in_the_slide() {
-        // Running in at 1 m, down to 0.8 m from 0.4 s to 1.0 s, and back up.
-        let heights = [
-            (0.0, 1.0),
-            (0.2, 0.95),
-            (0.4, 0.85),
-            (0.6, 0.8),
-            (1.0, 0.85),
-            (1.2, 0.95),
-            (1.4, 1.0),
-        ];
-        assert_eq!(slide(&heights), Some((0.4, 1.0)));
-        // Hardly going down at all is running, not sliding.
-        assert_eq!(slide(&[(0.0, 1.0), (0.5, 0.98), (1.0, 1.0)]), None);
-    }
-
-    #[test]
-    fn it_swings_round_smoothly_from_start_to_finish() {
-        let spin = (0.4, 1.0);
-        assert_eq!(spun(0.0, spin), 0.0, "not yet");
-        assert!((spun(0.7, spin) - 0.5).abs() < 1e-5, "halfway at halfway");
-        assert_eq!(spun(2.0, spin), 1.0, "all the way round, and no further");
-        assert!(spun(0.45, spin) < 0.1 && spun(0.95, spin) > 0.9, "easing in and out");
-    }
-
-    #[test]
-    fn yaw_is_left_positive() {
-        let turn = |angle: f32| UnitQuaternion::from_axis_angle(&Vector3::y_axis(), angle);
-        assert!((yaw(turn(0.5)) - 0.5).abs() < 1e-5);
-        assert!((yaw(turn(-2.5)) + 2.5).abs() < 1e-5);
     }
 
     #[test]

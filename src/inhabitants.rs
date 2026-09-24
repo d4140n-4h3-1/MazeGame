@@ -433,6 +433,7 @@ impl Inhabitants {
                 low: false,
                 falling: 0.0,
                 cover: false,
+                pushing: true,
                 strafing: false,
                 way: 0.0,
             };

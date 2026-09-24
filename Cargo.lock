@@ -2661,6 +2661,8 @@ dependencies = [
  "fyrox",
  "fyrox-gfx",
  "fyrox-graphics-wgpu",
+ "serde",
+ "serde_json",
  "wgpu",
 ]
 

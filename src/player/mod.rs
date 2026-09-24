@@ -336,6 +336,7 @@ impl Player {
             jumped,
             low,
             cover: self.in_cover(),
+            pushing,
             falling: self.fall_speed,
             // In cover, the wall sets which way the droid faces.
             strafing: can_move && keys.strafe && !self.in_cover(),

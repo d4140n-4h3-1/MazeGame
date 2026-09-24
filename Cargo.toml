@@ -3,7 +3,7 @@ name = "maze"
 version = "0.1.0"
 edition = "2021"
 description = "A small first-person maze game on Fyrox, rendered with Vulkan."
-license = "MIT"
+license = "MIT AND CC-BY-SA-4.0"
 
 # A workspace of its own, like iapetus-vulkan: Cargo features add up across a workspace, and the
 # engine picks OpenGL whenever anything enables it.
@@ -15,6 +15,9 @@ fyrox = { git = "https://github.com/d4140n-4h3-1/Fyrox.git", branch = "vulkan", 
 # Only used to confirm at startup which graphics API the renderer actually got.
 fyrox-graphics-wgpu = { git = "https://github.com/d4140n-4h3-1/Fyrox.git", branch = "vulkan" }
 wgpu = "30"
+# Reading where the droid's skids take it, from the file made along with its animations.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 # Refractive glass and other graphics improvements kept outside the engine.
 fyrox-gfx = { git = "https://github.com/d4140n-4h3-1/fyrox-gfx.git", branch = "main", features = ["raytracing"] }
 

@@ -95,6 +95,13 @@ shadows (its `raytracing` feature).
   or crawling, each `_L`, `_R`, `_FL`, `_FR`, `_B`, `_BL` and `_BR`), turning only a few
   degrees whichever way it goes. Strafing, it does not skid. In cover the
   wall still sets which way it faces.
+- **Skids of every kind.** Running or sprinting flat out, the droid skids round out of a sprint in
+  a skid of its own (`droid_skid_sprint_turn_L`/`_R`), cuts across a quarter turn
+  (`droid_skid_turn90_L`/`_R`), and let go of, slides to a standstill (`droid_skid_stop`,
+  `droid_skid_sprint_stop`) and idles. Which it does goes by how fast it is going, not the keys
+  held. The skids are made on the spot, and `data/droid_motion.json`, exported along with them,
+  has where each takes the droid and how far round: the body follows that path, as far as it
+  goes for how fast the droid went in, and the droid swings round with it.
 
 22 September 2026:
 
@@ -243,8 +250,14 @@ and round planning, and the player's movement, breath, head motion, leaning and 
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
 | `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`) and the camera behind it (`third_person`). |
 
-The tile models and the droid (`droid_full_deform.glb`) are in `data/`.
+The tile models and the droid (`droid_full_deform.glb`) are in `data/`, along with where the
+droid's skids take it (`droid_motion.json`).
 
 ## License
 
-MIT.
+Copyright (c) 2026 VulpesPhantasma ([d4140n-4h3-1](https://github.com/d4140n-4h3-1) on GitHub).
+
+The code is under the MIT license (`LICENSE-MIT`). The models, animations and other files in
+`data/` are under Creative Commons Attribution-ShareAlike 4.0 International (`LICENSE-CC-BY-SA`):
+share and adapt them, crediting VulpesPhantasma (d4140n-4h3-1), with anything made from them
+shared under the same license.
