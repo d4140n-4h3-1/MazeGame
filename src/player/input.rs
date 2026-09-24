@@ -26,6 +26,8 @@ pub(super) struct Keys {
     cover: bool,
     /// Whether Tab has been pressed since the last update, to take cover or let go.
     pub(super) take_cover: bool,
+    /// Whether the right mouse button is down, to strafe.
+    pub(super) strafe: bool,
 }
 
 impl Player {
@@ -76,6 +78,12 @@ impl Player {
             }
             _ => (),
         }
+    }
+
+    /// Holds the right mouse button down, or lets it go: while it is down, the droid strafes,
+    /// facing ahead whichever way it goes.
+    pub fn set_strafing(&mut self, held: bool) {
+        self.keys.strafe = held;
     }
 
     pub fn release_keys(&mut self) {

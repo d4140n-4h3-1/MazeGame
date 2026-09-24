@@ -16,6 +16,9 @@
 //! Tab takes cover against the wall ahead, and A and D slide along it to its edge - see
 //! [`cover`].
 //!
+//! Holding the right mouse button strafes: the droid keeps facing ahead whichever way it goes -
+//! see [`avatar`].
+//!
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
 //!
@@ -319,6 +322,8 @@ impl Player {
         self.place_head(graph, dt);
         let gait = self.gait();
         let keys = &self.keys;
+        // Which way the body is going, from the way it faces: its left is +x.
+        let local = rotation.inverse() * horizontal;
         let going = Going {
             heading: can_move.then(|| {
                 self.cover_heading()
@@ -332,6 +337,9 @@ impl Player {
             low,
             cover: self.in_cover(),
             falling: self.fall_speed,
+            // In cover, the wall sets which way the droid faces.
+            strafing: can_move && keys.strafe && !self.in_cover(),
+            way: local.x.atan2(local.z),
         };
         if let Some(avatar) = self.avatar.as_mut() {
             avatar.animate(graph, going, dt);

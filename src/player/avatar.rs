@@ -12,19 +12,26 @@
 //! Shift. Crouching and crawling share the crouch, played faster for the quicker gaits and slower
 //! down on the floor. Standing still, the droid settles into its idle, or its rest pose if it has
 //! none; crouched, it holds the crouch where it stopped. Going from one cycle to another, it
-//! carries on at the same point in the stride.
+//! carries on at the same point in the stride, with the same foot down - whichever foot each
+//! cycle starts on.
 //!
 //! The droid turns to face the way the keys held send it - ahead, to either side, back, or along
 //! any of the diagonals between - turning the short way round; let go, it turns back to face
 //! ahead. The camera and the body stay facing straight ahead.
+//!
+//! Strafing, with the right mouse button held, it keeps facing ahead instead, and steps whichever
+//! way the body goes: forward, or sideways, back and along each diagonal in its strafes, walking,
+//! running, sprinting or crouched, crawling too. Whichever of those is nearest the way it is
+//! going, it turns only by what is left over, a few degrees. Without a strafe back it plays its
+//! cycle backwards, and without the others it turns as far as it has to, up to side on.
 //!
 //! Running or sprinting flat out, turning round - from going forward to going back, say - skids:
 //! the droid digs its feet in, slides to a stop and swings round, whichever way round is shorter,
 //! and sets off the other way. The skid carries the body while it lasts, as far and as fast as
 //! its feet slide, on the way it was going, and hands back to the cycles once the droid has swung
 //! round. A skid that swings the droid round by itself is left to; one made skidding to a stop
-//! on the spot is swung round here, while it is down in the slide. Leaving the ground or
-//! crouching cuts it short.
+//! on the spot is swung round here, while it is down in the slide. Leaving the ground,
+//! crouching or strafing cuts it short, and strafing the droid never skids.
 //!
 //! Jumping, the droid pushes off, flies with its legs tucked and takes the landing in its knees,
 //! standing or on the move as it is going at the time: from standing still it springs straight
@@ -72,6 +79,42 @@ const CYCLES: [(&str, Option<Gait>); 4] = [
     ("droid_sprint_cycle", Some(Gait::Sprinting)),
     ("droid_crouch_cycle", None),
 ];
+/// The droid's strafes, walking, running and crouched, each to its left and to its right,
+/// forward to its left and to its right, back, and back to its left and to its right.
+const STRAFES: [[&str; 7]; 3] = [
+    [
+        "droid_strafe_walk_L",
+        "droid_strafe_walk_R",
+        "droid_strafe_walk_FL",
+        "droid_strafe_walk_FR",
+        "droid_strafe_walk_B",
+        "droid_strafe_walk_BL",
+        "droid_strafe_walk_BR",
+    ],
+    [
+        "droid_strafe_run_L",
+        "droid_strafe_run_R",
+        "droid_strafe_run_FL",
+        "droid_strafe_run_FR",
+        "droid_strafe_run_B",
+        "droid_strafe_run_BL",
+        "droid_strafe_run_BR",
+    ],
+    [
+        "droid_strafe_crouch_L",
+        "droid_strafe_crouch_R",
+        "droid_strafe_crouch_FL",
+        "droid_strafe_crouch_FR",
+        "droid_strafe_crouch_B",
+        "droid_strafe_crouch_BL",
+        "droid_strafe_crouch_BR",
+    ],
+];
+/// The gait each row of [`STRAFES`] is for, like [`CYCLES`].
+const STRAFE_GAITS: [Option<Gait>; 3] = [Some(Gait::Walking), Some(Gait::Running), None];
+/// How much nearer the way it is going another step has to be, in radians, for the droid to
+/// change to it strafing, so that going just about halfway between two it does not keep changing.
+const STRAFE_MARGIN: f32 = 10.0 * std::f32::consts::PI / 180.0;
 /// The droid's skids round, to its left and to its right.
 const SKIDS: [&str; 2] = ["droid_skid_turn_L", "droid_skid_turn_R"];
 /// How far round the keys have to swing the droid, in radians, for it to skid: from ahead to
@@ -213,6 +256,40 @@ struct Cycle {
     /// How fast the droid goes over the ground as the cycle was made, with its feet keeping to
     /// the floor, in meters per second at the droid's size in the game.
     speed: f32,
+    /// Which way it carries the droid, in radians from ahead, left positive: ahead but for the
+    /// strafes.
+    way: f32,
+    /// How far through it, from 0 to 1, the left foot is down, like [`left_step`].
+    phase: f32,
+}
+
+/// Which way the droid steps, strafing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Ahead,
+    /// The cycle played backwards.
+    Back,
+    /// A strafe, any way round, as an index into `cycles`.
+    Strafe(usize),
+}
+
+/// Which of `steps`, each with the way it carries the droid, is nearest `way`, in radians: the
+/// first of the nearest, give or take a rounding, but keeping to `current` unless another is
+/// nearer by `STRAFE_MARGIN`.
+fn nearest<T: Copy + PartialEq>(way: f32, steps: &[(f32, T)], current: Option<T>) -> Option<T> {
+    let off = |step: f32| wrap(way - step).abs();
+    let (best, best_off) = steps
+        .iter()
+        .map(|&(step, t)| (t, off(step)))
+        .fold(None, |best: Option<(T, f32)>, (t, o)| match best {
+            Some((_, b)) if b <= o + 1.0e-3 => best,
+            _ => Some((t, o)),
+        })?;
+    let kept = current.and_then(|c| steps.iter().find(|&&(_, t)| t == c));
+    Some(match kept {
+        Some(&(step, t)) if off(step) <= best_off + STRAFE_MARGIN => t,
+        _ => best,
+    })
 }
 
 /// Where the hips and the feet are, in the model's own terms.
@@ -447,6 +524,11 @@ pub(crate) struct Going {
     pub(crate) falling: f32,
     /// Whether it is in cover, up against a wall.
     pub(crate) cover: bool,
+    /// Whether it is strafing: keeping facing ahead whichever way it goes.
+    pub(crate) strafing: bool,
+    /// Which way it is actually going along the ground, in radians from the way it faces, left
+    /// positive. Only strafing goes by it.
+    pub(crate) way: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -456,12 +538,20 @@ pub(crate) struct Avatar {
     upright: UnitQuaternion<f32>,
     animations: Handle<Node>,
     cycles: Vec<Cycle>,
+    /// How many of `cycles`, from the first, are the ones for the gaits; the rest are played
+    /// only in cover or strafing.
+    gaited: usize,
     /// Played standing still, when the droid has one.
     idle: Option<Handle<Animation>>,
     /// Played in cover in place of the idle, and of the walk, as an index into `cycles`, when
     /// the droid has them.
     cover_idle: Option<Handle<Animation>>,
     cover_walk: Option<usize>,
+    /// Its strafes walking, running and crouched, each way, as indexes into `cycles`, as far as
+    /// it has them: like [`STRAFES`].
+    strafes: [[Option<usize>; 7]; 3],
+    /// Which way it is stepping, strafing on the move.
+    stepping: Option<Step>,
     /// Whether it was in cover as of the last frame.
     covered: bool,
     /// Its skids round to the left and to the right, as far as it has them.
@@ -613,6 +703,28 @@ fn trim(animation: &mut Animation) {
     }
 }
 
+/// How far through the cycle made of `stances`, from 0 to 1, its left foot is down: the middle,
+/// going round, of the time it is lower than the right. None if it never is.
+fn left_step(stances: &[(f32, Stance)]) -> Option<f32> {
+    let (start, end) = (stances.first()?.0, stances.last()?.0);
+    if end <= start {
+        return None;
+    }
+    let (sin, cos) = stances
+        .iter()
+        .filter(|(_, stance)| stance.feet[0].y < stance.feet[1].y)
+        .map(|(time, _)| (time - start) / (end - start) * std::f32::consts::TAU)
+        .fold((0.0, 0.0), |(sin, cos), angle| (sin + angle.sin(), cos + angle.cos()));
+    (sin != 0.0 || cos != 0.0)
+        .then(|| sin.atan2(cos).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU)
+}
+
+/// How far through a cycle whose left foot is down `to` of the way through, from 0 to 1, has
+/// the same foot down as `through` of the way through one whose left foot is down `from`.
+fn in_step(through: f32, from: f32, to: f32) -> f32 {
+    (through - from + to).rem_euclid(1.0)
+}
+
 /// The time in `stances` at which the hips are at their lowest.
 fn lowest(stances: &[(f32, Stance)]) -> Option<f32> {
     stances
@@ -743,23 +855,24 @@ impl Avatar {
             animation.set_enabled(false);
             trim(animation);
         }
-        // How fast an animation carries the droid along the ground, forward, in meters per
-        // second at its size in the game.
-        let speed_of = |animation: &mut Animation| {
-            let stances: Vec<Stance> = skeleton
-                .stances(animation, &rest)
-                .into_iter()
-                .map(|(_, stance)| stance)
-                .collect();
-            pace_of(&stances, ground(&stances)).map(|pace| pace.z * SCALE)
+        // How fast an animation carries the droid along the ground, and which way, in meters per
+        // second at its size in the game; and how far through it the left foot is down.
+        let measure = |animation: &mut Animation| {
+            let timed = skeleton.stances(animation, &rest);
+            let stances: Vec<Stance> = timed.iter().map(|&(_, stance)| stance).collect();
+            let pace = pace_of(&stances, ground(&stances)).map(|pace| pace * SCALE);
+            (pace, left_step(&timed).unwrap_or(0.0))
         };
+        // How fast it carries the droid forward.
+        let speed_of = |animation: &mut Animation| measure(animation).0.map(|pace| pace.z);
         let mut cycles = Vec::new();
         for (name, gait) in CYCLES {
             let Some((handle, animation)) = container.find_by_name_mut(name) else {
                 warn(format!("Droid: it has no {name}"));
                 continue;
             };
-            let Some(speed) = speed_of(animation).filter(|s| *s > STILL) else {
+            let (pace, phase) = measure(animation);
+            let Some(speed) = pace.map(|pace| pace.z).filter(|s| *s > STILL) else {
                 warn(format!("Droid: its {name} goes nowhere"));
                 continue;
             };
@@ -768,11 +881,15 @@ impl Avatar {
                 animation: handle,
                 gait,
                 speed,
+                way: 0.0,
+                phase,
             });
         }
         if cycles.is_empty() {
             return None;
         }
+        // The rest are only ever played by name.
+        let gaited = cycles.len();
         // The highest bones the cycles move: the walk's, or whichever cycle came first.
         let tops: Vec<(Handle<Node>, Bone)> = {
             let animation = &mut container[cycles[0].animation];
@@ -792,15 +909,43 @@ impl Avatar {
         };
         // In cover: made or not yet, so there is nothing to warn about without them.
         let cover_walk = container.find_by_name_mut(COVER_WALK).and_then(|(handle, animation)| {
-            let speed = speed_of(animation).filter(|s| *s > STILL)?;
+            let (pace, phase) = measure(animation);
+            let speed = pace.map(|pace| pace.z).filter(|s| *s > STILL)?;
             info(format!("Droid: its {COVER_WALK} goes {speed:.2} m/s"));
             cycles.push(Cycle {
                 animation: handle,
                 gait: Some(Gait::Walking),
                 speed,
+                way: 0.0,
+                phase,
             });
             Some(cycles.len() - 1)
         });
+        let strafes: [[Option<usize>; 7]; 3] = std::array::from_fn(|row| STRAFES[row].map(|name| {
+            let Some((handle, animation)) = container.find_by_name_mut(name) else {
+                warn(format!("Droid: it has no {name}"));
+                return None;
+            };
+            let (pace, phase) = measure(animation);
+            let Some(pace) = pace.filter(|p| p.norm() > STILL) else {
+                warn(format!("Droid: its {name} goes nowhere"));
+                return None;
+            };
+            let way = pace.x.atan2(pace.z);
+            info(format!(
+                "Droid: its {name} goes {:.2} m/s, {:.0} degrees left of ahead",
+                pace.norm(),
+                way.to_degrees()
+            ));
+            cycles.push(Cycle {
+                animation: handle,
+                gait: STRAFE_GAITS[row],
+                speed: pace.norm(),
+                way,
+                phase,
+            });
+            Some(cycles.len() - 1)
+        }));
         let cover_idle = container.find_by_name_mut(COVER_IDLE).map(|(handle, animation)| {
             animation.set_loop(true);
             handle
@@ -870,9 +1015,12 @@ impl Avatar {
             root,
             animations,
             cycles,
+            gaited,
             idle,
             cover_idle,
             cover_walk,
+            strafes,
+            stepping: None,
             covered: false,
             skids,
             skidding: None,
@@ -893,7 +1041,7 @@ impl Avatar {
     }
 
     fn gaits(&self) -> Vec<Option<Gait>> {
-        self.cycles.iter().map(|c| c.gait).collect()
+        self.cycles[..self.gaited].iter().map(|c| c.gait).collect()
     }
 
     /// How fast the droid goes at `gait` in `posture`, in meters per second, with its feet
@@ -968,10 +1116,17 @@ impl Avatar {
     }
 
     /// Takes any travel built into `animation` back out of `target`: the hips stay where they
-    /// rest, going forward, and everything the highest bones it moves carry goes with them.
-    fn hold_in_place(&self, animation: &Animation, target: &mut FxHashMap<Handle<Node>, Bone>) {
+    /// rest along `way`, the way it carries the droid like [`Cycle::way`], and everything the
+    /// highest bones it moves carry goes with them.
+    fn hold_in_place(
+        &self,
+        animation: &Animation,
+        target: &mut FxHashMap<Handle<Node>, Bone>,
+        way: f32,
+    ) {
         let hips = place(&self.skeleton.hips, |bone| target[&bone]);
-        let drift = Vector3::new(0.0, 0.0, hips.position.z - self.rest_hips.position.z);
+        let along = Vector3::new(way.sin(), 0.0, way.cos());
+        let drift = along * (hips.position - self.rest_hips.position).dot(&along);
         for (bone, above) in &self.tops {
             if posed(animation, *bone).0.is_some() {
                 if let Some(pose) = target.get_mut(bone) {
@@ -1006,7 +1161,8 @@ impl Avatar {
             }
             self.end_skid(graph);
         }
-        self.turn(graph, going.heading.unwrap_or(0.0), dt);
+        let facing = self.facing_for(going);
+        self.turn(graph, facing, dt);
         if going.grounded {
             self.airborne = 0.0;
         } else {
@@ -1024,6 +1180,15 @@ impl Avatar {
         if going.cover && !crouched && wanted.is_some_and(walking) {
             wanted = self.cover_walk.or(wanted);
         }
+        // Strafing, sideways in a strafe, or back in the cycle played backwards.
+        let mut backwards = false;
+        if going.strafing && wanted.is_some() {
+            match self.stepping {
+                Some(Step::Strafe(strafe)) => wanted = Some(strafe),
+                Some(Step::Back) => backwards = true,
+                _ => (),
+            }
+        }
         // Standing still, going into cover or out of it changes one idle for the other.
         if wanted.is_none() && self.playing.is_none() && going.cover != self.covered {
             self.covered = going.cover;
@@ -1032,13 +1197,17 @@ impl Avatar {
         }
         self.covered = going.cover;
         if wanted != self.playing {
-            // The new cycle picks up at the same point in the stride, so the feet carry on.
+            // The new cycle picks up at the same point in the stride, with the same foot down, so
+            // the feet carry on.
             if let (Some(old), Some(new)) = (self.playing, wanted) {
-                let (old, new) = (self.cycles[old].animation, self.cycles[new].animation);
+                let (old, new) = (&self.cycles[old], &self.cycles[new]);
+                let (from, to) = (old.phase, new.phase);
+                let (old, new) = (old.animation, new.animation);
                 if let Some(container) = self.container(graph) {
                     let old = &container[old];
                     let through = (old.time_position() - old.time_slice().start) / old.length();
                     let new = &mut container[new];
+                    let through = in_step(through, from, to);
                     new.set_time_position(new.time_slice().start + through * new.length());
                 }
             }
@@ -1055,7 +1224,7 @@ impl Avatar {
             let Some(container) = self.container(graph) else {
                 return;
             };
-            let animation = &mut container[cycle.animation];
+            let (animation, way) = (&mut container[cycle.animation], cycle.way);
             // As fast as the floor goes by, so the feet stay on it. In the air, or crouched and
             // still, it is held where it is.
             let rate = if going.grounded {
@@ -1063,10 +1232,10 @@ impl Avatar {
             } else {
                 0.0
             };
-            animation.set_speed(rate);
+            animation.set_speed(if backwards { -rate } else { rate });
             animation.tick(dt);
             take_pose(animation, &mut target);
-            self.hold_in_place(animation, &mut target);
+            self.hold_in_place(animation, &mut target, way);
         } else if let Some(idle) = self.idle_now() {
             let Some(container) = self.container(graph) else {
                 return;
@@ -1077,6 +1246,53 @@ impl Avatar {
             take_pose(animation, &mut target);
         }
         self.put(graph, target, dt);
+    }
+
+    /// Which way the droid is to face from the way the body faces, in radians, left positive: the
+    /// way the keys send it, or strafing on the move, ahead but for what is left over by the
+    /// step nearest the way it is going. It faces the way the keys send it in the air, where
+    /// the jumps leap forward.
+    fn facing_for(&mut self, going: Going) -> f32 {
+        let heading = going.heading.unwrap_or(0.0);
+        if !going.strafing || going.heading.is_none() || self.leaping.is_some() {
+            self.stepping = None;
+            return heading;
+        }
+        if going.speed < STILL {
+            self.stepping = None;
+            return 0.0;
+        }
+        let steps = self.steps(going);
+        self.stepping = nearest(going.way, &steps, self.stepping);
+        let way = steps
+            .iter()
+            .find(|&&(_, step)| Some(step) == self.stepping)
+            .map_or(0.0, |&(way, _)| way);
+        wrap(going.way - way)
+    }
+
+    /// The ways the droid can step strafing, in what it is doing: ahead, every way it has a
+    /// strafe for its gait standing up, or crouched, and back in the cycle played backwards if
+    /// it has no strafe for that.
+    fn steps(&self, going: Going) -> Vec<(f32, Step)> {
+        let mut steps = vec![(0.0, Step::Ahead)];
+        // Crawling in the crouched ones, and sprinting in the run's; the walk's and the run's
+        // each stand in for the other.
+        let rows: &[usize] = match (going.posture, going.gait) {
+            (Posture::Standing, Gait::Walking) => &[0, 1],
+            (Posture::Standing, _) => &[1, 0],
+            _ => &[2],
+        };
+        for side in 0..STRAFES[0].len() {
+            if let Some(strafe) = rows.iter().find_map(|&row| self.strafes[row][side]) {
+                steps.push((self.cycles[strafe].way, Step::Strafe(strafe)));
+            }
+        }
+        let back = std::f32::consts::PI;
+        if !steps.iter().any(|&(way, _)| wrap(way - back).abs() < STRAFE_MARGIN) {
+            steps.push((back, Step::Back));
+        }
+        steps
     }
 
     /// The idle to play standing still: the one for cover, in cover, if the droid has it.
@@ -1102,7 +1318,11 @@ impl Avatar {
         let Some(heading) = going.heading else {
             return false;
         };
-        if going.posture != Posture::Standing || !going.grounded || going.gait == Gait::Walking {
+        if going.posture != Posture::Standing
+            || !going.grounded
+            || going.gait == Gait::Walking
+            || going.strafing
+        {
             return false;
         }
         let pace = self.pace(Posture::Standing, going.gait).unwrap_or(f32::INFINITY);
@@ -1146,6 +1366,7 @@ impl Avatar {
         if going.heading.is_none()
             || !going.grounded
             || going.jumped
+            || going.strafing
             || going.posture != Posture::Standing
         {
             return false;
@@ -1166,7 +1387,7 @@ impl Avatar {
         let mut target = self.rest.clone();
         take_pose(animation, &mut target);
         let now = self.skeleton.stance_in(animation, &self.rest);
-        self.hold_in_place(animation, &mut target);
+        self.hold_in_place(animation, &mut target, 0.0);
         if let Some(spin) = skid.spin {
             // The left skid swings round to the left, which is the positive way.
             let way = if skidding.skid == 0 { 1.0 } else { -1.0 };
@@ -1344,7 +1565,7 @@ impl Avatar {
         animation.tick(dt);
         let mut target = self.rest.clone();
         take_pose(animation, &mut target);
-        self.hold_in_place(animation, &mut target);
+        self.hold_in_place(animation, &mut target, 0.0);
         self.put(graph, target, dt);
         true
     }
@@ -1527,6 +1748,69 @@ mod tests {
         let (from, to) = (-3.0 * PI / 4.0, 3.0 * PI / 4.0);
         assert!((wrap(to - from) + PI / 2.0).abs() < 1e-5);
         assert!((wrap(PI + 0.1) - (-PI + 0.1)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn strafing_it_steps_the_nearest_way_and_keeps_to_it_near_halfway() {
+        use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let steps = [(0.0, "ahead"), (PI, "back"), (FRAC_PI_2, "left"), (-FRAC_PI_2, "right")];
+        let step = |way: f32, current: Option<&'static str>| nearest(way, &steps, current);
+        assert_eq!(step(0.1, None), Some("ahead"));
+        assert_eq!(step(-PI + 0.1, None), Some("back"), "round the back");
+        assert_eq!(step(FRAC_PI_2 + 0.3, None), Some("left"));
+        assert_eq!(step(-1.4, None), Some("right"));
+        // Exactly halfway, going ahead or back wins.
+        assert_eq!(step(FRAC_PI_4, None), Some("ahead"), "W+A");
+        assert_eq!(step(3.0 * FRAC_PI_4, None), Some("back"), "S+A");
+        // Just past halfway, it keeps to the step it is on; well past, it changes.
+        assert_eq!(step(FRAC_PI_4 + 0.05, Some("ahead")), Some("ahead"));
+        assert_eq!(step(FRAC_PI_4 + 0.15, Some("ahead")), Some("left"));
+        // Halfway give or take a rounding, still ahead.
+        assert_eq!(step(FRAC_PI_4 + 1.0e-5, None), Some("ahead"));
+        assert_eq!(nearest::<&str>(0.0, &[], None), None, "nothing to step");
+    }
+
+    #[test]
+    fn strafing_diagonally_forward_it_steps_the_diagonal() {
+        use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        // As the model has them: a little further round than they are meant to be.
+        let steps = [
+            (0.0, "ahead"),
+            (PI, "back"),
+            (1.62, "left"),
+            (-1.62, "right"),
+            (0.81, "forward left"),
+            (-0.81, "forward right"),
+        ];
+        let step = |way: f32| nearest(way, &steps, None);
+        assert_eq!(step(FRAC_PI_4), Some("forward left"), "W+A");
+        assert_eq!(step(-FRAC_PI_4), Some("forward right"), "W+D");
+        assert_eq!(step(FRAC_PI_2), Some("left"), "A");
+        assert_eq!(step(0.2), Some("ahead"), "nearly straight on");
+    }
+
+    #[test]
+    fn a_cycle_starting_on_the_other_foot_is_picked_up_half_a_stride_on() {
+        // The left foot down, and the right lifted, for the first half; then the other way.
+        let stances = |left_first: bool| -> Vec<(f32, Stance)> {
+            (0..=40)
+                .map(|i| {
+                    let first = i < 20;
+                    let (left, right) = if first == left_first { (0.0, 0.2) } else { (0.2, 0.0) };
+                    let mut stance = stance(0.0, 0.0, left);
+                    stance.feet[1].y = right;
+                    (i as f32 * 0.05, stance)
+                })
+                .collect()
+        };
+        let left = left_step(&stances(true)).unwrap();
+        let right = left_step(&stances(false)).unwrap();
+        assert!((left - 0.25).abs() < 0.02, "{left}");
+        assert!((right - 0.75).abs() < 0.02, "{right}");
+        // A tenth of the way into a stride on the left foot is six tenths into one on the right.
+        assert!((in_step(0.1, left, right) - 0.6).abs() < 0.02);
+        assert!((in_step(0.9, right, right) - 0.9).abs() < 1e-6, "same foot, same place");
+        assert!((in_step(0.9, left, right) - 0.4).abs() < 0.02, "round past the end");
     }
 
     #[test]

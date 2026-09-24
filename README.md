@@ -87,6 +87,15 @@ shadows (its `raytracing` feature).
 
 ### The game
 
+23 September 2026:
+
+- **Strafing.** Holding the right mouse button keeps the droid facing ahead whichever way it goes:
+  it steps sideways, back and along every diagonal in its new strafes (`droid_strafe_walk_*`,
+  `droid_strafe_run_*`, the run's standing in for a sprint, and `droid_strafe_crouch_*`, crouched
+  or crawling, each `_L`, `_R`, `_FL`, `_FR`, `_B`, `_BL` and `_BR`), turning only a few
+  degrees whichever way it goes. Strafing, it does not skid. In cover the
+  wall still sets which way it faces.
+
 22 September 2026:
 
 - **A droid to play as.** The player is seen from behind as a droid (`data/droid_full_deform.glb`),
@@ -157,6 +166,7 @@ well.
 | F                | Flashlight on or off                                          |
 | V                | Third person (behind the droid) or first person               |
 | Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
+| Right mouse (hold) | Strafe: keep facing ahead whichever way you go                |
 | R                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |

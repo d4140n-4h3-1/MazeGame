@@ -710,6 +710,21 @@ impl Plugin for MazeGame {
                     }
                 }
                 WindowEvent::MouseInput {
+                    button: MouseButton::Right,
+                    state,
+                    ..
+                } => {
+                    // Held, the droid strafes. Let go counts even with the menu open, so it is
+                    // not left strafing.
+                    let held = *state == ElementState::Pressed;
+                    if !held || (!self.menu.is_open() && self.mouse_captured) {
+                        self.player.set_strafing(held);
+                    }
+                    if held && !self.menu.is_open() {
+                        self.want_mouse = true;
+                    }
+                }
+                WindowEvent::MouseInput {
                     state: ElementState::Pressed,
                     ..
                 } => {
