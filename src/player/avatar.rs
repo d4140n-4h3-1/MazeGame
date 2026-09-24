@@ -51,7 +51,8 @@
 //! In cover against a wall, it plays its cover idle and its cover walk, edging along the wall,
 //! in place of the usual ones - once it has them. Until then it idles and walks as ever.
 //!
-//! It draws a pistol, aims it, fires it and holsters it again, with its upper body - from the
+//! It draws a pistol, holds it at the ready, raises it to aim and fires it, lowers it again a
+//! moment after the last shot unless it is held raised, and holsters it, with its upper body - from the
 //! middle of its back up - while its legs go on walking, running, strafing or standing as ever.
 //! The pistol shows partway through the draw and goes again partway through the holster, as
 //! [`MOTION`] says, and until then is out of sight in its right hand. Out, it follows the
@@ -265,6 +266,10 @@ fn green_glass(tint: f32, glow: f32) -> fyrox::material::MaterialResource {
 /// How quickly the turn that brings the barrel round to the camera catches up with how far it
 /// has to, like a rate: after 1/`AIM_FIX_RATE` seconds, about two thirds of the way.
 const AIM_FIX_RATE: f32 = 15.0;
+/// How long after the last shot the pistol is lowered to the ready again, unless it is held
+/// raised, in seconds; and how long going from one of its animations to the next takes.
+const READY_AFTER: f32 = 1.0;
+const ARMS_BLEND: f32 = 0.12;
 /// How long the upper body takes to go over to the pistol, or back, in seconds.
 const ARMS_FADE: f32 = 0.15;
 /// The rate the droid's animations were made at, in frames a second.
@@ -602,6 +607,14 @@ struct PistolClips {
     aim: String,
     fire: String,
     holster: String,
+    /// Holding it lower at the ready, and going from there to aiming and back; without them, it
+    /// aims all the while it is out.
+    #[serde(default)]
+    ready: Option<String>,
+    #[serde(default)]
+    ready_to_aim: Option<String>,
+    #[serde(default)]
+    aim_to_ready: Option<String>,
 }
 
 /// How far into an animation frame `frame` is, counted from one, in seconds.
@@ -618,11 +631,21 @@ struct Pistol {
     aim: Handle<Animation>,
     fire: Handle<Animation>,
     holster: Handle<Animation>,
+    /// Held at the ready, raised from there to aim, and lowered back, if it has them.
+    ready: Option<Ready>,
     /// How far into the draw it shows, into the holster it goes, and into firing the shot
     /// leaves, in seconds.
     show_at: f32,
     hide_after: f32,
     shot_at: f32,
+}
+
+/// The pistol's animations for holding it at the ready.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Ready {
+    ready: Handle<Animation>,
+    raise: Handle<Animation>,
+    lower: Handle<Animation>,
 }
 
 /// What the droid is doing with its pistol.
@@ -631,10 +654,32 @@ enum Arms {
     #[default]
     Holstered,
     Drawing,
+    /// Held lower, at the ready.
+    Ready,
+    /// From the ready up to aiming, and back down.
+    Raising,
+    Lowering,
     Aiming,
     /// Whether the shot has left yet.
     Firing(bool),
     Holstering,
+}
+
+/// What the player wants of the pistol, and how things stand with it, for [`next_arms`].
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct Wants {
+    /// The pistol out.
+    out: bool,
+    /// It raised to aim: the right mouse button held.
+    raised: bool,
+    /// A shot: the trigger pulled, now or while it was being raised.
+    trigger: bool,
+    /// Whether what it is playing has ended.
+    ended: bool,
+    /// Whether it has been long enough since the last shot to lower it.
+    rested: bool,
+    /// Whether it has a ready to lower it to.
+    can_ready: bool,
 }
 
 /// The pistol's screen, which flashes as the trigger is pulled.
@@ -704,18 +749,26 @@ fn pointing(pitch: f32, yaw: f32) -> Vector3<f32> {
     Vector3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos())
 }
 
-/// What the droid does with its pistol next, doing `arms` with the player wanting it out or not
-/// and pulling the trigger or not, with whatever it is playing `ended` or not. None to go on.
-fn next_arms(arms: Arms, wanted: bool, trigger: bool, ended: bool) -> Option<Arms> {
+/// What the droid does with its pistol next, doing `arms` with things as `wants` has them. None
+/// to go on. Drawn, it is held at the ready unless it is raised to aim or fired; the draw, the
+/// shots and the holster all go through aiming.
+fn next_arms(arms: Arms, wants: Wants) -> Option<Arms> {
+    let rise = wants.raised || wants.trigger;
     match arms {
-        Arms::Holstered => wanted.then_some(Arms::Drawing),
-        Arms::Holstering if wanted => Some(Arms::Drawing),
-        Arms::Holstering => ended.then_some(Arms::Holstered),
-        _ if !wanted => Some(Arms::Holstering),
-        Arms::Drawing => ended.then_some(Arms::Aiming),
+        Arms::Holstered => wants.out.then_some(Arms::Drawing),
+        Arms::Holstering if wants.out => Some(Arms::Drawing),
+        Arms::Holstering => wants.ended.then_some(Arms::Holstered),
+        _ if !wants.out => Some(Arms::Holstering),
+        Arms::Drawing if wants.ended && (wants.raised || !wants.can_ready) => Some(Arms::Aiming),
+        Arms::Drawing => wants.ended.then_some(Arms::Lowering),
+        Arms::Ready | Arms::Lowering if rise => Some(Arms::Raising),
+        Arms::Ready => None,
+        Arms::Lowering => wants.ended.then_some(Arms::Ready),
+        Arms::Raising => wants.ended.then_some(Arms::Aiming),
         // Once the shot has left, the trigger can go again.
-        Arms::Aiming | Arms::Firing(true) if trigger => Some(Arms::Firing(false)),
-        Arms::Firing(_) => ended.then_some(Arms::Aiming),
+        Arms::Aiming | Arms::Firing(true) if wants.trigger => Some(Arms::Firing(false)),
+        Arms::Firing(_) => wants.ended.then_some(Arms::Aiming),
+        Arms::Aiming if !wants.raised && wants.rested && wants.can_ready => Some(Arms::Lowering),
         Arms::Aiming => None,
     }
 }
@@ -893,6 +946,8 @@ pub(crate) struct Going {
     pub(crate) armed: bool,
     /// Whether the trigger was pulled this frame.
     pub(crate) trigger: bool,
+    /// Whether it wants the pistol raised to aim, rather than held at the ready.
+    pub(crate) raised: bool,
     /// Which way the camera looks, in radians from the body's ahead: up, and to the left.
     pub(crate) look: (f32, f32),
     /// Which way it is actually going along the ground, in radians from the way it faces, left
@@ -958,6 +1013,14 @@ pub(crate) struct Avatar {
     arms: Arms,
     /// How far over to the pistol the upper body is, from 0 to 1.
     arms_weight: f32,
+    /// Where the pistol had the upper body as it went from one of its animations to the next,
+    /// and how far through going over it is, from 0 to 1.
+    arms_from: FxHashMap<Handle<Node>, Bone>,
+    arms_blend: f32,
+    /// Whether a shot is waiting for the pistol to be raised; and how long since the last one,
+    /// in seconds.
+    queued: bool,
+    since_shot: f32,
     /// Where the pistol has every bone of the upper body, as of this frame.
     arms_pose: FxHashMap<Handle<Node>, Bone>,
     /// Which way the barrel pointed, across the world, as the trigger was last pulled.
@@ -1430,6 +1493,20 @@ impl Avatar {
                 };
                 let (draw, aim) = (find(&clips.draw, false), find(&clips.aim, true));
                 let (fire, holster) = (find(&clips.fire, false), find(&clips.holster, false));
+                let mut find_some = |name: &Option<String>, looped: bool| {
+                    name.as_deref().and_then(|name| find(name, looped))
+                };
+                let ready = match (
+                    find_some(&clips.ready, true),
+                    find_some(&clips.ready_to_aim, false),
+                    find_some(&clips.aim_to_ready, false),
+                ) {
+                    (Some(ready), Some(raise), Some(lower)) => Some(Ready { ready, raise, lower }),
+                    _ => {
+                        info("Droid: without a ready, its pistol aims all the while it is out".into());
+                        None
+                    }
+                };
                 match (draw, aim, fire, holster) {
                     (Some(draw), Some(aim), Some(fire), Some(holster)) => Some(Pistol {
                         node,
@@ -1438,6 +1515,7 @@ impl Avatar {
                         aim,
                         fire,
                         holster,
+                        ready,
                         show_at: frame_time(motion.show_frame),
                         hide_after: frame_time(motion.hide_after_frame),
                         shot_at: frame_time(motion.shot_frame),
@@ -1549,6 +1627,10 @@ impl Avatar {
             pistol,
             arms: Arms::Holstered,
             arms_weight: 0.0,
+            arms_from: Default::default(),
+            arms_blend: 1.0,
+            queued: false,
+            since_shot: READY_AFTER,
             arms_pose,
             barrel: Vector3::z(),
             shot: None,
@@ -1630,6 +1712,9 @@ impl Avatar {
         let clip = |arms: Arms| match arms {
             Arms::Holstered => None,
             Arms::Drawing => Some(pistol.draw),
+            Arms::Ready => pistol.ready.map(|ready| ready.ready),
+            Arms::Raising => pistol.ready.map(|ready| ready.raise),
+            Arms::Lowering => pistol.ready.map(|ready| ready.lower),
             Arms::Aiming => Some(pistol.aim),
             Arms::Firing(_) => Some(pistol.fire),
             Arms::Holstering => Some(pistol.holster),
@@ -1644,10 +1729,30 @@ impl Avatar {
             return;
         };
         let ended = clip(self.arms).is_some_and(|clip| container[clip].has_ended());
-        if let Some(mut next) = next_arms(self.arms, going.armed, going.trigger, ended) {
+        self.since_shot += dt;
+        // Pulled at the ready, or on the way up or down, the shot waits for the pistol to be up.
+        let waiting = matches!(self.arms, Arms::Ready | Arms::Raising | Arms::Lowering);
+        self.queued |= going.trigger && waiting;
+        let wants = Wants {
+            out: going.armed,
+            raised: going.raised,
+            trigger: going.trigger || self.queued,
+            ended,
+            rested: self.since_shot >= READY_AFTER,
+            can_ready: pistol.ready.is_some(),
+        };
+        if let Some(mut next) = next_arms(self.arms, wants) {
             // Put away before it was even in hand, there is nothing to holster.
             if next == Arms::Holstering && !shown {
                 next = Arms::Holstered;
+            }
+            if next == Arms::Holstering {
+                self.queued = false;
+            }
+            // From one of its animations to the next, the upper body goes over rather than jumps.
+            if clip(self.arms).is_some() {
+                self.arms_from.clone_from(&self.arms_pose);
+                self.arms_blend = 0.0;
             }
             if let Some(clip) = clip(next) {
                 let animation = &mut container[clip];
@@ -1660,6 +1765,8 @@ impl Avatar {
                 }
             }
             if next == Arms::Firing(false) {
+                self.queued = false;
+                self.since_shot = 0.0;
                 self.barrel = barrel.unwrap_or(self.barrel);
                 if let Some(flash) = self.flash.as_mut() {
                     flash.since = 0.0;
@@ -1673,11 +1780,20 @@ impl Avatar {
             animation.tick(dt);
             into = animation.time_position() - animation.time_slice().start;
             take_pose(animation, &mut self.arms_pose);
+            if self.arms_blend < 1.0 {
+                self.arms_blend = (self.arms_blend + dt / ARMS_BLEND).min(1.0);
+                let t = self.arms_blend * self.arms_blend * (3.0 - 2.0 * self.arms_blend);
+                for (bone, pose) in self.arms_pose.iter_mut() {
+                    if let Some(from) = self.arms_from.get(bone) {
+                        *pose = from.towards(*pose, t);
+                    }
+                }
+            }
         }
         let show = match self.arms {
             Arms::Holstered => false,
             Arms::Drawing => into >= pistol.show_at,
-            Arms::Aiming | Arms::Firing(_) => true,
+            Arms::Ready | Arms::Raising | Arms::Lowering | Arms::Aiming | Arms::Firing(_) => true,
             Arms::Holstering => into <= pistol.hide_after,
         };
         if show != shown {
@@ -1830,7 +1946,7 @@ impl Avatar {
                 let (left, right) = (aims.yaws.last().copied(), aims.yaws.first().copied());
                 let yaw = yaw.clamp(right.unwrap_or(yaw), left.unwrap_or(yaw));
                 let wanted = pointing(pitch.clamp(bottom, top), wrap(yaw + facing - self.heading));
-                if self.arms == Arms::Aiming {
+                if matches!(self.arms, Arms::Aiming | Arms::Ready) {
                     let barrel =
                         place(&self.barrel_chain, |bone| target[&bone]).rotation * Vector3::x();
                     if let Some(needed) = UnitQuaternion::rotation_between(&barrel, &wanted) {
@@ -2501,25 +2617,45 @@ mod tests {
     }
 
     #[test]
-    fn the_pistol_is_drawn_aimed_fired_and_holstered_in_turn() {
+    fn the_pistol_is_drawn_to_the_ready_raised_fired_and_holstered_in_turn() {
         use Arms::*;
-        // Wanted out: drawn, and aimed once the draw is over.
-        assert_eq!(next_arms(Holstered, true, false, false), Some(Drawing));
-        assert_eq!(next_arms(Drawing, true, false, false), None, "still drawing");
-        assert_eq!(next_arms(Drawing, true, false, true), Some(Aiming));
-        // The trigger fires only once it is drawn, and again only once the shot has left.
-        assert_eq!(next_arms(Drawing, true, true, false), None, "not drawn yet");
-        assert_eq!(next_arms(Aiming, true, true, false), Some(Firing(false)));
-        assert_eq!(next_arms(Firing(false), true, true, false), None, "the shot is yet to leave");
-        assert_eq!(next_arms(Firing(true), true, true, false), Some(Firing(false)));
-        assert_eq!(next_arms(Firing(true), true, false, true), Some(Aiming));
+        let wants = Wants { out: true, rested: true, can_ready: true, ..Default::default() };
+        let ended = Wants { ended: true, ..wants };
+        let raised = Wants { raised: true, ..wants };
+        let trigger = Wants { trigger: true, ..wants };
+        // Drawn, it comes down to the ready - or stays up, held raised.
+        assert_eq!(next_arms(Holstered, wants), Some(Drawing));
+        assert_eq!(next_arms(Drawing, wants), None, "still drawing");
+        assert_eq!(next_arms(Drawing, ended), Some(Lowering));
+        assert_eq!(next_arms(Drawing, Wants { raised: true, ..ended }), Some(Aiming));
+        assert_eq!(next_arms(Lowering, ended), Some(Ready));
+        // Raised to aim, or to fire; and lowered again, rested and let go.
+        assert_eq!(next_arms(Ready, wants), None, "at the ready");
+        assert_eq!(next_arms(Ready, raised), Some(Raising));
+        assert_eq!(next_arms(Ready, trigger), Some(Raising), "up to fire");
+        assert_eq!(next_arms(Lowering, trigger), Some(Raising), "back up halfway down");
+        assert_eq!(next_arms(Raising, Wants { ended: true, ..raised }), Some(Aiming));
+        assert_eq!(next_arms(Aiming, raised), None, "held up");
+        assert_eq!(next_arms(Aiming, Wants { rested: false, ..wants }), None, "just fired");
+        assert_eq!(next_arms(Aiming, wants), Some(Lowering), "let go, and rested");
+        // The trigger fires only once it is up, and again only once the shot has left.
+        assert_eq!(next_arms(Drawing, trigger), None, "not drawn yet");
+        assert_eq!(next_arms(Aiming, trigger), Some(Firing(false)));
+        assert_eq!(next_arms(Firing(false), trigger), None, "the shot is yet to leave");
+        assert_eq!(next_arms(Firing(true), trigger), Some(Firing(false)));
+        assert_eq!(next_arms(Firing(true), ended), Some(Aiming));
         // Put away from anything, and drawn again halfway through putting it away.
-        for arms in [Drawing, Aiming, Firing(false), Firing(true)] {
-            assert_eq!(next_arms(arms, false, false, false), Some(Holstering), "{arms:?}");
+        let away = Wants { out: false, ..wants };
+        for arms in [Drawing, Ready, Raising, Lowering, Aiming, Firing(false), Firing(true)] {
+            assert_eq!(next_arms(arms, away), Some(Holstering), "{arms:?}");
         }
-        assert_eq!(next_arms(Holstering, false, false, true), Some(Holstered));
-        assert_eq!(next_arms(Holstering, true, false, false), Some(Drawing));
-        assert_eq!(next_arms(Holstered, false, true, false), None, "no trigger holstered");
+        assert_eq!(next_arms(Holstering, Wants { ended: true, ..away }), Some(Holstered));
+        assert_eq!(next_arms(Holstering, wants), Some(Drawing));
+        assert_eq!(next_arms(Holstered, Wants { trigger: true, ..away }), None);
+        // Without a ready, it aims all the while it is out.
+        let no_ready = Wants { can_ready: false, ..ended };
+        assert_eq!(next_arms(Drawing, no_ready), Some(Aiming));
+        assert_eq!(next_arms(Aiming, Wants { can_ready: false, ..wants }), None);
     }
 
     #[test]

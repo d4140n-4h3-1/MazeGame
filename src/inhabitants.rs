@@ -437,6 +437,7 @@ impl Inhabitants {
                 strafing: false,
                 armed: false,
                 trigger: false,
+                raised: false,
                 look: (0.0, 0.0),
                 way: 0.0,
             };

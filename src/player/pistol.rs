@@ -1,5 +1,7 @@
 //! The pistol: R draws it and holsters it again; the left mouse button draws it too, and once it
-//! is drawn fires it. Drawn, the droid aims ahead and strafes, as with the right mouse button.
+//! is drawn fires it. Drawn, the droid holds it lower, at the ready, and strafes; the right mouse
+//! button raises it to aim, and a shot from the ready raises it, fires as soon as it is up, and
+//! lowers it again a moment later.
 //!
 //! A shot is a glowing green bolt that leaves the droid's muzzle as the droid fires, flies
 //! straight the way the gun was pointing (see [`Avatar::shot`](super::avatar::Avatar::shot)) -
@@ -43,7 +45,7 @@ const BOLT_LENGTH: f32 = 0.5;
 const BOLT_WIDTH: f32 = 0.05;
 /// The bolt's colour - the green of the ball at the muzzle - and how brightly it glows by itself.
 const BOLT_COLOR: Color = Color::opaque(40, 255, 60);
-const BOLT_GLOW: f32 = 4.0;
+const BOLT_GLOW: f32 = 10.0;
 /// How far the flash a bolt carries lights, in meters, and how brightly.
 const FLASH_REACH: f32 = 5.0;
 const FLASH_BRIGHTNESS: f32 = 3.0;
@@ -95,11 +97,14 @@ impl Bolts {
         ));
         let bolts = (0..BOLTS)
             .map(|_| {
-                // The flash rides with the bolt, and shows and goes with it.
+                // The flash rides with the bolt, and shows and goes with it. It lights what is
+                // round the bolt, but does not scatter into a haze in the air: the bolt is what
+                // glows.
                 let flash: Handle<Node> = PointLightBuilder::new(
                     BaseLightBuilder::new(BaseBuilder::new())
                         .with_color(BOLT_COLOR)
-                        .with_intensity(FLASH_BRIGHTNESS),
+                        .with_intensity(FLASH_BRIGHTNESS)
+                        .with_scatter_enabled(false),
                 )
                 .with_radius(FLASH_REACH)
                 .build(graph)

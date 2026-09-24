@@ -4132,7 +4132,10 @@
    "draw": "droid_pistol_draw",
    "aim": "droid_pistol_aim",
    "fire": "droid_pistol_fire",
-   "holster": "droid_pistol_holster"
+   "holster": "droid_pistol_holster",
+   "ready": "droid_pistol_ready",
+   "ready_to_aim": "droid_pistol_ready_to_aim",
+   "aim_to_ready": "droid_pistol_aim_to_ready"
   },
   "show_frame": 6,
   "hide_after_frame": 9,

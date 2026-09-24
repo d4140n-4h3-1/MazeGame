@@ -94,7 +94,10 @@ shadows (its `raytracing` feature).
   mouse button, its upper body in the pistol's poses (`droid_pistol_draw`, `_aim`, `_fire`,
   `_holster`) while its legs walk, run or stand as ever. The pistol shows and goes partway
   through the draw and the holster, as `data/droid_motion.json` says, and is out of sight in
-  its hand until then. Drawn, the pistol follows the camera: the droid's upper body leans it
+  its hand until then. Drawn, it is held lower, at the ready (`droid_pistol_ready`); holding
+  the right mouse button raises it to aim, and a shot from the ready raises it, fires as soon as
+  it is up and lowers it again a second after the last shot. Raised or at the ready, the pistol
+  follows the camera: the droid's upper body leans it
   up, down and round towards wherever the camera looks, up to 60 degrees each way, blending the
   model's aims (`droid_pistol_aim_*`, laid out in `droid_motion.json`). A shot is a glowing bolt
   from the muzzle that flies the way the gun points and stops at the first thing it hits,
@@ -198,6 +201,7 @@ well.
 | Right mouse (hold) | Strafe: keep facing ahead whichever way you go; Shift only runs |
 | R                | Draw the pistol, or holster it                                |
 | Left mouse       | Draw the pistol; once it is drawn, fire                       |
+| Right mouse, drawn | Raise the pistol to aim, rather than hold it at the ready   |
 | N                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |

@@ -361,6 +361,7 @@ impl Player {
             strafing: can_move && self.strafing() && !self.in_cover(),
             armed: self.armed,
             trigger: can_move && keys.trigger,
+            raised: can_move && keys.strafe,
             look: (look.y.clamp(-1.0, 1.0).asin(), look.x.atan2(look.z)),
             way: local.x.atan2(local.z),
         };
