@@ -17,7 +17,10 @@
 //! [`cover`].
 //!
 //! Holding the right mouse button strafes: the droid keeps facing ahead whichever way it goes -
-//! see [`avatar`].
+//! see [`avatar`]. A sprint slows to a run while it does, and picks up again when it is let go.
+//!
+//! R draws the pistol and holsters it again, and the left mouse button draws it and then fires
+//! it - see [`pistol`].
 //!
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
@@ -47,6 +50,7 @@ mod head;
 mod input;
 mod lean;
 mod movement;
+mod pistol;
 pub(crate) mod posture;
 mod third_person;
 mod view;
@@ -138,6 +142,10 @@ pub struct Player {
     orbit: Orbit,
     /// Where the droid's feet were the last time the graphics effects were told.
     last_seen: Option<Vector3<f32>>,
+    /// Whether the player wants the pistol out.
+    armed: bool,
+    /// The pistol's shots.
+    bolts: pistol::Bolts,
     keys: Keys,
 }
 
@@ -174,6 +182,8 @@ impl Default for Player {
             boom: BOOM_LENGTH,
             orbit: Orbit::default(),
             last_seen: None,
+            armed: false,
+            bolts: Default::default(),
             keys: Default::default(),
         }
     }
@@ -241,6 +251,7 @@ impl Player {
             collider,
             camera,
             flashlight,
+            bolts: pistol::Bolts::new(graph),
             ..Default::default()
         }
     }
@@ -256,6 +267,7 @@ impl Player {
 
     pub fn teleport(&mut self, graph: &mut Graph, position: Vector3<f32>, yaw: f32) {
         self.start_fresh(yaw);
+        self.bolts.clear(graph);
         let body = &mut graph[self.body];
         body.set_gravity_scale(1.0);
         body.set_lin_vel(Vector3::zeros());
@@ -283,6 +295,7 @@ impl Player {
         self.boom = BOOM_LENGTH;
         // A new round puts the body somewhere else rather than moving it there.
         self.last_seen = None;
+        self.armed = false;
     }
 
     /// Applies input for this frame. With `can_move` off the player only looks around.
@@ -324,6 +337,12 @@ impl Player {
         let keys = &self.keys;
         // Which way the body is going, from the way it faces: its left is +x.
         let local = rotation.inverse() * horizontal;
+        // Which way the camera looks, likewise, as of the last frame: for the pistol to follow.
+        let look = rotation.inverse()
+            * graph[self.camera.transmute::<Node>()]
+                .look_vector()
+                .try_normalize(1.0e-6)
+                .unwrap_or_else(Vector3::z);
         let going = Going {
             heading: can_move.then(|| {
                 self.cover_heading()
@@ -339,12 +358,22 @@ impl Player {
             pushing,
             falling: self.fall_speed,
             // In cover, the wall sets which way the droid faces.
-            strafing: can_move && keys.strafe && !self.in_cover(),
+            strafing: can_move && self.strafing() && !self.in_cover(),
+            armed: self.armed,
+            trigger: can_move && keys.trigger,
+            look: (look.y.clamp(-1.0, 1.0).asin(), look.x.atan2(look.z)),
             way: local.x.atan2(local.z),
         };
+        self.keys.trigger = false;
         if let Some(avatar) = self.avatar.as_mut() {
             avatar.animate(graph, going, dt);
         }
+        self.shoot(graph, dt);
+    }
+
+    /// Whether the droid strafes: with the right mouse button held, or the pistol out.
+    fn strafing(&self) -> bool {
+        self.keys.strafe || self.armed
     }
 
     /// How fast the player goes at `gait` in the posture they are in, in meters per second: as

@@ -87,19 +87,41 @@ shadows (its `raytracing` feature).
 
 ### The game
 
+24 September 2026:
+
+- **A pistol.** R draws the droid's pistol and holsters it again; the left mouse button draws it
+  too, and once it is drawn fires it. Drawn, the droid aims ahead and strafes as with the right
+  mouse button, its upper body in the pistol's poses (`droid_pistol_draw`, `_aim`, `_fire`,
+  `_holster`) while its legs walk, run or stand as ever. The pistol shows and goes partway
+  through the draw and the holster, as `data/droid_motion.json` says, and is out of sight in
+  its hand until then. Drawn, the pistol follows the camera: the droid's upper body leans it
+  up, down and round towards wherever the camera looks, up to 60 degrees each way, blending the
+  model's aims (`droid_pistol_aim_*`, laid out in `droid_motion.json`). A shot is a glowing bolt
+  from the muzzle that flies the way the gun points and stops at the first thing it hits,
+  harming nothing yet. The
+  bolt is green and carries a green light with it, lighting up the droid as it leaves and
+  everything it passes in the dark. The pistol's screen, see-through green glass, flashes with
+  each pull of the trigger; the ball at its muzzle - a glowing core in a see-through green
+  shell - shows all the while the pistol is out, the core and the shell tumbling every way
+  round, each the opposite way to the other.
+- **Square to the front.** Strafing, or with the pistol drawn, the droid's face and shoulders
+  stay square to straight ahead, however its hips turn to the way it steps.
+- **N for a new maze**, since R is the pistol's now.
+
 23 September 2026:
 
 - **Strafing.** Holding the right mouse button keeps the droid facing ahead whichever way it goes:
   it steps sideways, back and along every diagonal in its new strafes (`droid_strafe_walk_*`,
-  `droid_strafe_run_*`, the run's standing in for a sprint, and `droid_strafe_crouch_*`, crouched
-  or crawling, each `_L`, `_R`, `_FL`, `_FR`, `_B`, `_BL` and `_BR`), turning only a few
-  degrees whichever way it goes. Strafing, it does not skid. In cover the
+  `droid_strafe_run_*` and `droid_strafe_crouch_*`, crouched or crawling, each `_L`, `_R`,
+  `_FL`, `_FR`, `_B`, `_BL` and `_BR`), turning only a few degrees whichever way it goes.
+  Strafing, a sprint slows to a run, picking up again once the button is let go, and the droid
+  does not skid. In cover the
   wall still sets which way it faces.
-- **Skids of every kind.** Running or sprinting flat out, the droid skids round out of a sprint in
-  a skid of its own (`droid_skid_sprint_turn_L`/`_R`), cuts across a quarter turn
-  (`droid_skid_turn90_L`/`_R`), and let go of, slides to a standstill (`droid_skid_stop`,
-  `droid_skid_sprint_stop`) and idles. Which it does goes by how fast it is going, not the keys
-  held. The skids are made on the spot, and `data/droid_motion.json`, exported along with them,
+- **Skids of every kind, sprinting only.** Sprinting flat out, the droid skids round
+  (`droid_skid_sprint_turn_L`/`_R`) and runs out through the run, cuts across a quarter turn
+  (`droid_skid_sprint_turn90_L`/`_R`), and let go of, slides to a standstill
+  (`droid_skid_sprint_stop`) and idles. Running, it no longer skids at all. Whether it is
+  sprinting goes by how fast it is going, not the keys held. The skids are made on the spot, and `data/droid_motion.json`, exported along with them,
   has where each takes the droid and how far round: the body follows that path, as far as it
   goes for how fast the droid went in, and the droid swings round with it.
 
@@ -173,8 +195,10 @@ well.
 | F                | Flashlight on or off                                          |
 | V                | Third person (behind the droid) or first person               |
 | Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
-| Right mouse (hold) | Strafe: keep facing ahead whichever way you go                |
-| R                | New maze                                                      |
+| Right mouse (hold) | Strafe: keep facing ahead whichever way you go; Shift only runs |
+| R                | Draw the pistol, or holster it                                |
+| Left mouse       | Draw the pistol; once it is drawn, fire                       |
+| N                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |
 | Escape           | Pause                                                         |
@@ -188,7 +212,7 @@ window in the middle of a round pauses it too. The menu has:
 - **Lights**: switch the maze's lights off, or back on. Off, the lamps, the glow of their
   fixtures, the sun and nearly all the ambient light go out, leaving your flashlight and the
   exit's own glow. The setting carries over to each new maze.
-- **New maze**: the same as R. **New round** when playing a fixed maze model.
+- **New maze**: the same as N. **New round** when playing a fixed maze model.
 - **Quit**.
 
 ## Options

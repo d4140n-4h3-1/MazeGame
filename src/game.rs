@@ -414,7 +414,7 @@ impl MazeGame {
                 self.show_look_settings();
             }
             KeyCode::Escape => self.set_paused(ctx, !self.menu.is_open()),
-            KeyCode::KeyR => self.restart(ctx),
+            KeyCode::KeyN => self.restart(ctx),
             _ => (),
         }
     }
@@ -706,6 +706,20 @@ impl Plugin for MazeGame {
                         self.player.set_orbiting(held);
                     }
                     if held && !self.menu.is_open() {
+                        self.want_mouse = true;
+                    }
+                }
+                WindowEvent::MouseInput {
+                    button: MouseButton::Left,
+                    state: ElementState::Pressed,
+                    ..
+                } => {
+                    // The click that takes the mouse is only for that; after it, the left button
+                    // is the pistol's.
+                    if !self.menu.is_open() {
+                        if self.mouse_captured {
+                            self.player.pull_trigger();
+                        }
                         self.want_mouse = true;
                     }
                 }

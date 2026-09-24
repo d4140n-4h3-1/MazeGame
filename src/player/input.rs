@@ -1,5 +1,5 @@
-//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z, F, V and Tab each
-//! act once per press, however long the key is held.
+//! The keys the player moves with, and the toggles among them: Caps Lock, C, Z, F, V, Tab and R
+//! each act once per press, however long the key is held.
 
 use super::Player;
 use fyrox::keyboard::KeyCode;
@@ -28,6 +28,10 @@ pub(super) struct Keys {
     pub(super) take_cover: bool,
     /// Whether the right mouse button is down, to strafe.
     pub(super) strafe: bool,
+    /// Whether R is down, so that key repeat does not draw or holster the pistol again.
+    pistol: bool,
+    /// Whether the trigger has been pulled since the last update.
+    pub(super) trigger: bool,
 }
 
 impl Player {
@@ -69,6 +73,12 @@ impl Player {
                     self.keys.take_cover = true;
                 }
                 self.keys.cover = pressed;
+            }
+            KeyCode::KeyR => {
+                if pressed && !self.keys.pistol {
+                    self.toggle_pistol();
+                }
+                self.keys.pistol = pressed;
             }
             KeyCode::KeyZ => {
                 if pressed && !self.keys.crawl {
@@ -181,6 +191,16 @@ mod tests {
         assert_eq!(player.gait(), Gait::Sprinting, "sprinting from a run");
         player.on_key(KeyCode::ShiftLeft, false);
         assert_eq!(player.gait(), Gait::Running, "running again once Shift is let go");
+    }
+
+    #[test]
+    fn strafing_a_sprint_slows_to_a_run_until_it_is_let_go() {
+        let mut player = Player::default();
+        player.on_key(KeyCode::ShiftLeft, true);
+        player.set_strafing(true);
+        assert_eq!(player.gait(), Gait::Running, "Shift only runs, strafing");
+        player.set_strafing(false);
+        assert_eq!(player.gait(), Gait::Sprinting, "Shift is still held");
     }
 
     #[test]
