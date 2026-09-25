@@ -104,6 +104,11 @@ pub(crate) enum Gait {
 }
 
 impl Player {
+    /// How the player holds themselves.
+    pub(crate) fn posture(&self) -> Posture {
+        self.posture
+    }
+
     /// How fast the player is going: sprinting while Shift is held, and otherwise whichever of
     /// walking and running Caps Lock last left them in. Strafing, or with the pistol out, Shift
     /// only runs. Out of breath, or edging along a wall in cover, they only walk.

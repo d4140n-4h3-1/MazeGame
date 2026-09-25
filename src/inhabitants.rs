@@ -19,6 +19,37 @@
 //! still and turns to face them, and afterwards stands a moment before going on its way. One of
 //! them does not wander at all: it stands just in front of where the player starts, and stays
 //! there, so that there is always someone near to talk to.
+//!
+//! A conversation can turn a droid hostile (see [`Inhabitants::set_hostile`]), and a hostile
+//! droid hunts the player the way Metal Gear's guards do, through its [`Alert`] phases:
+//!
+//! - **Alert**: it can see the player, and after a first moment runs at them. If it gets close
+//!   enough, it has caught them.
+//! - **Evasion**: it has lost them. It runs to where they were going when it last saw them, and
+//!   looks about; then walks to one spot after another nearby, looking about at each, until
+//!   [`EVASION`] seconds are up.
+//! - **Caution**: it has given up, and wanders as before, but watching for the player still,
+//!   for [`CAUTION`] seconds; then it is calm again, and can be talked to once more.
+//!
+//! Out of Alert, a droid sees only what is in front of it, and not as far as it could: a player
+//! crouched is seen from half as far, and one crawling from less than a third. Anyone right next
+//! to it, it notices whichever way it faces. With the lights off it sees a good deal less far in
+//! any phase - unless the player's flashlight is on. Seeing the player again, it is back on
+//! Alert, and a bolt from the pistol has it search where the shot came from.
+//!
+//! Out of Alert, it also listens (see [`Inhabitants::hear`]): a noise that carries as far as it
+//! is, along the corridors, has it run to where the noise was and search from there.
+//!
+//! Hostile, it cannot be talked to any more, but after [`HITS`] bolts it goes down, crouched
+//! with its eyes dark, and stays there.
+//!
+//! A droid that is not hostile minds having the player's pistol pointed at it (see
+//! [`Inhabitants::feel_aimed_at`]): for as long as its kind stands for it, and then it stops,
+//! faces the player and warns them. Each warning then holds for [`WARNING`] seconds more, time
+//! to say it and for the player to take it in, before the next: the last warning, and then
+//! being provoked. What it does then is up to its kind: it turns hostile, or sounds the alarm
+//! (see [`Inhabitants::raise_alarm`]) for those near it that would. Looking away only holds the
+//! next stage off; with the pistol off it for [`CALM`] seconds, it calms down again.
 
 use crate::{
     layout::{Rng, WalkGrid},
@@ -35,7 +66,7 @@ use fyrox::{
     resource::model::ModelResource,
     scene::{
         base::BaseBuilder,
-        collider::{ColliderBuilder, ColliderShape},
+        collider::{Collider, ColliderBuilder, ColliderShape},
         graph::Graph,
         node::Node,
         rigidbody::{RigidBody, RigidBodyBuilder, RigidBodyType},
@@ -96,10 +127,107 @@ const TALK_CONE: f32 = 40.0 * std::f32::consts::PI / 180.0;
 const MEET_AT: [f32; 3] = [2.2, 1.8, 1.4];
 /// Where a droid's face is above its feet, in meters, if its model has no head to go by.
 const FACE_HEIGHT: f32 = 1.6;
+/// Its running pace, in meters per second, if the droid has no run to go by.
+const FALLBACK_RUN: f32 = 2.0;
+/// How long a droid that has just turned hostile stands before it goes after the player, in
+/// seconds: long enough to finish its threat, and for the player to start running.
+const WINDUP: f32 = 1.0;
+/// How far off a hostile droid can see the player, in meters.
+const SIGHT: f32 = 30.0;
+/// How far to either side of straight ahead a droid that is not on Alert sees, in radians.
+const VIEW_CONE: f32 = 55.0 * std::f32::consts::PI / 180.0;
+/// How near the player has to be, in meters, for such a droid to notice them whichever way it
+/// faces.
+const NOTICE: f32 = 1.5;
+/// How much of [`SIGHT`] a droid that is not on Alert sees a player crouched and crawling from.
+const CROUCHED_SIGHT: f32 = 0.5;
+const CRAWLING_SIGHT: f32 = 0.3;
+/// How much of how far it would see, it sees with the lights off and no flashlight on.
+const DARK_SIGHT: f32 = 0.35;
+/// How long after hearing something a droid pays no heed to another noise, in seconds, but to
+/// go on to where that one was.
+const HEARING_REST: f32 = 3.0;
+/// How long a droid searches for the player once it has lost them, in seconds, and how long it
+/// stays wary after that.
+pub const EVASION: f32 = 30.0;
+pub const CAUTION: f32 = 60.0;
+/// How far ahead of where it last saw the player it looks for them first, in meters, the way
+/// they were going.
+const GUESS: f32 = 4.0;
+/// How long it looks about at each spot it searches, in seconds, and how far either way it turns
+/// looking, in radians.
+const LOOK_ABOUT: f32 = 3.0;
+const LOOK_SWEEP: f32 = 70.0 * std::f32::consts::PI / 180.0;
+/// How far each spot it searches is from the last, in steps across the grid, from least to most.
+const SEARCH_TRIP: (f32, f32) = (10.0, 40.0);
+/// How far off, in meters, the pistol pointed at a droid bothers it, and how far to the side of
+/// the middle of the view it can be, in meters, for the pistol to count as pointed at it.
+const AIM_RANGE: f32 = 20.0;
+const AIM_WIDTH: f32 = 0.6;
+/// How far above its feet, in meters, the middle of the view is taken to be pointed at a droid.
+const CHEST: f32 = 1.2;
+/// How long each warning holds, in seconds, on top of how long the droid stands for the pistol
+/// in the first place, before it goes on to the next; and how long the pistol has to be off it,
+/// in seconds, for it to calm down again.
+const WARNING: f32 = 2.5;
+const CALM: f32 = 2.5;
+/// How far off, in meters, droids that answer an alarm hear it.
+const ALARM_RANGE: f32 = 40.0;
+/// How often a hostile droid that can see the player works out its way to them again, in
+/// seconds.
+const REPLAN: f32 = 0.4;
+/// How far it looks for a way to the player, in steps across the grid's half-meter cells.
+const CHASE_REACH: f32 = 200.0;
+/// How near the player's feet, in meters, a hostile droid's have to get to catch them - short of
+/// their bodies touching - and how far above or below.
+const CATCH: f32 = 0.9;
+const CATCH_HEIGHT: f32 = 1.0;
+/// How many of the pistol's bolts it takes to stop a hostile droid.
+pub const HITS: u32 = 3;
+/// How tall a droid that has been stopped is, crouched, in meters.
+const DOWN_HEIGHT: f32 = 1.1;
+
+/// How a hostile droid is going about the player: Metal Gear's phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Alert {
+    /// It has given up searching for them, and wanders, watching for them.
+    Caution,
+    /// It has lost them, and is searching.
+    Evasion,
+    /// It can see them, and is after them.
+    Alert,
+}
+
+/// How a droid takes having the pistol pointed at it, as it goes from one stage to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Threat {
+    /// It stops, faces the player and warns them.
+    Warned,
+    /// It warns them for the last time.
+    WarnedAgain,
+    /// It has stood for it long enough: its kind does something about it.
+    Provoked,
+    /// The pistol has been lowered long enough for it to calm down again.
+    Calmed,
+}
+
+/// What came of moving everyone along.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct News {
+    /// The droid that caught the player, if one did.
+    pub caught: Option<usize>,
+    /// The droids whose phase changed, as indices, and what to: none for calm again.
+    pub alerts: Vec<(usize, Option<Alert>)>,
+    /// The droids that heard the player, and are searching where.
+    pub heard: Vec<usize>,
+    /// The droids that answered an alarm, and are searching where the player was.
+    pub alarmed: Vec<usize>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 struct Inhabitant {
     body: Handle<Node>,
+    collider: Handle<Collider>,
     avatar: Avatar,
     /// Where its feet are.
     feet: Vector3<f32>,
@@ -122,12 +250,48 @@ struct Inhabitant {
     talking: bool,
     /// Whether it stays where it was put, near where the player starts, rather than wandering.
     stays: bool,
+    /// How it is going about the player, once it has turned on them.
+    alert: Option<Alert>,
+    /// Whether, being hostile, it can see the player, as of this frame.
+    sees_player: bool,
+    /// Where it last saw the player's feet, and which way they were going then, roughly.
+    lost_at: Vector3<f32>,
+    lost_going: Vector3<f32>,
+    /// How long it has left to search, or to stay wary, in seconds.
+    search_left: f32,
+    /// How many spots it has set off to search since it lost the player.
+    searched: u32,
+    /// How long it has left looking about where it is, in seconds, while it is, and which way it
+    /// faced as it started.
+    looking: Option<f32>,
+    look_from: f32,
+    /// How long before it heeds another noise, in seconds.
+    deaf: f32,
+    /// How long it has had the pistol pointed at it since it last warned the player, or since it
+    /// first had, in seconds; how many times it has warned them; and how long the pistol has been
+    /// off it since, in seconds.
+    threat: f32,
+    warned: u8,
+    unaimed: f32,
+    /// How long until it works out its way to the player again, in seconds.
+    replan: f32,
+    /// How long, having just turned hostile, it stands before going after the player, in seconds.
+    windup: f32,
+    /// How many of the pistol's bolts have hit it while hostile.
+    hits: u32,
+    /// Whether it has been stopped, and stays where it went down.
+    down: bool,
 }
 
 /// Everyone who lives in the maze.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Inhabitants {
     droids: Vec<Inhabitant>,
+    /// The phases changed since the last update, as [`News::alerts`] has them, and those that
+    /// heard the player.
+    alerts: Vec<(usize, Option<Alert>)>,
+    heard: Vec<usize>,
+    alarmed: Vec<usize>,
     /// Whether they have been put into this round's maze yet.
     populated: bool,
 }
@@ -217,20 +381,166 @@ fn step_aside(
     None
 }
 
+/// Whether a droid at `feet`, facing `heading`, in `alert`, could see a player at `player`
+/// holding themselves in `posture`, if nothing were in the way: in any direction and from as far
+/// as it sees at all on Alert; otherwise only in front, and less far the lower the player is -
+/// but right next to it, in any direction. `in_the_dark`, with the lights off and no flashlight
+/// on, it sees less far either way.
+fn could_see(
+    alert: Alert,
+    feet: Vector3<f32>,
+    heading: f32,
+    player: Vector3<f32>,
+    posture: Posture,
+    in_the_dark: bool,
+) -> bool {
+    let to = player - feet;
+    let sight = if in_the_dark { SIGHT * DARK_SIGHT } else { SIGHT };
+    if flat(to).norm() < NOTICE {
+        return true;
+    }
+    if to.norm() > sight {
+        return false;
+    }
+    if alert == Alert::Alert {
+        return true;
+    }
+    let reach = sight
+        * match posture {
+            Posture::Standing => 1.0,
+            Posture::Crouching => CROUCHED_SIGHT,
+            Posture::Crawling => CRAWLING_SIGHT,
+        };
+    let across = flat(to).norm();
+    across < reach && flat(to).dot(&forward(heading)) >= across * VIEW_CONE.cos()
+}
+
+/// Whether the middle of a view from `eye`, looking `ahead` - one meter long - is on `target`:
+/// in front, not too far off, and not too far to its side.
+fn pointed_at(eye: Vector3<f32>, ahead: Vector3<f32>, target: Vector3<f32>) -> bool {
+    let to = target - eye;
+    let along = to.dot(&ahead);
+    along > 0.0 && along < AIM_RANGE && (to - ahead * along).norm() < AIM_WIDTH
+}
+
+/// How long a droid that stands `patience` seconds of the pistol has it pointed at it, in
+/// seconds, after it has warned the player `warned` times, before it goes on to the next stage:
+/// first its patience, then that and as long again as it takes to warn them.
+fn stage_after(warned: u8, patience: f32) -> f32 {
+    if warned == 0 {
+        patience
+    } else {
+        patience + WARNING
+    }
+}
+
+/// The phase a droid in `alert` goes into, seeing the player or not, with `left` seconds left of
+/// searching or of being wary: none, once it is calm again.
+fn next_alert(alert: Alert, sees: bool, left: f32) -> Option<Alert> {
+    Some(match alert {
+        _ if sees => Alert::Alert,
+        Alert::Alert => Alert::Evasion,
+        Alert::Evasion if left <= 0.0 => Alert::Caution,
+        Alert::Caution if left <= 0.0 => return None,
+        other => other,
+    })
+}
+
+impl Inhabitant {
+    /// Puts it into `alert`, or with none calms it down, and gets it ready to go about it; and
+    /// tells of it in `news`, as the `n`th droid.
+    fn enter(&mut self, n: usize, alert: Option<Alert>, news: &mut Vec<(usize, Option<Alert>)>) {
+        if self.alert == alert {
+            return;
+        }
+        self.alert = alert;
+        news.push((n, alert));
+        match alert {
+            Some(Alert::Alert) => self.replan = 0.0,
+            Some(Alert::Evasion) => self.search_afresh(),
+            Some(Alert::Caution) | None => {
+                self.route.clear();
+                self.looking = None;
+                self.resting = REST.0;
+                self.search_left = CAUTION;
+            }
+        }
+    }
+
+    /// Starts searching from where it last saw the player.
+    fn search_afresh(&mut self) {
+        self.route.clear();
+        self.looking = None;
+        self.searched = 0;
+        self.search_left = EVASION;
+    }
+}
+
 /// The middle of a cell of the grid, on its floor.
 fn on_floor(grid: &WalkGrid, origin: Vector3<f32>, (x, z): (usize, usize)) -> Vector3<f32> {
     survey::cell_center(origin, x, z) + Vector3::new(0.0, grid.floor(x, z), 0.0)
 }
 
+/// The cells of `path` after the first, as points on the floor, the last one first: a route.
+fn along(grid: &WalkGrid, origin: Vector3<f32>, path: Vec<(usize, usize)>) -> Vec<Vector3<f32>> {
+    path.into_iter()
+        .skip(1)
+        .rev()
+        .map(|cell| on_floor(grid, origin, cell))
+        .collect()
+}
+
+/// The walkable cell at `point`, or failing that the nearest one.
+fn walkable_cell(
+    grid: &WalkGrid,
+    origin: Vector3<f32>,
+    point: Vector3<f32>,
+) -> Option<(usize, usize)> {
+    survey::cell_at(grid, origin, point)
+        .filter(|&(x, z)| grid.is_walkable(x, z))
+        .or_else(|| survey::nearest_walkable(grid, origin, point))
+}
+
+/// A route from `feet` to `to`, as points on the floor, the first one last, ending at `to`
+/// itself. Empty if there is no way there within [`CHASE_REACH`].
+fn route_to(
+    grid: &WalkGrid,
+    origin: Vector3<f32>,
+    feet: Vector3<f32>,
+    to: Vector3<f32>,
+) -> Vec<Vector3<f32>> {
+    let (Some(from), Some(goal)) =
+        (walkable_cell(grid, origin, feet), walkable_cell(grid, origin, to))
+    else {
+        return Vec::new();
+    };
+    let Some(path) = grid.routes_from(from, CHASE_REACH).path_to(goal) else {
+        return Vec::new();
+    };
+    let mut route = along(grid, origin, path);
+    let end = Vector3::new(to.x, route.first().map_or(feet.y, |end| end.y), to.z);
+    match route.first_mut() {
+        Some(last) => *last = end,
+        None => route.push(end),
+    }
+    route
+}
+
 /// A route from `feet` to somewhere a trip away, as points on the floor, the first one last. Empty
 /// if there is nowhere to go.
-fn plan(grid: &WalkGrid, origin: Vector3<f32>, feet: Vector3<f32>, rng: &mut Rng) -> Vec<Vector3<f32>> {
+fn plan(
+    grid: &WalkGrid,
+    origin: Vector3<f32>,
+    feet: Vector3<f32>,
+    trip: (f32, f32),
+    rng: &mut Rng,
+) -> Vec<Vector3<f32>> {
     let Some(from) =
         survey::cell_at(grid, origin, feet).filter(|&(x, z)| grid.is_walkable(x, z))
     else {
         return Vec::new();
     };
-    let routes = grid.routes_from(from, TRIP.1);
+    let routes = grid.routes_from(from, trip.1);
     let reached = |range: (f32, f32)| -> Vec<usize> {
         routes
             .costs
@@ -241,7 +551,7 @@ fn plan(grid: &WalkGrid, origin: Vector3<f32>, feet: Vector3<f32>, rng: &mut Rng
             .collect()
     };
     // Somewhere a trip away; failing that, in a small space, anywhere else at all.
-    let mut choices = reached(TRIP);
+    let mut choices = reached(trip);
     if choices.is_empty() {
         choices = reached((f32::MIN_POSITIVE, f32::INFINITY));
     }
@@ -252,11 +562,7 @@ fn plan(grid: &WalkGrid, origin: Vector3<f32>, feet: Vector3<f32>, rng: &mut Rng
     let Some(path) = routes.path_to((goal % grid.width, goal / grid.width)) else {
         return Vec::new();
     };
-    path.into_iter()
-        .skip(1)
-        .rev()
-        .map(|cell| on_floor(grid, origin, cell))
-        .collect()
+    along(grid, origin, path)
 }
 
 impl Inhabitants {
@@ -329,7 +635,7 @@ impl Inhabitants {
                 Some(spot) => spot,
                 None => on_floor(grid, origin, places.swap_remove(rng.below(places.len()))),
             };
-            let collider = ColliderBuilder::new(BaseBuilder::new())
+            let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
                 .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
                 .build(&mut scene.graph);
             let body = RigidBodyBuilder::new(
@@ -349,6 +655,7 @@ impl Inhabitants {
             let to_player = flat(player - feet);
             self.droids.push(Inhabitant {
                 body,
+                collider,
                 avatar,
                 feet,
                 speed: 0.0,
@@ -370,6 +677,22 @@ impl Inhabitants {
                 code: 10 + rng.below(90) as u32,
                 talking: false,
                 stays: meeting,
+                alert: None,
+                sees_player: false,
+                lost_at: feet,
+                lost_going: Vector3::zeros(),
+                search_left: 0.0,
+                searched: 0,
+                looking: None,
+                look_from: 0.0,
+                deaf: 0.0,
+                threat: 0.0,
+                warned: 0,
+                unaimed: 0.0,
+                replan: 0.0,
+                windup: 0.0,
+                hits: 0,
+                down: false,
             });
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
@@ -383,7 +706,8 @@ impl Inhabitants {
     }
 
     /// Moves everyone along for another `dt`, over `grid` whose corner is at `origin`, making
-    /// way for each other and for the `player`'s feet.
+    /// way for each other and - unless they are after them - for the `player`'s feet. Whether
+    /// anyone caught the player, and whose phase changed.
     pub fn update(
         &mut self,
         graph: &mut Graph,
@@ -391,7 +715,11 @@ impl Inhabitants {
         player: Vector3<f32>,
         rng: &mut Rng,
         dt: f32,
-    ) {
+    ) -> News {
+        let mut caught = None;
+        let mut alerts = std::mem::take(&mut self.alerts);
+        let heard = std::mem::take(&mut self.heard);
+        let alarmed = std::mem::take(&mut self.alarmed);
         let floor_at = |spot: Vector3<f32>| {
             survey::cell_at(grid, origin, spot).is_some_and(|(x, z)| grid.is_walkable(x, z))
         };
@@ -405,19 +733,44 @@ impl Inhabitants {
             })
             .chain(std::iter::once((player, None)))
             .collect();
+        let the_player = everyone.len() - 1;
         for (me, droid) in self.droids.iter_mut().enumerate() {
+            // After the player, it goes straight for them rather than round them.
+            let hunting = droid.alert == Some(Alert::Alert);
             let others = everyone
                 .iter()
                 .enumerate()
-                .filter(|&(other, _)| other != me)
+                .filter(|&(other, _)| other != me && !(hunting && other == the_player))
                 .map(|(_, &other)| other);
             droid.resting = (droid.resting - dt).max(0.0);
+            droid.windup = (droid.windup - dt).max(0.0);
+            droid.deaf = (droid.deaf - dt).max(0.0);
             // The one that stays may step out of someone's way, but never sets off anywhere.
             if droid.stays {
                 droid.resting = f32::INFINITY;
             }
-            // Talking, it stands and faces the player, and rests a moment once they are done.
-            if droid.talking {
+            if droid.sees_player {
+                // Where the player is, and roughly which way they are going, from how they have
+                // moved lately.
+                let moved = flat(player - droid.lost_at);
+                droid.lost_going = droid.lost_going * (-4.0 * dt).exp() + moved;
+                droid.lost_at = player;
+            }
+            // Seeing the player or not, a hostile droid goes into the phase that follows - once it
+            // is done standing, having just turned hostile.
+            if let Some(alert) = droid.alert.filter(|_| droid.windup == 0.0 && !droid.down) {
+                if alert != Alert::Alert {
+                    droid.search_left -= dt;
+                }
+                let next = next_alert(alert, droid.sees_player, droid.search_left);
+                droid.enter(me, next, &mut alerts);
+            }
+            // Stopped, it stays where it went down.
+            if droid.down {
+                droid.route.clear();
+            // Talking, or warning them off, it stands and faces the player, and rests a moment
+            // once they are done.
+            } else if droid.talking || droid.warned > 0 {
                 droid.route.clear();
                 droid.waiting = 0.0;
                 droid.resting = droid.resting.max(REST.0);
@@ -425,16 +778,66 @@ impl Inhabitants {
                 if to_them.norm() > 1.0e-3 {
                     droid.heading = to_them.x.atan2(to_them.z);
                 }
+            } else if droid.alert.is_some() && droid.windup > 0.0 {
+                // Just turned hostile, it stands a moment where it is.
+                droid.route.clear();
+            } else if droid.alert == Some(Alert::Alert) {
+                // After the player, the way to them worked out again every so often as they move.
+                droid.replan -= dt;
+                if droid.replan <= 0.0 || droid.route.is_empty() {
+                    droid.replan = REPLAN;
+                    droid.route = route_to(grid, origin, droid.feet, player);
+                }
+            } else if droid.alert == Some(Alert::Evasion) {
+                if droid.route.is_empty() {
+                    match droid.looking {
+                        // Looking about where it is, one way and then the other.
+                        Some(left) if left > 0.0 => {
+                            droid.looking = Some(left - dt);
+                            let turn = std::f32::consts::TAU * (LOOK_ABOUT - left) / LOOK_ABOUT;
+                            droid.heading = droid.look_from + LOOK_SWEEP * turn.sin();
+                        }
+                        // Done looking: on to another spot nearby.
+                        Some(_) => {
+                            droid.looking = None;
+                            droid.searched += 1;
+                            droid.route = plan(grid, origin, droid.feet, SEARCH_TRIP, rng);
+                        }
+                        // First where the player was going when it last saw them, if there is
+                        // floor all the way there, or else where it saw them.
+                        None if droid.searched == 0 => {
+                            droid.searched = 1;
+                            let guess = droid
+                                .lost_going
+                                .try_normalize(1.0e-3)
+                                .map(|going| droid.lost_at + going * GUESS)
+                                .filter(|&guess| {
+                                    let (from, way) = (droid.lost_at, guess - droid.lost_at);
+                                    (1..=4).all(|i| floor_at(from + way * (i as f32 / 4.0)))
+                                })
+                                .unwrap_or(droid.lost_at);
+                            droid.route = route_to(grid, origin, droid.feet, guess);
+                        }
+                        // Got there, or has nowhere to go: it looks about.
+                        None => {
+                            droid.looking = Some(LOOK_ABOUT);
+                            droid.look_from = droid.heading;
+                        }
+                    }
+                }
             } else if droid.route.is_empty() {
                 if let Some(aside) = step_aside(droid.feet, others.clone(), floor_at) {
                     droid.route = vec![aside];
                 } else if droid.resting == 0.0 {
-                    droid.route = plan(grid, origin, droid.feet, rng);
+                    droid.route = plan(grid, origin, droid.feet, TRIP, rng);
                     if droid.route.is_empty() {
                         droid.resting = REST.0;
                     }
                 }
             }
+            // Running after the player, and to where it lost them.
+            let hurrying = droid.alert == Some(Alert::Alert)
+                || (droid.alert == Some(Alert::Evasion) && droid.searched <= 1);
             // Past each point on the way, bar the last, as soon as it is near - or already
             // behind, having been put off course making way for someone.
             while let [.., after, next] = droid.route[..] {
@@ -465,10 +868,16 @@ impl Inhabitants {
                         }
                     } else {
                         droid.waiting = 0.0;
-                        let pace = droid
-                            .avatar
-                            .pace(Posture::Standing, Gait::Walking)
-                            .unwrap_or(FALLBACK_PACE);
+                        let pace = match hurrying {
+                            true => droid
+                                .avatar
+                                .pace(Posture::Standing, Gait::Running)
+                                .unwrap_or(FALLBACK_RUN),
+                            false => droid
+                                .avatar
+                                .pace(Posture::Standing, Gait::Walking)
+                                .unwrap_or(FALLBACK_PACE),
+                        };
                         // Slower the further it has yet to turn, and slowing down to stop at the
                         // end of the way.
                         let off = droid.heading - droid.avatar.facing();
@@ -493,14 +902,30 @@ impl Inhabitants {
                 }
             }
 
+            let to_player = player - droid.feet;
+            if droid.alert == Some(Alert::Alert)
+                && droid.windup == 0.0
+                && droid.sees_player
+                && flat(to_player).norm() < CATCH
+                && to_player.y.abs() < CATCH_HEIGHT
+            {
+                caught = caught.or(Some(me));
+            }
+
             if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(droid.body) {
                 body.set_next_kinematic_translation(droid.feet + Vector3::new(0.0, MIDDLE, 0.0));
             }
             let going = Going {
                 heading: Some(droid.heading),
                 speed: droid.speed,
-                posture: Posture::Standing,
-                gait: Gait::Walking,
+                posture: match droid.down {
+                    true => Posture::Crouching,
+                    false => Posture::Standing,
+                },
+                gait: match hurrying {
+                    true => Gait::Running,
+                    false => Gait::Walking,
+                },
                 grounded: true,
                 jumped: false,
                 low: false,
@@ -516,6 +941,246 @@ impl Inhabitants {
             };
             droid.avatar.animate(graph, going, dt);
         }
+        News {
+            caught,
+            alerts,
+            heard,
+            alarmed,
+        }
+    }
+
+    /// Has each hostile droid look for the player, at `player` in `posture`, whom it can see
+    /// wherever `in_sight` says nothing is in the way from the player to it, and [`could_see`]
+    /// says they are where it is looking - `in_the_dark` or not.
+    pub fn look_for_player(
+        &mut self,
+        player: Vector3<f32>,
+        posture: Posture,
+        in_the_dark: bool,
+        in_sight: impl Fn(Vector3<f32>) -> bool,
+    ) {
+        for droid in &mut self.droids {
+            droid.sees_player = match droid.alert {
+                Some(alert) if !droid.down => {
+                    could_see(alert, droid.feet, droid.heading, player, posture, in_the_dark)
+                        && in_sight(droid.feet)
+                }
+                _ => false,
+            };
+        }
+    }
+
+    /// Has each droid that is not hostile feel the pistol pointed at it for another `dt`, or
+    /// not: by the player looking from `eye` along `ahead` with it out, if they are, as long as
+    /// `in_sight` says nothing is in the way from the player to the droid. `patience` says how
+    /// long each kind of droid - as an index into the conversations' characters - stands for
+    /// it; none, it pays it no heed. Which droids went on to another stage.
+    pub fn feel_aimed_at(
+        &mut self,
+        aim: Option<(Vector3<f32>, Vector3<f32>)>,
+        in_sight: impl Fn(Vector3<f32>) -> bool,
+        patience: impl Fn(usize) -> Option<f32>,
+        dt: f32,
+    ) -> Vec<(usize, Threat)> {
+        let mut stages = Vec::new();
+        for (n, droid) in self.droids.iter_mut().enumerate() {
+            let Some(patience) = patience(droid.character) else {
+                continue;
+            };
+            let minding = droid.alert.is_none() && !droid.down && !droid.talking;
+            let chest = droid.feet + Vector3::new(0.0, CHEST, 0.0);
+            let aimed = minding
+                && aim.is_some_and(|(eye, ahead)| pointed_at(eye, ahead, chest))
+                && in_sight(droid.feet);
+            if !minding {
+                droid.threat = 0.0;
+                droid.warned = 0;
+                continue;
+            }
+            // Worse only while it is pointed at, and the same while it is not - until it has been
+            // off it long enough to calm down.
+            if aimed {
+                droid.threat += dt;
+                droid.unaimed = 0.0;
+            } else {
+                droid.unaimed += dt;
+            }
+            if droid.threat >= stage_after(droid.warned, patience) {
+                droid.threat = 0.0;
+                droid.warned += 1;
+                let stage = match droid.warned {
+                    1 => Threat::Warned,
+                    2 => Threat::WarnedAgain,
+                    _ => Threat::Provoked,
+                };
+                if stage == Threat::Provoked {
+                    droid.warned = 0;
+                }
+                stages.push((n, stage));
+            } else if droid.unaimed >= CALM && (droid.warned > 0 || droid.threat > 0.0) {
+                droid.threat = 0.0;
+                if droid.warned > 0 {
+                    droid.warned = 0;
+                    stages.push((n, Threat::Calmed));
+                }
+            }
+        }
+        stages
+    }
+
+    /// Provokes the `n`th droid at once, as if it had stood for the pistol as long as it will:
+    /// shot at, say. True if it was one that minds.
+    pub fn provoke(&mut self, n: usize) -> bool {
+        match self.droids.get_mut(n) {
+            Some(droid) if droid.alert.is_none() && !droid.down => {
+                droid.threat = 0.0;
+                droid.warned = 0;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The `n`th droid sounds the alarm, with the player at `player`: every droid near it that
+    /// `answers`, by its kind, and is not already after them, searches where they are.
+    pub fn raise_alarm(&mut self, n: usize, player: Vector3<f32>, answers: impl Fn(usize) -> bool) {
+        let Some(from) = self.droids.get(n).map(|droid| droid.feet) else {
+            return;
+        };
+        for (m, droid) in self.droids.iter_mut().enumerate() {
+            let answering = m != n
+                && answers(droid.character)
+                && !droid.down
+                && matches!(droid.alert, None | Some(Alert::Caution))
+                && (droid.feet - from).norm() < ALARM_RANGE;
+            if !answering {
+                continue;
+            }
+            droid.stays = false;
+            droid.talking = false;
+            droid.warned = 0;
+            droid.threat = 0.0;
+            droid.lost_at = player;
+            droid.lost_going = Vector3::zeros();
+            droid.alert = None;
+            droid.enter(m, Some(Alert::Evasion), &mut self.alerts);
+            self.alarmed.push(m);
+        }
+    }
+
+    /// The droid whose body `collider` is, if it is one.
+    pub fn hit(&self, collider: Handle<Collider>) -> Option<usize> {
+        self.droids.iter().position(|droid| droid.collider == collider)
+    }
+
+    /// A noise at `at`, that carries `loudness` meters along the corridors of `grid`, whose
+    /// corner is at `origin`. Every hostile droid within earshot that is not on Alert - and has
+    /// not just heard something else, or been shot - runs to where it was, and searches from
+    /// there.
+    pub fn hear(
+        &mut self,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        at: Vector3<f32>,
+        loudness: f32,
+    ) {
+        let listening = |droid: &Inhabitant| {
+            !droid.down && matches!(droid.alert, Some(Alert::Evasion | Alert::Caution))
+        };
+        if !self.droids.iter().any(listening) {
+            return;
+        }
+        let Some(from) = walkable_cell(grid, origin, at) else {
+            return;
+        };
+        let within = loudness / survey::CELL_SIZE;
+        let routes = grid.routes_from(from, within);
+        for (n, droid) in self.droids.iter_mut().enumerate() {
+            if !listening(droid) {
+                continue;
+            }
+            let heard = survey::cell_at(grid, origin, droid.feet)
+                .and_then(|(x, z)| routes.costs[z * grid.width + x])
+                .is_some_and(|cost| cost <= within);
+            if !heard {
+                continue;
+            }
+            if droid.deaf > 0.0 {
+                continue;
+            }
+            droid.deaf = HEARING_REST;
+            droid.lost_at = at;
+            droid.lost_going = Vector3::zeros();
+            droid.alert = None;
+            droid.enter(n, Some(Alert::Evasion), &mut self.alerts);
+            self.heard.push(n);
+        }
+    }
+
+    /// The most urgent phase any droid is in, and the longest any of them in it has left to
+    /// search or stay wary, in seconds.
+    pub fn alarm(&self) -> Option<(Alert, f32)> {
+        let alert = self.droids.iter().filter_map(|droid| droid.alert).max()?;
+        let left = self
+            .droids
+            .iter()
+            .filter(|droid| droid.alert == Some(alert))
+            .map(|droid| droid.search_left)
+            .fold(0.0, f32::max);
+        Some((alert, left))
+    }
+
+    /// Turns the `n`th droid on the player: after a moment it hunts them, and it cannot be
+    /// talked to any more. The one that stays near where the player starts leaves its place to.
+    pub fn set_hostile(&mut self, n: usize) {
+        if let Some(droid) = self.droids.get_mut(n).filter(|droid| !droid.down) {
+            droid.alert = Some(Alert::Alert);
+            droid.stays = false;
+            droid.windup = WINDUP;
+            droid.replan = 0.0;
+        }
+    }
+
+    /// A bolt from the pistol of the player at `player` has hit `collider`. If it is a hostile
+    /// droid's, that is another hit on it, and at [`HITS`] it goes down: crouched, with its eyes
+    /// dark, and no taller than it is crouched. Short of that, if it has not seen who fired, it
+    /// searches for them where they fired from. The droid that went down, if one did.
+    pub fn shot(
+        &mut self,
+        graph: &mut Graph,
+        collider: Handle<Collider>,
+        player: Vector3<f32>,
+    ) -> Option<usize> {
+        let (n, droid) = self
+            .droids
+            .iter_mut()
+            .enumerate()
+            .find(|(_, droid)| droid.collider == collider)?;
+        if droid.alert.is_none() || droid.down {
+            return None;
+        }
+        droid.hits += 1;
+        if droid.hits < HITS {
+            if droid.alert != Some(Alert::Alert) {
+                // After whoever fired, paying no heed to the bolt's own noise hitting it.
+                droid.deaf = HEARING_REST;
+                droid.lost_at = player;
+                droid.lost_going = Vector3::zeros();
+                droid.alert = None;
+                droid.enter(n, Some(Alert::Evasion), &mut self.alerts);
+            }
+            return None;
+        }
+        droid.down = true;
+        droid.alert = None;
+        droid.sees_player = false;
+        droid.avatar.set_eyes(Some(Color::BLACK));
+        if let Ok(shape) = graph.try_get_mut(droid.collider) {
+            shape.set_shape(ColliderShape::capsule_y(0.5 * DOWN_HEIGHT - RADIUS, RADIUS));
+            shape
+                .local_transform_mut()
+                .set_position(Vector3::new(0.0, 0.5 * DOWN_HEIGHT - MIDDLE, 0.0));
+        }
+        Some(n)
     }
 
     /// The droid the player could talk to, standing at `feet` and looking `ahead` along the
@@ -529,6 +1194,7 @@ impl Inhabitants {
     ) -> Option<usize> {
         within_talking(self.droids.iter().map(|droid| droid.feet), feet, ahead)
             .into_iter()
+            .filter(|&i| self.droids[i].alert.is_none() && !self.droids[i].down)
             .find(|&i| in_sight(self.droids[i].feet))
     }
 
@@ -677,6 +1343,68 @@ mod tests {
         let floor = |spot: Vector3<f32>| spot.x.abs() < 0.05;
         let (_, blocked) = make_way(Vector3::zeros(), AHEAD, [standing(0.0, 0.5)].into_iter(), floor);
         assert!(blocked);
+    }
+
+    #[test]
+    fn out_of_alert_it_sees_only_ahead_and_less_far_the_lower_the_player() {
+        // Facing +z.
+        let sees = |alert, x: f32, z: f32, posture| {
+            could_see(alert, Vector3::zeros(), 0.0, Vector3::new(x, 0.0, z), posture, false)
+        };
+        let standing = Posture::Standing;
+        assert!(sees(Alert::Caution, 0.0, 20.0, standing), "ahead");
+        assert!(!sees(Alert::Caution, 0.0, -10.0, standing), "behind");
+        assert!(!sees(Alert::Caution, 10.0, 1.0, standing), "off to the side");
+        assert!(sees(Alert::Caution, 0.0, -1.0, standing), "right behind it, it notices");
+        assert!(!sees(Alert::Caution, 0.0, 20.0, Posture::Crouching), "crouched, far off");
+        assert!(sees(Alert::Caution, 0.0, 12.0, Posture::Crouching), "crouched, nearer");
+        assert!(!sees(Alert::Evasion, 0.0, 12.0, Posture::Crawling), "crawling");
+        // On Alert it keeps track of them wherever they go, as long as they are not too far off.
+        assert!(sees(Alert::Alert, 0.0, -20.0, Posture::Crawling));
+        assert!(!sees(Alert::Alert, 0.0, SIGHT + 1.0, standing));
+    }
+
+    #[test]
+    fn in_the_dark_it_sees_less_far() {
+        let sees = |alert, z: f32, dark| {
+            let player = Vector3::new(0.0, 0.0, z);
+            could_see(alert, Vector3::zeros(), 0.0, player, Posture::Standing, dark)
+        };
+        assert!(sees(Alert::Caution, 20.0, false));
+        assert!(!sees(Alert::Caution, 20.0, true));
+        assert!(sees(Alert::Caution, 8.0, true));
+        assert!(!sees(Alert::Alert, 20.0, true), "even after them");
+        assert!(sees(Alert::Caution, 1.0, true), "right next to it");
+    }
+
+    #[test]
+    fn the_pistol_is_pointed_at_what_is_in_the_middle_of_the_view() {
+        let eye = Vector3::zeros();
+        let ahead = Vector3::z();
+        assert!(pointed_at(eye, ahead, Vector3::new(0.3, 0.0, 10.0)));
+        assert!(!pointed_at(eye, ahead, Vector3::new(1.0, 0.0, 10.0)), "off to the side");
+        assert!(!pointed_at(eye, ahead, Vector3::new(0.0, 0.0, -5.0)), "behind");
+        assert!(!pointed_at(eye, ahead, Vector3::new(0.0, 0.0, AIM_RANGE + 1.0)), "too far");
+    }
+
+    #[test]
+    fn each_warning_holds_long_enough_to_be_said() {
+        assert_eq!(stage_after(0, 1.0), 1.0, "its patience, before it first warns");
+        assert!(stage_after(1, 1.0) >= WARNING, "then time to say it");
+        assert_eq!(stage_after(1, 1.0), stage_after(2, 1.0));
+        assert!(stage_after(0, 1.0) < stage_after(0, 2.0), "a less patient droid is sooner");
+    }
+
+    #[test]
+    fn it_searches_once_it_loses_them_gives_up_and_calms_down_in_the_end() {
+        assert_eq!(next_alert(Alert::Alert, true, 0.0), Some(Alert::Alert));
+        assert_eq!(next_alert(Alert::Alert, false, 0.0), Some(Alert::Evasion));
+        assert_eq!(next_alert(Alert::Evasion, false, 5.0), Some(Alert::Evasion));
+        assert_eq!(next_alert(Alert::Evasion, false, 0.0), Some(Alert::Caution));
+        assert_eq!(next_alert(Alert::Evasion, true, 5.0), Some(Alert::Alert));
+        assert_eq!(next_alert(Alert::Caution, false, 5.0), Some(Alert::Caution));
+        assert_eq!(next_alert(Alert::Caution, true, 5.0), Some(Alert::Alert));
+        assert_eq!(next_alert(Alert::Caution, false, 0.0), None, "calm again");
     }
 
     #[test]

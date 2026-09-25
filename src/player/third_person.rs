@@ -173,6 +173,7 @@ impl Player {
         if let Some(avatar) = &self.avatar {
             avatar.set_visible(graph, shown);
         }
+        self.in_own_eyes = !third_person && close <= 0.0;
 
         let camera = graph[self.camera.transmute::<Node>()].local_transform_mut();
         camera.set_position(at);
@@ -192,7 +193,8 @@ impl Player {
         self.last_seen = Some(feet);
         let avatar = self.avatar.as_ref()?;
         if !avatar.is_visible(graph) {
-            return None;
+            // In first person, the pistol held in view is what moves.
+            return self.viewmodel_moving(graph);
         }
         Some(super::avatar::capsule(feet, moved))
     }
@@ -225,6 +227,7 @@ impl Player {
         if self.avatar.is_none() {
             fyrox::core::log::Log::err("Player: playing without the droid");
         }
+        self.make_viewmodel(&mut scene.graph);
     }
 }
 

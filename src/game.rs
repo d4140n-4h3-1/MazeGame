@@ -4,7 +4,7 @@ use crate::{
     diagnostics::{self, FrameStats},
     dialogue::{
         screen::{self, DialogueScreen, Pointer, Subtitles},
-        Conversation, Facts, Script, SCRIPT,
+        Conversation, Facts, Mood, Provoked, Script, SCRIPT,
     },
     formants::{
         self,
@@ -13,7 +13,7 @@ use crate::{
     },
     generate::Maze,
     hud::{self, Hud, Status},
-    inhabitants::Inhabitants,
+    inhabitants::{Alert, Inhabitants, News, Threat},
     layout::Rng,
     level::Level,
     menu::{Choice, PauseMenu},
@@ -75,6 +75,8 @@ const EXIT_NOT_FAR: f32 = 60.0;
 /// The ambient light with the lights off: next to none, so that what the flashlight is not
 /// pointed at is as good as black.
 const DARK_AMBIENT: Color = Color::opaque(3, 3, 5);
+/// How long the player is shown they were deleted before the next maze, in seconds.
+const DELETED_FOR: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
@@ -85,6 +87,8 @@ enum Phase {
     Settling(u8),
     Playing,
     Won,
+    /// A hostile droid caught the player; the next maze comes once the time is up.
+    Deleted,
     /// The maze could not be used; the reason is on screen.
     Broken,
 }
@@ -105,6 +109,14 @@ struct Talking {
     making: Option<Making>,
 }
 
+/// Something a droid says out loud by itself, being made into a voice: which droid, as an index
+/// into the inhabitants.
+#[derive(Debug, PartialEq)]
+struct Barking {
+    droid: usize,
+    making: Making,
+}
+
 /// A line being made into a voice, away from the game so as not to hold it up: the samples to
 /// come, and how far off they are heard at full volume.
 #[derive(Debug)]
@@ -114,6 +126,13 @@ impl PartialEq for Making {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self, other)
     }
+}
+
+/// How high the droid with `code` speaks, feeling `mood`, as a part of its kind's pitch: each a
+/// little higher or lower than the rest of its kind, and always the same; and higher or lower
+/// again with how it feels.
+fn pitch(voices: &Voices, code: u32, mood: Mood) -> f32 {
+    (1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0)) * voices.mood_pitch(mood)
 }
 
 #[derive(Default, Debug, PartialEq, Visit, Reflect)]
@@ -177,6 +196,10 @@ pub struct MazeGame {
     phase: Phase,
     round_time: f32,
     best_time: Option<f32>,
+    /// How long ago the player was deleted, in seconds.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    deleted: f32,
     #[visit(skip)]
     #[reflect(hidden)]
     hud: Hud,
@@ -196,6 +219,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     talking: Option<Talking>,
+    /// What droids are saying by themselves, while it is being made into a voice.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    barks: Vec<Barking>,
     /// The droid the player could talk to right now, as an index into the inhabitants, and who
     /// it is as the hint to talk names it.
     #[visit(skip)]
@@ -359,6 +386,8 @@ impl MazeGame {
 
     fn start_round(&mut self, ctx: &mut PluginContext) {
         self.stop_talking(ctx);
+        // The droids are put down afresh, and what they were about to say goes with them.
+        self.barks.clear();
         // Made (and seeded) first: the grid below borrows the game.
         self.rng();
         let Some((grid, origin)) = self.level.grid.as_ref() else {
@@ -428,7 +457,7 @@ impl MazeGame {
         let status = match self.phase {
             Phase::Loading | Phase::Settling(_) => Status::Loading,
             Phase::Broken => Status::Blank,
-            Phase::Playing | Phase::Won => Status::Round {
+            Phase::Playing | Phase::Won | Phase::Deleted => Status::Round {
                 time: self.round_time,
                 best: self.best_time,
                 breath: self.player.breath(),
@@ -437,6 +466,11 @@ impl MazeGame {
                 mouse_captured: self.mouse_captured
                     || self.menu.is_open()
                     || self.talking.is_some(),
+                alarm: self.inhabitants.alarm().map(|(alert, left)| match alert {
+                    Alert::Alert => "ALERT".to_string(),
+                    Alert::Evasion => format!("EVASION {:.0}", left.max(0.0).ceil()),
+                    Alert::Caution => format!("CAUTION {:.0}", left.max(0.0).ceil()),
+                }),
             },
         };
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
@@ -509,6 +543,7 @@ impl MazeGame {
         }
         self.set_paused(ctx, false);
         self.stop_talking(ctx);
+        self.barks.clear();
         if self.prefabs.is_some() {
             // Out of the way first: the new maze's survey would take them for walls.
             self.inhabitants
@@ -541,12 +576,12 @@ impl MazeGame {
     }
 
     /// Puts the maze's inhabitants into it once there is a droid to make them from, and moves
-    /// them along.
-    fn update_inhabitants(&mut self, ctx: &mut PluginContext) {
+    /// them along. Whether any caught the player, and whose phase changed.
+    fn update_inhabitants(&mut self, ctx: &mut PluginContext) -> News {
         let (Some(model), Some((grid, origin)), Some(rng)) =
             (&self.droid_model, &self.level.grid, self.rng.as_mut())
         else {
-            return;
+            return News::default();
         };
         let scene = &mut ctx.scenes[self.scene];
         let player = self.player.feet(&scene.graph);
@@ -563,8 +598,232 @@ impl MazeGame {
                 rng,
             );
         }
+        let graph = &scene.graph;
+        // With the lights off, the player is hard to see, unless their flashlight gives them
+        // away.
+        let in_the_dark = self.lights_off && !self.player.flashlight_on();
+        let posture = self.player.posture();
         self.inhabitants
-            .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt);
+            .look_for_player(player, posture, in_the_dark, |there| {
+                self.player.can_see(graph, there)
+            });
+        self.inhabitants
+            .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt)
+    }
+
+    /// Tells the droids what the player's bolts have hit, and says so when one goes down.
+    fn land_shots(&mut self, ctx: &mut PluginContext) {
+        let graph = &mut ctx.scenes[self.scene].graph;
+        let player = self.player.feet(graph);
+        let mut provoked = Vec::new();
+        for collider in self.player.struck() {
+            if let Some(n) = self.inhabitants.shot(graph, collider, player) {
+                let name = self.name_of(n).unwrap_or_else(|| "The droid".into());
+                self.hud.show_note(format!("{name} is down"));
+            }
+            // Shot at, a droid that was not after the player already is at once.
+            else if let Some(n) = self.inhabitants.hit(collider) {
+                if self.threatened(n).is_some() && self.inhabitants.provoke(n) {
+                    provoked.push(n);
+                }
+            }
+        }
+        for n in provoked {
+            self.on_threat(ctx, n, Threat::Provoked);
+        }
+    }
+
+    /// How the `n`th droid takes having the pistol pointed at it, if it minds at all.
+    fn threatened(&self, n: usize) -> Option<crate::dialogue::Threatened> {
+        let (character, _) = self.inhabitants.who(n)?;
+        self.script.as_ref()?.characters.get(character)?.threatened
+    }
+
+    /// Has the droids feel the pistol pointed at them, or not, for another frame, and deals with
+    /// what they do about it.
+    fn threaten(&mut self, ctx: &mut PluginContext) {
+        let graph = &ctx.scenes[self.scene].graph;
+        let aim = self.player.pistol_aim(graph);
+        let Some(script) = self.script.as_ref() else {
+            return;
+        };
+        let patience = |character: usize| {
+            let threatened = script.characters.get(character)?.threatened?;
+            Some(threatened.patience)
+        };
+        let player = &self.player;
+        let stages = self.inhabitants.feel_aimed_at(
+            aim,
+            |there| player.can_see(graph, there),
+            patience,
+            ctx.dt,
+        );
+        for (n, threat) in stages {
+            self.on_threat(ctx, n, threat);
+        }
+    }
+
+    /// The `n`th droid has gone on to `threat`, with the pistol pointed at it: its eyes and what
+    /// it says show how it takes it, and provoked, it does what its kind does about it.
+    fn on_threat(&mut self, ctx: &mut PluginContext, n: usize, threat: Threat) {
+        let (mood, bark) = match threat {
+            Threat::Warned => (Mood::Warning, "warned"),
+            Threat::WarnedAgain => (Mood::Agitated, "warned_again"),
+            Threat::Provoked => (Mood::Hostile, "provoked"),
+            Threat::Calmed => (Mood::Normal, "calmed"),
+        };
+        self.bark(n, bark, mood);
+        let eyes = match threat {
+            Threat::Calmed => None,
+            _ => screen::eyes(mood),
+        };
+        self.inhabitants.set_eyes(n, eyes);
+        if threat != Threat::Provoked {
+            return;
+        }
+        match self.threatened(n).map(|threatened| threatened.then) {
+            Some(Provoked::Attacks) => self.inhabitants.set_hostile(n),
+            Some(Provoked::Alarm) => {
+                // It has done its part: the sentries see to the player.
+                self.inhabitants.set_eyes(n, None);
+                let player = self.player.feet(&ctx.scenes[self.scene].graph);
+                let Some(script) = self.script.as_ref() else {
+                    return;
+                };
+                self.inhabitants.raise_alarm(n, player, |character| {
+                    script
+                        .characters
+                        .get(character)
+                        .and_then(|character| character.threatened)
+                        .is_some_and(|threatened| threatened.then == Provoked::Attacks)
+                });
+                let name = self.name_of(n).unwrap_or_else(|| "A droid".into());
+                self.hud.show_note(format!("{name} sounded the alarm"));
+            }
+            None => (),
+        }
+    }
+
+    /// Moves the droids along, and deals with what comes of it: the player caught, and droids
+    /// spotting them, losing them and giving up. True if the player was caught.
+    fn move_inhabitants(&mut self, ctx: &mut PluginContext) -> bool {
+        // What the player made heard since the last time, for the droids to hear.
+        let noises = self.player.noises();
+        if let Some((grid, origin)) = &self.level.grid {
+            for (at, loudness) in noises {
+                self.inhabitants.hear((grid, *origin), at, loudness);
+            }
+        }
+        let News {
+            caught,
+            alerts,
+            heard,
+            alarmed,
+        } = self.update_inhabitants(ctx);
+        for (n, alert) in alerts {
+            // The eyes show the phase: red after the player, orange searching, yellow wary, and
+            // their own colour once it is calm again.
+            let (mood, bark) = match alert {
+                Some(Alert::Alert) => (Mood::Hostile, "spotted"),
+                Some(Alert::Evasion) if alarmed.contains(&n) => (Mood::Agitated, "alarmed"),
+                Some(Alert::Evasion) if heard.contains(&n) => (Mood::Agitated, "heard"),
+                Some(Alert::Evasion) => (Mood::Agitated, "lost"),
+                Some(Alert::Caution) => (Mood::Warning, "gave_up"),
+                None => {
+                    self.inhabitants.set_eyes(n, None);
+                    continue;
+                }
+            };
+            self.inhabitants.set_eyes(n, screen::eyes(mood));
+            self.bark(n, bark, mood);
+        }
+        match caught {
+            Some(n) if self.phase == Phase::Playing => {
+                self.delete_player(ctx, n);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Has the `n`th droid say its bark called `name`, if its kind has one, feeling `mood`: out
+    /// loud once the voice is made, and on screen straight away, as the player has subtitles.
+    fn bark(&mut self, n: usize, name: &str, mood: Mood) {
+        let (Some(script), Some((character, code))) = (&self.script, self.inhabitants.who(n))
+        else {
+            return;
+        };
+        let character = &script.characters[character];
+        let Some(bark) = character.barks.get(name) else {
+            return;
+        };
+        let mut lines = Vec::new();
+        if self.subtitles.latin {
+            lines.push(bark.says.clone());
+        }
+        if self.subtitles.english && !bark.means.is_empty() {
+            lines.push(bark.means.clone());
+        }
+        if !lines.is_empty() {
+            let who = format!("{} {code}", character.name.to_uppercase());
+            self.hud.show_note(format!("{who}: {}", lines.join("\n")));
+        }
+        let Some(voices) = &self.voices else {
+            return;
+        };
+        let Some(voice) = voices.voice(&character.name) else {
+            return;
+        };
+        let sound = voices.speak(&bark.says, voice, pitch(voices, code, mood));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (rate, reach) = (voices.sample_rate, sound.reach);
+        std::thread::spawn(move || sender.send(synth::make(&sound, rate)));
+        // A new one from the same droid cuts off whatever it had yet to say.
+        self.barks.retain(|barking| barking.droid != n);
+        self.barks.push(Barking {
+            droid: n,
+            making: Making(receiver, reach),
+        });
+    }
+
+    /// Says each bark that has been made into a voice, from its droid's face.
+    fn bark_when_made(&mut self, ctx: &mut PluginContext) {
+        let Some(voices) = &self.voices else {
+            return;
+        };
+        let graph = &mut ctx.scenes[self.scene].graph;
+        let inhabitants = &self.inhabitants;
+        self.barks.retain(|Barking { droid, making: Making(receiver, reach) }| {
+            let samples = match receiver.try_recv() {
+                Ok(samples) => samples,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return false,
+            };
+            if let (Some(face), Some(buffer)) = (
+                inhabitants.face(graph, *droid),
+                formants::playable(samples, voices.sample_rate),
+            ) {
+                SoundBuilder::new(BaseBuilder::new().with_local_transform(
+                    TransformBuilder::new().with_local_position(face).build(),
+                ))
+                .with_buffer(Some(buffer))
+                .with_radius(*reach)
+                .with_play_once(true)
+                .with_status(SoundStatus::Playing)
+                .build(graph);
+            }
+            false
+        });
+    }
+
+    /// The player has been caught by the `n`th droid: they stop where they are, and are told so
+    /// until the next maze.
+    fn delete_player(&mut self, ctx: &mut PluginContext, n: usize) {
+        self.stop_talking(ctx);
+        self.phase = Phase::Deleted;
+        self.deleted = 0.0;
+        let name = self.name_of(n).unwrap_or_else(|| "A droid".into());
+        self.set_banner(ctx, &format!("Deleted by {name}"));
     }
 
     /// Opens the pause menu and stops the world, or closes it and carries on.
@@ -742,11 +1001,7 @@ impl MazeGame {
             return;
         };
         let view = talking.conversation.view(script, &talking.facts);
-        // Each a little higher or lower than the rest of its kind, and always the same; and
-        // higher or lower again with how it feels.
-        let pitch = (1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0))
-            * voices.mood_pitch(view.mood);
-        let sound = voices.speak(&view.says, voice, pitch);
+        let sound = voices.speak(&view.says, voice, pitch(voices, code, view.mood));
         let (sender, receiver) = std::sync::mpsc::channel();
         let (rate, reach) = (voices.sample_rate, sound.reach);
         std::thread::spawn(move || sender.send(synth::make(&sound, rate)));
@@ -824,6 +1079,16 @@ impl MazeGame {
         };
         self.inhabitants.set_talking(talking.droid, false);
         self.inhabitants.set_eyes(talking.droid, None);
+        // However it ended, a conversation that got as far as a threat is carried out.
+        if self
+            .script
+            .as_ref()
+            .is_some_and(|script| talking.conversation.attacks(script))
+        {
+            self.inhabitants.set_hostile(talking.droid);
+            self.inhabitants
+                .set_eyes(talking.droid, screen::eyes(Mood::Hostile));
+        }
         self.player.talk_to(None);
         self.dialogue.set_open(ctx.user_interfaces.first(), false);
         self.want_mouse = !self.menu.is_open();
@@ -981,37 +1246,53 @@ impl Plugin for MazeGame {
                 let scene = &mut ctx.scenes[self.scene];
                 self.player
                     .update(&mut scene.graph, ctx.dt, self.focused && !talking);
-                self.update_inhabitants(ctx);
-                let scene = &mut ctx.scenes[self.scene];
-                let exit = scene.graph[self.exit].global_position();
-                let player = self.player.position(&scene.graph);
-                let flat = Vector3::new(exit.x - player.x, 0.0, exit.z - player.z);
-                if flat.norm() < EXIT_RADIUS {
-                    self.phase = Phase::Won;
-                    let best = self
-                        .best_time
-                        .map_or(self.round_time, |b| b.min(self.round_time));
-                    let record = self.best_time.is_none_or(|b| self.round_time < b);
-                    self.best_time = Some(best);
-                    let text = format!(
-                        "You escaped in {}{}\nPress N for another maze",
-                        hud::format_time(self.round_time),
-                        if record { " - a new best!" } else { "" }
-                    );
-                    self.set_banner(ctx, &text);
+                self.land_shots(ctx);
+                if !talking {
+                    self.threaten(ctx);
+                }
+                if !self.move_inhabitants(ctx) {
+                    let scene = &mut ctx.scenes[self.scene];
+                    let exit = scene.graph[self.exit].global_position();
+                    let player = self.player.position(&scene.graph);
+                    let flat = Vector3::new(exit.x - player.x, 0.0, exit.z - player.z);
+                    if flat.norm() < EXIT_RADIUS {
+                        self.phase = Phase::Won;
+                        let best = self
+                            .best_time
+                            .map_or(self.round_time, |b| b.min(self.round_time));
+                        let record = self.best_time.is_none_or(|b| self.round_time < b);
+                        self.best_time = Some(best);
+                        let text = format!(
+                            "You escaped in {}{}\nPress N for another maze",
+                            hud::format_time(self.round_time),
+                            if record { " - a new best!" } else { "" }
+                        );
+                        self.set_banner(ctx, &text);
+                    }
                 }
             }
             Phase::Broken => (),
             Phase::Won => {
                 let scene = &mut ctx.scenes[self.scene];
                 self.player.update(&mut scene.graph, ctx.dt, false);
-                self.update_inhabitants(ctx);
+                self.land_shots(ctx);
+                self.move_inhabitants(ctx);
+            }
+            Phase::Deleted => {
+                let scene = &mut ctx.scenes[self.scene];
+                self.player.update(&mut scene.graph, ctx.dt, false);
+                self.land_shots(ctx);
+                self.move_inhabitants(ctx);
+                self.deleted += ctx.dt;
+                if self.deleted > DELETED_FOR {
+                    self.restart(ctx);
+                }
             }
         }
 
         // Only what can be seen from where the player stands is drawn and lit. Not while the
         // level is being readied: the survey measures the tiles, which must all be showing.
-        if matches!(self.phase, Phase::Playing | Phase::Won) {
+        if matches!(self.phase, Phase::Playing | Phase::Won | Phase::Deleted) {
             let scene = &mut ctx.scenes[self.scene];
             let player = self.player.position(&scene.graph);
             self.level.cull(&mut scene.graph, player);
@@ -1031,7 +1312,7 @@ impl Plugin for MazeGame {
 
         // The effects follow only so many things: the player's droid, and the nearest of the rest.
         let moving = match self.phase {
-            Phase::Playing | Phase::Won => {
+            Phase::Playing | Phase::Won | Phase::Deleted => {
                 let graph = &ctx.scenes[self.scene].graph;
                 let player = self.player.position(graph);
                 let droid = self.player.moving(graph);
@@ -1046,6 +1327,9 @@ impl Plugin for MazeGame {
             self.set_mouse_captured(ctx, true);
         }
 
+        if !self.menu.is_open() {
+            self.bark_when_made(ctx);
+        }
         self.look_for_someone(ctx);
         self.update_hud(ctx);
         self.stats.update(ctx);

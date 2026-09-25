@@ -20,7 +20,7 @@
 //! see [`avatar`]. A sprint slows to a run while it does, and picks up again when it is let go.
 //!
 //! R draws the pistol and holsters it again, and the left mouse button draws it and then fires
-//! it - see [`pistol`].
+//! it - see [`pistol`]. What its bolts hit, the game hears of from [`Player::struck`].
 //!
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
@@ -30,6 +30,8 @@
 //! and into turns.
 //!
 //! F switches the flashlight on and off; it starts off.
+//!
+//! Running, sprinting, landing hard and the pistol are heard: see [`noise`].
 //!
 //! What the player hears, they hear from where the camera is, facing the way it faces.
 //!
@@ -47,6 +49,8 @@
 //! Talking to another droid, the droid turns to face it and the camera closes in on its face -
 //! see [`talk`].
 //!
+//! In first person, the pistol is held in view, as in Call of Duty - see [`viewmodel`].
+//!
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
 pub(crate) mod avatar;
@@ -56,11 +60,13 @@ mod head;
 mod input;
 mod lean;
 mod movement;
+mod noise;
 mod pistol;
 pub(crate) mod posture;
 mod talk;
 mod third_person;
 mod view;
+mod viewmodel;
 
 pub use avatar::DROID_MODEL;
 use avatar::{heading, Avatar, Going};
@@ -164,6 +170,13 @@ pub struct Player {
     armed: bool,
     /// The pistol's shots.
     bolts: pistol::Bolts,
+    /// The pistol held in view in first person, once the droid has loaded, if it has one.
+    viewmodel: Option<viewmodel::Viewmodel>,
+    /// Whether the view is from the droid's own eyes, as of this frame: first person, and
+    /// neither swung round the droid nor closed in on someone talked to.
+    in_own_eyes: bool,
+    /// What the player makes heard.
+    noises: noise::Noises,
     /// Who the player is talking to, and how far in to them the camera is.
     talk: talk::Talk,
     keys: Keys,
@@ -208,6 +221,9 @@ impl Default for Player {
             last_seen: None,
             armed: false,
             bolts: Default::default(),
+            viewmodel: None,
+            in_own_eyes: false,
+            noises: Default::default(),
             talk: Default::default(),
             keys: Default::default(),
         }
@@ -285,6 +301,11 @@ impl Player {
         }
     }
 
+    /// Whether the flashlight is on.
+    pub fn flashlight_on(&self) -> bool {
+        self.flashlight_on
+    }
+
     pub fn position(&self, graph: &Graph) -> Vector3<f32> {
         graph[self.body].global_position()
     }
@@ -338,6 +359,7 @@ impl Player {
         // solver has already taken it out of the body by now.
         if self.grounded && !was_grounded {
             self.land();
+            self.thud(self.feet(graph));
         }
         let keys = &self.keys;
         let pushing = can_move && (keys.forward || keys.back || keys.left || keys.right);
@@ -367,6 +389,7 @@ impl Player {
         self.carry_head(horizontal, right, dt);
         self.place_head(graph, dt);
         let gait = self.gait();
+        self.footfalls(self.feet(graph), horizontal.norm(), gait, dt);
         let keys = &self.keys;
         // Which way the body is going, from the way it faces: its left is +x.
         let local = rotation.inverse() * horizontal;
@@ -400,6 +423,8 @@ impl Player {
         if let Some(avatar) = self.avatar.as_mut() {
             avatar.animate(graph, going, dt);
         }
+        let fired = self.avatar.as_ref().is_some_and(|avatar| avatar.shot().is_some());
+        self.hold_pistol(graph, fired, dt);
         self.shoot(graph, dt);
     }
 
@@ -427,11 +452,23 @@ impl Player {
         direction: Vector3<f32>,
         reach: f32,
     ) -> f32 {
-        let head = from;
+        self.first_hit(graph, from, direction, reach)
+            .map_or(reach, |(distance, _)| distance)
+    }
+
+    /// How far a ray from `from` goes in `direction` before hitting something other than the
+    /// player, and what it hits, if it does within `reach`.
+    fn first_hit(
+        &self,
+        graph: &Graph,
+        from: Vector3<f32>,
+        direction: Vector3<f32>,
+        reach: f32,
+    ) -> Option<(f32, Handle<Collider>)> {
         let mut hits = Vec::new();
         graph.physics.cast_ray(
             RayCastOptions {
-                ray_origin: Point3::from(head),
+                ray_origin: Point3::from(from),
                 ray_direction: direction,
                 max_len: reach,
                 groups: Default::default(),
@@ -442,7 +479,7 @@ impl Player {
         hits.iter()
             // The ray starts inside the player's own body.
             .find(|hit| hit.collider != self.collider)
-            .map_or(reach, |hit| (hit.position.coords - head).norm())
+            .map(|hit| ((hit.position.coords - from).norm(), hit.collider))
     }
 }
 

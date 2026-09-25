@@ -7,15 +7,18 @@
 //! straight the way the gun was pointing (see [`Avatar::shot`](super::avatar::Avatar::shot)) -
 //! wherever the camera is looking - and stops at the first thing it hits. It carries the
 //! muzzle's green flash with it, lighting up the droid as it leaves and everything it passes in
-//! the dark. It does no harm to anything yet.
+//! the dark. Where it hits something it stops with its tip against it and glows there a moment
+//! longer, lighting up what it hit, before it is gone. What it stops at is told to the game (see
+//! [`Player::struck`]), which decides what harm that does.
 //!
 //! The bolts are a handful of meshes made once, with the player, and shown while they fly:
 //! adding or taking away a mesh has the traced shadows gather every mesh in the scene again.
 //!
 //! A shot sounds at the muzzle, and each bolt hums as it flies, till it stops. The sounds are
-//! made from the formants in [`PISTOL_SOUNDS`] when the player is: see [`crate::formants`].
+//! made from the formants in [`PISTOL_SOUNDS`] when the player is: see [`crate::formants`]. The
+//! shot, and a bolt hitting something, are heard by the droids too: see [`noise`](super::noise).
 
-use super::Player;
+use super::{noise, Player};
 use crate::formants::{self, Sounds};
 use fyrox::{
     core::{
@@ -28,6 +31,7 @@ use fyrox::{
     resource::texture::{Texture, TextureKind, TexturePixelKind, TextureResource},
     scene::{
         base::BaseBuilder,
+        collider::Collider,
         graph::Graph,
         light::{point::PointLightBuilder, BaseLightBuilder},
         mesh::{
@@ -59,6 +63,8 @@ const BOLT_GLOW: f32 = 10.0;
 /// How far the flash a bolt carries lights, in meters, and how brightly.
 const FLASH_REACH: f32 = 5.0;
 const FLASH_BRIGHTNESS: f32 = 3.0;
+/// How long a bolt that has hit something glows where it hit, in seconds.
+const IMPACT: f32 = 0.12;
 
 /// A bolt in the air.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,6 +74,8 @@ struct Bolt {
     direction: Vector3<f32>,
     /// How much further it can fly, in meters.
     range: f32,
+    /// How much longer it glows where it hit something, in seconds, once it has.
+    landed: Option<f32>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -78,6 +86,8 @@ pub(super) struct Bolts {
     hums: Vec<Handle<Node>>,
     /// The sound of a shot, and how far off it is heard at full volume, if there is one.
     shot: Option<(SoundBufferResource, f32)>,
+    /// What bolts have hit since the game last asked.
+    struck: Vec<Handle<Collider>>,
 }
 
 /// The sound called `name` in `sounds`, made to play, with how far off it is heard at full
@@ -163,7 +173,12 @@ impl Bolts {
                 (mesh, None)
             })
             .collect();
-        Self { bolts, hums, shot }
+        Self {
+            bolts,
+            hums,
+            shot,
+            struck: Vec::new(),
+        }
     }
 
     /// Starts or stops the hum of the bolt that is `index` of `bolts`, if it has one.
@@ -197,6 +212,7 @@ impl Bolts {
             position: from,
             direction,
             range: BOLT_RANGE,
+            landed: None,
         });
         let node = &mut graph[*mesh];
         node.local_transform_mut()
@@ -219,6 +235,7 @@ impl Bolts {
 
     /// Puts every bolt out of sight, and out of the air.
     pub(super) fn clear(&mut self, graph: &mut Graph) {
+        self.struck.clear();
         for index in 0..self.bolts.len() {
             let (mesh, bolt) = &mut self.bolts[index];
             if bolt.take().is_some() {
@@ -233,26 +250,59 @@ impl Player {
     /// Fires a bolt from the muzzle the way the gun pointed, if the droid let a shot go this
     /// frame; and flies every bolt in the air on for another `dt`.
     pub(super) fn shoot(&mut self, graph: &mut Graph, dt: f32) {
-        if let Some((muzzle, direction)) = self.avatar.as_ref().and_then(|avatar| avatar.shot()) {
+        // In first person, from the pistol held in view, for the middle of the view.
+        let shot = self.avatar.as_ref().and_then(|avatar| avatar.shot());
+        let shot = shot.map(|shot| self.aim_from_view(graph).unwrap_or(shot));
+        if let Some((muzzle, direction)) = shot {
             self.bolts.fire(graph, muzzle, direction);
+            self.make_noise(muzzle, noise::SHOT_NOISE);
         }
-        // How far each bolt gets this frame before it hits something, if it does.
-        let flights: Vec<Option<(f32, bool)>> = self
+        // How far each bolt gets this frame, and what it hits, if it does.
+        let flights: Vec<Option<(f32, Option<Handle<Collider>>, bool)>> = self
             .bolts
             .bolts
             .iter()
             .map(|(_, bolt)| {
-                let bolt = (*bolt)?;
+                let bolt = bolt.filter(|bolt| bolt.landed.is_none())?;
                 let step = (BOLT_SPEED * dt).min(bolt.range);
-                let reach = self.distance_to_hit(graph, bolt.position, bolt.direction, step);
-                Some((reach, reach < step || step >= bolt.range))
+                Some(match self.first_hit(graph, bolt.position, bolt.direction, step) {
+                    Some((reach, hit)) => (reach, Some(hit), true),
+                    None => (step, None, step >= bolt.range),
+                })
             })
             .collect();
         for (index, flight) in flights.into_iter().enumerate() {
             let (mesh, bolt) = &mut self.bolts.bolts[index];
-            let (Some(flying), Some((reach, stopped))) = (bolt.as_mut(), flight) else {
+            let Some(flying) = bolt.as_mut() else {
                 continue;
             };
+            // One that has hit something glows where it hit until its moment is up.
+            if let Some(left) = flying.landed.as_mut() {
+                *left -= dt;
+                if *left <= 0.0 {
+                    *bolt = None;
+                    graph[*mesh].set_visibility(false);
+                }
+                continue;
+            }
+            let Some((reach, hit, stopped)) = flight else {
+                continue;
+            };
+            self.bolts.struck.extend(hit);
+            if hit.is_some() {
+                // Its tip against what it hit, its flash lighting it up; and quiet, and the first
+                // to go if another is fired.
+                flying.position += flying.direction * (reach - 0.5 * BOLT_LENGTH).max(0.0);
+                flying.range = 0.0;
+                flying.landed = Some(IMPACT);
+                graph[*mesh]
+                    .local_transform_mut()
+                    .set_position(flying.position);
+                let at = flying.position;
+                self.bolts.hum(graph, index, false);
+                self.make_noise(at, noise::IMPACT_NOISE);
+                continue;
+            }
             if stopped {
                 *bolt = None;
                 graph[*mesh].set_visibility(false);
@@ -265,6 +315,19 @@ impl Player {
                 .local_transform_mut()
                 .set_position(flying.position);
         }
+    }
+
+    /// Where the pistol is pointed while it is out: from where the view is, along the middle of
+    /// it, one meter long. None while it is put away.
+    pub fn pistol_aim(&self, graph: &Graph) -> Option<(Vector3<f32>, Vector3<f32>)> {
+        let out = self.avatar.as_ref()?.pistol_out(graph);
+        let camera = &graph[self.camera];
+        out.then(|| (camera.global_position(), camera.look_vector().normalize()))
+    }
+
+    /// What the pistol's bolts have hit since this was last asked, each once for every bolt.
+    pub fn struck(&mut self) -> Vec<Handle<Collider>> {
+        std::mem::take(&mut self.bolts.struck)
     }
 
     /// Takes the pistol out, or puts it away.

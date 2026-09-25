@@ -27,6 +27,8 @@ pub enum Status {
         /// How much breath is left, from 0 to 1, and whether the player has run out of it.
         breath: (f32, bool),
         mouse_captured: bool,
+        /// How the droids hunting the player are going about it, if any are.
+        alarm: Option<String>,
     },
 }
 
@@ -97,8 +99,12 @@ impl Hud {
                 best,
                 breath: (breath, winded),
                 mouse_captured,
+                alarm,
             } => {
                 let mut text = format!("Time {}", format_time(time));
+                if let Some(alarm) = alarm {
+                    text += &format!("    {alarm}");
+                }
                 if let Some(best) = best {
                     text += &format!("    Best {}", format_time(best));
                 }

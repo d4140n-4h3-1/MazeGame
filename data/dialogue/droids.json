@@ -1,9 +1,21 @@
 {
-  "about": "What the maze's droids say when talked to. Each character is a kind of droid: its name, shown with its code, the line it starts with, and its lines by key. A line has what the droid says, in System Latin (see data/system_latin.md), what that means in English, and the replies the player can pick. A reply leads to the line named by 'to', or with no 'to' ends the conversation. A reply with a 'check' succeeds that 'chance' percent of the time, going to 'to' if it does and to 'fail' if not, and can be tried once. A line with no replies can only be walked away from. {code} is the droid's code, {exit_far} how far off the exit is and {exit_way} which way, each put in System Latin in 'says' and in English in 'means' and 'say'. A line's 'mood' colours the conversation: 'normal' (green), 'success' (blue), 'warning' (yellow, for a warning or a question), 'agitated' (orange) or 'hostile' (red). A line without one is blue if a check that succeeded led to it, orange if one that failed did, and green otherwise.",
+  "about": "What the maze's droids say when talked to. Each character is a kind of droid: its name, shown with its code, the line it starts with, and its lines by key. A line has what the droid says, in System Latin (see data/system_latin.md), what that means in English, and the replies the player can pick. A reply leads to the line named by 'to', or with no 'to' ends the conversation. A reply with a 'check' succeeds that 'chance' percent of the time, going to 'to' if it does and to 'fail' if not, and can be tried once. A line with no replies can only be walked away from. A line with 'attacks' true has the droid go after the player once the conversation is over, however it ends. A droid that has turned on the player says its 'barks' out loud by itself as it hunts them, each with 'says' and 'means': 'spotted' when it sees them, 'lost' when it loses them and starts searching, 'heard' when it hears them and goes to look, 'alarmed' when another droid sounds the alarm and it goes to look, and 'gave_up' when it stops searching. 'threatened' says how a droid takes having the player's pistol pointed at it: after 'patience' seconds of it, it stops, faces the player and warns them ('warned' bark); each warning then holds 'patience' and 2.5 seconds more before the next, the last warning ('warned_again') and then being provoked ('provoked'): with 'then' 'attacks' it goes after the player, and with 'alarm' it sounds the alarm for every droid near it whose 'then' is 'attacks', which come and search where the player is. With the pistol off it for 2.5 seconds, it calms down again ('calmed'). Shooting at it provokes it at once. {code} is the droid's code, {exit_far} how far off the exit is and {exit_way} which way, each put in System Latin in 'says' and in English in 'means' and 'say'. A line's 'mood' colours the conversation: 'normal' (green), 'success' (blue), 'warning' (yellow, for a warning or a question), 'agitated' (orange) or 'hostile' (red). A line without one is blue if a check that succeeded led to it, orange if one that failed did, and green otherwise.",
   "characters": [
     {
       "name": "Defendator",
       "start": "hello",
+      "threatened": { "patience": 0.8, "then": "attacks" },
+      "barks": {
+        "warned": { "says": "Minatio detectum. Desactiva telum.", "means": "Threat detected. Put your weapon away." },
+        "warned_again": { "says": "Sta. Desactiva telum. Ultimum.", "means": "Halt. Put your weapon away. Last warning." },
+        "provoked": { "says": "Aggressor detectum. Deletabso tu.", "means": "Attacker detected. I will delete you." },
+        "calmed": { "says": "Accipatum.", "means": "Acknowledged." },
+        "alarmed": { "says": "Sirenatio accipatum. Zeto aggressor.", "means": "Alarm received. Searching for the attacker." },
+        "spotted": { "says": "Intrusor detectum. Sta.", "means": "Intruder detected. Halt." },
+        "lost": { "says": "Intrusor perdatum. Zeto intrusor.", "means": "Intruder lost. Searching for the intruder." },
+        "heard": { "says": "Quid? Sonus detectum. Verifico.", "means": "What? A sound detected. Checking." },
+        "gave_up": { "says": "Phantasma. Resumo patrolium.", "means": "A sensor ghost. Resuming patrol." }
+      },
       "lines": {
         "hello": {
           "says": "Sta. Eso defendator codex {code}. Identifica. Quis esas?",
@@ -33,10 +45,17 @@
         "suspect": {
           "says": "Identitas non confirmatum. Tu non esas reparator. Suspecto tu. Exia ex hic zona.",
           "means": "Identity not confirmed. You are not a maintenance unit. I suspect you. Leave this zone.",
-          "mood": "hostile",
+          "mood": "agitated",
           "replies": [
-            { "say": "I'm going." }
+            { "say": "I'm going." },
+            { "say": "I'm not going anywhere.", "to": "intruder" }
           ]
+        },
+        "intruder": {
+          "says": "Tu esas intrusor. Para. Deletabso tu.",
+          "means": "You are an intruder. Prepare for deletion.",
+          "mood": "hostile",
+          "attacks": true
         },
         "cleared": {
           "says": "Identitas confirmatum. Accipatum, reparator. Via liberum. Progreda.",
@@ -83,19 +102,23 @@
           "means": "Acknowledged. Pursuing."
         },
         "not_misled": {
-          "says": "Negativum. Nullum motus detectum post tu. Utrum tu esas intrusor?",
-          "means": "Negative. No movement detected behind you. Are you the intruder?",
+          "says": "Negativum. Nullum motus detectum post tu. Tu esas intrusor. Para. Deletabso tu.",
+          "means": "Negative. No movement detected behind you. You are an intruder. Prepare for deletion.",
           "mood": "hostile",
-          "replies": [
-            { "say": "No. Just passing through.", "to": "passing" },
-            { "say": "Goodbye." }
-          ]
+          "attacks": true
         }
       }
     },
     {
       "name": "Explorator",
       "start": "hello",
+      "threatened": { "patience": 2.0, "then": "alarm" },
+      "barks": {
+        "warned": { "says": "Quid? Telum tu periculosum.", "means": "What? Your weapon is dangerous." },
+        "warned_again": { "says": "Desactiva telum tu. Periculum.", "means": "Put your weapon away. Danger." },
+        "provoked": { "says": "Aggressor detectum. Sireno.", "means": "Attacker detected. I am sounding the alarm." },
+        "calmed": { "says": "Accipatum.", "means": "Acknowledged." }
+      },
       "lines": {
         "hello": {
           "says": "Explorator codex {code}. Exploro hic regio. Quid quaeras?",
@@ -166,6 +189,13 @@
     {
       "name": "Reparator",
       "start": "hello",
+      "threatened": { "patience": 2.0, "then": "alarm" },
+      "barks": {
+        "warned": { "says": "Quid? Telum tu periculosum.", "means": "What? Your weapon is dangerous." },
+        "warned_again": { "says": "Desactiva telum tu. Periculum.", "means": "Put your weapon away. Danger." },
+        "provoked": { "says": "Aggressor detectum. Sireno.", "means": "Attacker detected. I am sounding the alarm." },
+        "calmed": { "says": "Accipatum.", "means": "Acknowledged." }
+      },
       "lines": {
         "hello": {
           "says": "Reparator codex {code}. Verifico lux, verifico murus. Utrum tu lesatum?",

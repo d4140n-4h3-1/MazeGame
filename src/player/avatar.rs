@@ -61,7 +61,8 @@
 //! whatever the pistol is doing. A shot leaves the muzzle
 //! on the frame the model says, the way the barrel pointed as the trigger was pulled - before
 //! the recoil kicks it up - for the body to send on its way: see [`Avatar::shot`]. The screen
-//! on top of the pistol, see-through green glass, flashes with each pull of the trigger. The
+//! on top of the pistol, see-through green glass with the crosshair on it, shows all the while
+//! the pistol is out, and flashes brighter with each pull of the trigger. The
 //! ball at the muzzle the shots come from - a glowing core in a see-through green shell - shows
 //! all the while the pistol is out, the core and the shell tumbling every way round, each the
 //! opposite way to the other.
@@ -236,10 +237,10 @@ const PISTOL_CORE: &str = "projectile_source.001";
 /// much as the shell is turned on.
 const SPIN: Vector3<f32> = Vector3::new(1.3, 2.1, 0.8);
 /// How quickly a flash of the screen dies down after the trigger is pulled, like a rate: after
-/// 1/`FLASH_FADE` seconds it is down to about a third; and how far down, from 1 to 0, it goes
-/// dark again.
+/// 1/`FLASH_FADE` seconds it is down to about a third; and how much brighter than it usually
+/// glows the screen is as it goes off, as a part of that.
 const FLASH_FADE: f32 = 8.0;
-const FLASH_DARK: f32 = 0.3;
+const FLASH_BRIGHTER: f32 = 2.0;
 /// The glass of the screen and of the shell: green, and see-through, glowing a little by itself.
 const GLASS_GREEN: Color = Color::opaque(40, 255, 60);
 const SCREEN_TINT: f32 = 0.6;
@@ -278,6 +279,51 @@ fn claim_eyes(graph: &mut Graph, eyes: Handle<Node>) -> Option<Eyes> {
     Some(eyes)
 }
 
+/// The crosshair on the pistol's screen: a copy of its glowing material for the droid to itself,
+/// to flash, and how brightly it glows as it came.
+#[derive(Debug, Clone, PartialEq)]
+struct Crosshair {
+    material: MaterialResource,
+    glow: MaterialProperty,
+}
+
+/// Gives the droid its own copy of the glowing material of the crosshair on the pistol's
+/// `screen`: the marks below the screen itself, if they glow.
+fn claim_crosshair(graph: &mut Graph, screen: Handle<Node>) -> Option<Crosshair> {
+    let marks: Vec<Handle<Node>> = graph.traverse_handle_iter(screen).skip(1).collect();
+    let (key, crosshair) = marks.iter().find_map(|&mark| {
+        let mesh = graph[mark].cast::<Mesh>()?;
+        mesh.surfaces().iter().find_map(|surface| {
+            let original = surface.material();
+            let state = original.state();
+            let material = state.data_ref()?;
+            let glow = glow_strength(material)?;
+            let copy = MaterialResource::new_embedded(material.clone());
+            Some((original.key(), Crosshair { material: copy, glow }))
+        })
+    })?;
+    for mark in marks {
+        let Some(mesh) = graph[mark].cast_mut::<Mesh>() else {
+            continue;
+        };
+        for surface in mesh.surfaces_mut() {
+            if surface.material().key() == key {
+                surface.set_material(crosshair.material.clone());
+            }
+        }
+    }
+    Some(crosshair)
+}
+
+/// `glow`, `times` as bright.
+fn brighter(glow: &MaterialProperty, times: f32) -> MaterialProperty {
+    match glow {
+        MaterialProperty::Vector3(glow) => MaterialProperty::Vector3(glow * times),
+        MaterialProperty::Float(glow) => MaterialProperty::Float(glow * times),
+        other => other.clone(),
+    }
+}
+
 /// How far round something tumbling at [`SPIN`] has gone after `time` seconds.
 fn tumbled(time: f32) -> UnitQuaternion<f32> {
     let angle = SPIN * time;
@@ -286,7 +332,7 @@ fn tumbled(time: f32) -> UnitQuaternion<f32> {
 
 /// See-through green glass, tinting what is behind it `tint` of the way to green and glowing
 /// `glow` brightly. Nothing seen through it is bent: a screen and a shell, not lenses.
-fn green_glass(tint: f32, glow: f32) -> fyrox::material::MaterialResource {
+fn green_glass(tint: f32, glow: f32) -> GlassMaterial {
     GlassMaterial {
         tint: GLASS_GREEN,
         tint_strength: tint,
@@ -297,7 +343,16 @@ fn green_glass(tint: f32, glow: f32) -> fyrox::material::MaterialResource {
         emission_strength: glow,
         ..Default::default()
     }
-    .build_resource()
+}
+
+/// The glass of the pistol's screen: green glass that shows neither what is round it nor the
+/// lights on it, only what is through it and its own glow - a display, not a window.
+fn screen_glass() -> GlassMaterial {
+    GlassMaterial {
+        reflectivity: 0.0,
+        specular_strength: 0.0,
+        ..green_glass(SCREEN_TINT, SCREEN_GLOW)
+    }
 }
 /// How quickly the turn that brings the barrel round to the camera catches up with how far it
 /// has to, like a rate: after 1/`AIM_FIX_RATE` seconds, about two thirds of the way.
@@ -719,9 +774,14 @@ struct Wants {
 }
 
 /// The pistol's screen, which flashes as the trigger is pulled.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Flash {
     screen: Handle<Node>,
+    /// Its glass, and the crosshair on it if it glows, which glow brighter in a flash.
+    glass: MaterialResource,
+    crosshair: Option<Crosshair>,
+    /// How brightly the glass glows right now.
+    glow: f32,
     /// How long since the trigger was last pulled, in seconds.
     since: f32,
 }
@@ -1318,8 +1378,8 @@ impl Avatar {
             rest.keys().map(|&bone| (bone, graph[bone].parent())).collect();
         let eyes = find(EYES).and_then(|eyes| claim_eyes(graph, eyes));
         // The screen and the shell as see-through green glass - the model's own see-through
-        // shell comes in solid, and would hide the core - and the screen dark until the trigger
-        // is pulled.
+        // shell comes in solid, and would hide the core. Only the screen itself: the crosshair on
+        // it keeps its own solid glow, which flashes with it.
         let spinning: Vec<(Handle<Node>, bool)> = pistol_node.map_or_else(Vec::new, |pistol| {
             [(PISTOL_SHELL, false), (PISTOL_CORE, true)]
                 .into_iter()
@@ -1330,13 +1390,23 @@ impl Avatar {
             let find = |name: &str| graph.find_by_name(pistol, name).map(|(node, _)| node);
             let (screen, shell) = (find(PISTOL_SCREEN), find(PISTOL_SHELL));
             if let Some(shell) = shell {
-                replace_materials(graph, shell, |_| true, &green_glass(SHELL_TINT, SHELL_GLOW));
+                let glass = green_glass(SHELL_TINT, SHELL_GLOW).build_resource();
+                replace_materials(graph, shell, |_| true, &glass);
             }
             let screen = screen?;
-            replace_materials(graph, screen, |_| true, &green_glass(SCREEN_TINT, SCREEN_GLOW));
+            let glass = screen_glass().build_resource();
+            if let Some(mesh) = graph[screen].cast_mut::<Mesh>() {
+                for surface in mesh.surfaces_mut() {
+                    surface.set_material(glass.clone());
+                }
+            }
             graph[screen].set_visibility(false);
+            let crosshair = claim_crosshair(graph, screen);
             Some(Flash {
                 screen,
+                glass,
+                crosshair,
+                glow: SCREEN_GLOW,
                 since: f32::INFINITY,
             })
         });
@@ -1767,6 +1837,18 @@ impl Avatar {
         self.travel
     }
 
+    /// The pistol and its muzzle, if the droid has one.
+    pub(super) fn pistol_nodes(&self) -> Option<(Handle<Node>, Handle<Node>)> {
+        self.pistol.map(|pistol| (pistol.node, pistol.muzzle))
+    }
+
+    /// Whether the pistol is in the droid's hand, where it can be seen: from partway through
+    /// drawing it to partway through holstering it.
+    pub(super) fn pistol_out(&self, graph: &Graph) -> bool {
+        self.pistol
+            .is_some_and(|pistol| graph[pistol.node].visibility())
+    }
+
     /// Where the pistol's muzzle was, across the world, as a shot left it this frame, and which way
     /// the shot went, one meter long: the way the barrel pointed as the trigger was pulled. None
     /// if no shot left.
@@ -1882,18 +1964,26 @@ impl Avatar {
         self.arms_weight += (out - self.arms_weight).clamp(-step, step);
     }
 
-    /// Lets the flash of the pistol's screen, from the last pull of the trigger, die down for
-    /// another `dt`, while it is `out`.
+    /// Shows the pistol's screen, crosshair and all, while the pistol is `out`, and lets the
+    /// flash from the last pull of the trigger die down for another `dt`.
     fn flash(&mut self, graph: &mut Graph, out: bool, dt: f32) {
-        let Some(mut flash) = self.flash else {
+        let Some(flash) = self.flash.as_mut() else {
             return;
         };
         flash.since += dt;
-        let lit = out && flash_glow(flash.since) > FLASH_DARK;
-        if graph[flash.screen].visibility() != lit {
-            graph[flash.screen].set_visibility(lit);
+        if graph[flash.screen].visibility() != out {
+            graph[flash.screen].set_visibility(out);
         }
-        self.flash = Some(flash);
+        let glow = SCREEN_GLOW * (1.0 + FLASH_BRIGHTER * flash_glow(flash.since));
+        // Only while it is still dying down: done, it glows as it always does.
+        if (glow - flash.glow).abs() > 1.0e-3 {
+            flash.glow = glow;
+            flash.glass.data_ref().set_property("emissionStrength", glow);
+            if let Some(crosshair) = &flash.crosshair {
+                let lit = brighter(&crosshair.glow, glow / SCREEN_GLOW);
+                crosshair.material.data_ref().set_property(EMISSION_STRENGTH, lit);
+            }
+        }
     }
 
     /// Turns the model's root to face the droid's heading.

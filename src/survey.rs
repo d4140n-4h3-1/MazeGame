@@ -18,7 +18,7 @@ use fyrox::{
 };
 
 /// Spacing of the walkability samples, in meters.
-const CELL_SIZE: f32 = 0.5;
+pub(crate) const CELL_SIZE: f32 = 0.5;
 
 /// Samples the maze for walkable ground, returning the grid and the world position of its corner.
 /// `maze` is the level's collider, which must exist already, and `ignore` a mesh that is not part

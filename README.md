@@ -17,7 +17,8 @@ glowing exit waits at the other end. The clock runs until you reach it.
   with you, as fast as its feet carry it. V switches to seeing through its eyes; holding the
   middle mouse button swings the camera round it.
 - Other droids living in the maze, wandering its corridors on their own, that can be talked to
-  as in Fallout 3. They speak System Latin.
+  as in Fallout 3. They speak System Latin. Fail to fool a sentry and it hunts you down, Metal
+  Gear style: break its line of sight and it searches for you; the pistol can stop it.
 - Movement with walking, running and a breath-limited sprint, crouching, crawling,
   jumping, taking cover and leaning round corners, and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
@@ -132,6 +133,69 @@ shadows (its `raytracing` feature).
 - **Always someone to talk to.** One of the droids stands just in front of you at the start of
   each round, facing you, and stays there rather than wandering off, even once you have talked
   to it.
+- **Sentries turn hostile.** Fail the sentry's Speech check to pass as a maintenance unit, and it
+  orders you out of its zone, in orange; walk away and that is the end of it, but refuse and it
+  says "You are an intruder. Prepare for deletion." in red. Fail to send it after something
+  behind you, and it sees through you and says the same. Its eyes stay red, it cannot be
+  talked to any more, and once the conversation is over, a moment later it comes after you at
+  a run, and hunts you as below. If it catches you,
+  you are deleted, and a new maze begins a few seconds later. Three bolts from the pistol stop
+  it: it goes down in a crouch, its eyes dark, and stays there. A line in
+  `data/dialogue/droids.json` with `"attacks": true` has its droid do this.
+- **Stealth, as in Metal Gear.** A hostile droid goes through Metal Gear's phases, shown in the
+  status line and in its eyes:
+  - **ALERT** (red eyes): it can see you, and runs at you.
+  - **EVASION** (orange), with the seconds of searching it has left: it has lost you. It runs to
+    where you were heading when it last saw you and looks about, then walks from one spot to
+    another nearby, looking about at each, for 30 seconds.
+  - **CAUTION** (yellow), with the seconds left: it has given up, and wanders, still watching
+    for you. After a minute it calms down, its eyes go back to green, and it can be talked to
+    again.
+
+  Out of ALERT it sees only what is in front of it, 55 degrees either way, and 30 m off
+  standing, half as far crouched and under a third as far crawling; right next to it, it
+  notices you whichever way it faces. Seeing you in any phase puts it back on ALERT. A bolt
+  that hits it without it seeing you has it search where you fired from. As it spots you,
+  loses you and gives up, it says so out loud: "Intrusor detectum. Sta." ("Intruder detected.
+  Halt."), "Intrusor perdatum. Zeto intrusor." ("Intruder lost. Searching for the intruder.")
+  and "Phantasma. Resumo patrolium." ("A sensor ghost. Resuming patrol."), with subtitles
+  under the status line. These are the sentry's `barks` in `data/dialogue/droids.json`.
+- **Noise.** Out of ALERT, a hostile droid listens as well. Walking, crouching and crawling are
+  silent; running is heard 5 m off, sprinting 10 m, landing hard from a fall 6 m, a pistol shot
+  12 m and a bolt hitting something 8 m - measured along the corridors, so a wall between you
+  muffles it. A droid that hears you says "Quid? Sonus detectum. Verifico." ("What? A sound
+  detected. Checking."), runs to where the noise was and searches from there, and pays no heed
+  to another noise for 3 seconds. A bolt fired into a wall away from you makes a distraction.
+- **Darkness.** With the lights off, a droid sees only about a third as far, whichever phase it
+  is in - unless your flashlight is on, which gives you away as if the lights were on.
+- **The crosshair is always there.** The pistol's screen, crosshair and all, shows the whole
+  time the pistol is out, rather than only for a moment as it fires; each pull of the trigger
+  now flashes it brighter, the crosshair with it. The crosshair's marks keep the model's own
+  solid green glow instead of being turned into glass with the screen, and the screen's glass no longer mirrors its
+  surroundings or catches highlights from lights: only what is seen through it, and its glow.
+- **Don't point that at me.** Every droid minds having the pistol pointed at it - the middle
+  of the view on it, within 20 m, with the pistol out. Keep it there and the droid stops, turns
+  to face you and warns you, its eyes yellow. Each warning then holds 2.5 seconds longer than
+  that, for it to be said and taken in, before the next: the last warning, its eyes orange, and
+  then being provoked. Sentries are the least patient, warning you after 0.8 seconds, again at
+  4.1 and provoked at 7.4, and provoked, they come after you ("Aggressor detectum.
+  Deletabso tu." - "Attacker detected. I will delete you."). Scouts and maintenance units
+  warn you after 2 seconds, again at 6.5 and provoked at 11, and then sound the alarm ("Aggressor detectum. Sireno."):
+  every sentry within 40 m that is not already after you comes to search where you are
+  ("Sirenatio accipatum. Zeto aggressor." - "Alarm received. Searching for the attacker.").
+  Looking away only holds the next stage off; lower the pistol or keep it off a droid for 2.5
+  seconds and it calms down ("Accipatum."). Shooting a droid provokes it at once. How patient each kind is, and what it
+  does, is its `threatened` in `data/dialogue/droids.json`, and what it says are its `barks`.
+- **The pistol in first person, as in Call of Duty.** Seen through the droid's eyes, the pistol
+  is held in view, low and to the right, pointing in at the middle of the view. Holding the
+  right mouse button raises it into the middle to aim, its screen - crosshair and all - square
+  in the middle of the view like a sight. It comes up from below as it is drawn and goes back
+  down as it is holstered, kicks back and up with each shot, and tucks down out of the way
+  right up against a wall; the ball at its muzzle tumbles and its screen flashes as the
+  droid's own do. In first person a shot leaves its muzzle for whatever the middle of the view
+  is on.
+- **A bolt shows where it hits.** It stops with its tip against whatever it hit and glows there
+  a moment, lighting it up, rather than going out a step short of it.
 
 24 September 2026:
 

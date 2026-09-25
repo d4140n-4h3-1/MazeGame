@@ -15,6 +15,16 @@
 //! line says its own, or takes one from how the check that led to it went: blue if it succeeded,
 //! orange if not.
 //!
+//! A line can have the droid turn on the player once the conversation is over (see
+//! [`Conversation::attacks`]): a sentry that sees through the player goes after them. A kind of
+//! droid can also have [`Bark`]s, said out loud with nobody talking to it, as it hunts the
+//! player: when it spots them, when it loses them, when it hears them, and when it gives up
+//! looking.
+//!
+//! Every kind of droid can say how it takes having the pistol pointed at it ([`Threatened`]):
+//! how long it will stand for it before warning the player, and what it does once it has warned
+//! them twice - a sentry goes after them, anyone else sounds the alarm for the sentries.
+//!
 //! Lines can name what is true where the conversation happens, in braces: `{code}`, the droid's
 //! code, and `{exit_far}` and `{exit_way}`, how far off the exit is and which way. Each is put in
 //! System Latin where the droid says it, and in English where the meaning is given.
@@ -81,6 +91,38 @@ pub struct Line {
     /// None takes the mood from how the check that led here went, if one did.
     #[serde(default)]
     pub mood: Option<Mood>,
+    /// Whether the droid goes after the player once the conversation is over.
+    #[serde(default)]
+    pub attacks: bool,
+}
+
+/// Something a droid says out loud by itself, with nobody talking to it.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Bark {
+    /// In System Latin.
+    pub says: String,
+    /// What that means, in English.
+    #[serde(default)]
+    pub means: String,
+}
+
+/// What a droid does once it has had the pistol pointed at it for too long.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provoked {
+    /// It goes after the player.
+    Attacks,
+    /// It sounds the alarm, for the droids that go after the player to come and look.
+    Alarm,
+}
+
+/// How a droid takes having the pistol pointed at it.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub struct Threatened {
+    /// How long it stands for it, in seconds, before it warns the player; as long again before
+    /// its last warning; and as long again before it does something about it.
+    pub patience: f32,
+    pub then: Provoked,
 }
 
 /// A kind of droid, and how a conversation with one goes.
@@ -91,6 +133,14 @@ pub struct Character {
     /// The line it opens with.
     pub start: String,
     pub lines: HashMap<String, Line>,
+    /// What it says by itself, by when: as it hunts the player, `spotted`, `lost`, `heard`,
+    /// `alarmed` or `gave_up`; with the pistol pointed at it, `warned`, `warned_again`,
+    /// `provoked` or `calmed`.
+    #[serde(default)]
+    pub barks: HashMap<String, Bark>,
+    /// How it takes having the pistol pointed at it; not at all, without.
+    #[serde(default)]
+    pub threatened: Option<Threatened>,
 }
 
 /// Everyone's conversations, as the file has them.
@@ -276,6 +326,12 @@ impl Conversation {
         }
     }
 
+    /// Whether the line the conversation is at has the droid go after the player once it is
+    /// over.
+    pub fn attacks(&self, script: &Script) -> bool {
+        self.line(script).is_some_and(|line| line.attacks)
+    }
+
     /// Says the `choice`th of the replies on offer, rolling `roll` - from 0 to 99 - for its check
     /// if it has one. False once the conversation is over.
     pub fn choose(&mut self, script: &Script, choice: usize, roll: u32) -> bool {
@@ -344,7 +400,8 @@ mod tests {
                 "exit": { "says": "Progreda {exit_way}.", "means": "Go {exit_way}." },
                 "no": { "says": "Negativum.", "means": "No.",
                     "replies": [ { "say": "Back.", "to": "hello" } ] },
-                "cross": { "says": "Sta.", "means": "Stop.", "mood": "hostile" } } } ] }"#,
+                "cross": { "says": "Sta.", "means": "Stop.", "mood": "hostile",
+                    "attacks": true } } } ] }"#,
         )
         .unwrap()
     }
@@ -397,6 +454,15 @@ mod tests {
         assert_eq!(talk.view(&script, &facts()).mood, Mood::Success, "succeeded");
         talk.line = "cross".into();
         assert_eq!(talk.view(&script, &facts()).mood, Mood::Hostile, "its own");
+    }
+
+    #[test]
+    fn only_a_line_that_says_so_ends_in_an_attack() {
+        let script = script();
+        let mut talk = Conversation::new(&script, 0).unwrap();
+        assert!(!talk.attacks(&script));
+        talk.line = "cross".into();
+        assert!(talk.attacks(&script));
     }
 
     #[test]
