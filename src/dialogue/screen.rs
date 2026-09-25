@@ -1,9 +1,10 @@
-//! The conversation on screen, as in Fallout 3: a green-on-black panel along the bottom, with
-//! who is talking, what they say and what it means, how the last check went, and the replies to
-//! pick from, the one picked lit up; and the hint to talk, under the middle of the screen, while
-//! there is someone close enough.
+//! The conversation on screen, as in Fallout 3: a panel along the bottom, with who is talking,
+//! what they say and what it means, how the last check went, and the replies to pick from, the
+//! one picked lit up; and the hint to talk, under the middle of the screen, while there is
+//! someone close enough. The panel is coloured by the mood of what is being said: green as
+//! usual, blue, yellow, orange or red (see [`Mood`]).
 
-use super::View;
+use super::{Mood, View};
 use fyrox::{
     core::{color::Color, pool::Handle},
     gui::{
@@ -24,14 +25,65 @@ pub const MOST_REPLIES: usize = 8;
 /// How wide the panel is, in pixels.
 const WIDTH: f32 = 860.0;
 
-/// The Pip-Boy's greens: bright for what is being said and the reply picked, the usual for the
-/// rest, dim for what has been said already and for the panel's edge.
-const BRIGHT: Color = Color::opaque(170, 255, 190);
-const GREEN: Color = Color::opaque(90, 225, 130);
-const DIM: Color = Color::opaque(50, 130, 75);
-const BACKDROP: Color = Color::from_rgba(2, 12, 6, 215);
-const LIT: Color = Color::from_rgba(60, 255, 130, 55);
+/// The colours of the panel in one mood: bright for what is being said and the reply picked, the
+/// usual for the rest, dim for what has been said already and for the panel's edge; the panel's
+/// backdrop, and the light behind the reply picked.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Palette {
+    bright: Color,
+    usual: Color,
+    dim: Color,
+    backdrop: Color,
+    lit: Color,
+}
+
+/// The Pip-Boy's greens, as usual.
+const GREEN: Palette = Palette {
+    bright: Color::opaque(170, 255, 190),
+    usual: Color::opaque(90, 225, 130),
+    dim: Color::opaque(50, 130, 75),
+    backdrop: Color::from_rgba(2, 12, 6, 215),
+    lit: Color::from_rgba(60, 255, 130, 55),
+};
+const BLUE: Palette = Palette {
+    bright: Color::opaque(175, 215, 255),
+    usual: Color::opaque(95, 165, 255),
+    dim: Color::opaque(50, 95, 150),
+    backdrop: Color::from_rgba(2, 6, 14, 215),
+    lit: Color::from_rgba(80, 160, 255, 55),
+};
+const YELLOW: Palette = Palette {
+    bright: Color::opaque(255, 245, 165),
+    usual: Color::opaque(235, 210, 80),
+    dim: Color::opaque(140, 120, 40),
+    backdrop: Color::from_rgba(12, 10, 2, 215),
+    lit: Color::from_rgba(255, 220, 60, 55),
+};
+const ORANGE: Palette = Palette {
+    bright: Color::opaque(255, 205, 155),
+    usual: Color::opaque(255, 145, 50),
+    dim: Color::opaque(150, 80, 30),
+    backdrop: Color::from_rgba(14, 6, 2, 215),
+    lit: Color::from_rgba(255, 140, 40, 55),
+};
+const RED: Palette = Palette {
+    bright: Color::opaque(255, 175, 170),
+    usual: Color::opaque(240, 70, 60),
+    dim: Color::opaque(140, 40, 35),
+    backdrop: Color::from_rgba(14, 2, 2, 215),
+    lit: Color::from_rgba(255, 60, 50, 55),
+};
 const UNLIT: Color = Color::from_rgba(0, 0, 0, 0);
+
+fn palette(mood: Mood) -> Palette {
+    match mood {
+        Mood::Normal => GREEN,
+        Mood::Success => BLUE,
+        Mood::Warning => YELLOW,
+        Mood::Agitated => ORANGE,
+        Mood::Hostile => RED,
+    }
+}
 
 /// Something done with the mouse to a reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,9 +94,12 @@ pub enum Pointer {
     Picked(usize),
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct DialogueScreen {
     screen: Handle<Screen>,
+    /// The panel's edge and backdrop, and the line between what is said and the replies.
+    frame: Handle<Border>,
+    rule: Handle<Border>,
     name: Handle<Text>,
     says: Handle<Text>,
     means: Handle<Text>,
@@ -54,8 +109,30 @@ pub struct DialogueScreen {
     /// Whether each reply shown has been said before.
     said: Vec<bool>,
     selected: usize,
+    /// The colours of the mood of what is being said.
+    palette: Palette,
     prompt: Handle<Text>,
     open: bool,
+}
+
+impl Default for DialogueScreen {
+    fn default() -> Self {
+        Self {
+            screen: Handle::NONE,
+            frame: Handle::NONE,
+            rule: Handle::NONE,
+            name: Handle::NONE,
+            says: Handle::NONE,
+            means: Handle::NONE,
+            note: Handle::NONE,
+            replies: Vec::new(),
+            said: Vec::new(),
+            selected: 0,
+            palette: GREEN,
+            prompt: Handle::NONE,
+            open: false,
+        }
+    }
 }
 
 fn text(ctx: &mut BuildContext, color: Color, size: f32, margin: Thickness) -> Handle<Text> {
@@ -73,15 +150,15 @@ impl DialogueScreen {
     /// Builds the panel, hidden, and the hint to talk, in `ui`.
     pub fn build(ui: &mut UserInterface) -> Self {
         let ctx = &mut ui.build_ctx();
-        let name = text(ctx, DIM, 17.0, Thickness::bottom(6.0));
-        let says = text(ctx, BRIGHT, 27.0, Thickness::bottom(4.0));
-        let means = text(ctx, GREEN, 19.0, Thickness::bottom(4.0));
-        let note = text(ctx, BRIGHT, 17.0, Thickness::bottom(4.0));
+        let name = text(ctx, GREEN.dim, 17.0, Thickness::bottom(6.0));
+        let says = text(ctx, GREEN.bright, 27.0, Thickness::bottom(4.0));
+        let means = text(ctx, GREEN.usual, 19.0, Thickness::bottom(4.0));
+        let note = text(ctx, GREEN.bright, 17.0, Thickness::bottom(4.0));
         let rule = BorderBuilder::new(
             WidgetBuilder::new()
                 .with_height(1.0)
                 .with_margin(Thickness::top_bottom(8.0))
-                .with_background(Brush::Solid(DIM).into()),
+                .with_background(Brush::Solid(GREEN.dim).into()),
         )
         .with_stroke_thickness(Thickness::uniform(0.0).into())
         .build(ctx);
@@ -96,7 +173,7 @@ impl DialogueScreen {
         for _ in 0..MOST_REPLIES {
             let label = text(
                 ctx,
-                GREEN,
+                GREEN.usual,
                 22.0,
                 Thickness {
                     left: 10.0,
@@ -124,8 +201,8 @@ impl DialogueScreen {
                 .with_horizontal_alignment(HorizontalAlignment::Center)
                 .with_vertical_alignment(VerticalAlignment::Bottom)
                 .with_margin(Thickness::bottom(40.0))
-                .with_background(Brush::Solid(BACKDROP).into())
-                .with_foreground(Brush::Solid(DIM).into())
+                .with_background(Brush::Solid(GREEN.backdrop).into())
+                .with_foreground(Brush::Solid(GREEN.dim).into())
                 .with_child(panel),
         )
         .with_stroke_thickness(Thickness::uniform(2.0).into())
@@ -146,7 +223,7 @@ impl DialogueScreen {
                 .with_horizontal_alignment(HorizontalAlignment::Center)
                 .with_vertical_alignment(VerticalAlignment::Center)
                 .with_margin(Thickness::top(240.0))
-                .with_foreground(Brush::Solid(GREEN).into()),
+                .with_foreground(Brush::Solid(GREEN.usual).into()),
         )
         .with_font_size(22.0.into())
         .with_horizontal_text_alignment(HorizontalAlignment::Center)
@@ -155,15 +232,15 @@ impl DialogueScreen {
 
         Self {
             screen,
+            frame,
+            rule,
             name,
             says,
             means,
             note,
             replies,
-            said: Vec::new(),
-            selected: 0,
             prompt,
-            open: false,
+            ..Default::default()
         }
     }
 
@@ -179,8 +256,9 @@ impl DialogueScreen {
         ui.send(self.prompt, TextMessage::Text(text));
     }
 
-    /// Shows `view`, from `who`, with the first reply picked.
+    /// Shows `view`, from `who`, in the colours of its mood, with the first reply picked.
     pub fn show(&mut self, ui: &UserInterface, who: &str, view: &View) {
+        self.colour(ui, palette(view.mood));
         ui.send(self.name, TextMessage::Text(who.to_string()));
         ui.send(self.says, TextMessage::Text(view.says.clone()));
         ui.send(self.means, TextMessage::Text(view.means.clone()));
@@ -199,6 +277,24 @@ impl DialogueScreen {
         self.select(ui, 0);
     }
 
+    /// Colours the panel, and all that is in it but the replies, with `palette`; the replies are
+    /// coloured as they are picked.
+    fn colour(&mut self, ui: &UserInterface, palette: Palette) {
+        self.palette = palette;
+        let solid = |color: Color| Brush::Solid(color).into();
+        ui.send(self.frame, WidgetMessage::Background(solid(palette.backdrop)));
+        ui.send(self.frame, WidgetMessage::Foreground(solid(palette.dim)));
+        ui.send(self.rule, WidgetMessage::Background(solid(palette.dim)));
+        for (text, color) in [
+            (self.name, palette.dim),
+            (self.says, palette.bright),
+            (self.means, palette.usual),
+            (self.note, palette.bright),
+        ] {
+            ui.send(text, WidgetMessage::Foreground(solid(color)));
+        }
+    }
+
     /// How many replies there are to pick from.
     pub fn count(&self) -> usize {
         self.said.len()
@@ -215,11 +311,12 @@ impl DialogueScreen {
         for (i, &(reply, label)) in self.replies.iter().take(self.count()).enumerate() {
             let lit = i == self.selected;
             let color = match (lit, self.said[i]) {
-                (true, _) => BRIGHT,
-                (false, true) => DIM,
-                (false, false) => GREEN,
+                (true, _) => self.palette.bright,
+                (false, true) => self.palette.dim,
+                (false, false) => self.palette.usual,
             };
-            ui.send(reply, WidgetMessage::Background(Brush::Solid(if lit { LIT } else { UNLIT }).into()));
+            let light = if lit { self.palette.lit } else { UNLIT };
+            ui.send(reply, WidgetMessage::Background(Brush::Solid(light).into()));
             ui.send(label, WidgetMessage::Foreground(Brush::Solid(color).into()));
         }
     }

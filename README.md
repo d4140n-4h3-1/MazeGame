@@ -111,7 +111,15 @@ shadows (its `raytracing` feature).
   high and quick, and the maintenance unit breathily; every droid a little higher or lower than
   the rest of its kind. The sounds and voices are in `data/sounds/voice_formants.json`, which
   can be retuned without a rebuild. A line is cut off by the next one, or by walking away.
-- **The close-up is lower**, looking up into the droid's face.
+- **The close-up looks level and square on at the droid's face**, from low enough that the
+  face is up above the conversation at the bottom of the screen.
+- **Moods.** The conversation's panel takes the colour of how the droid feels about what it is
+  saying: green as usual, blue for success, yellow for a warning or a question, orange for
+  agitation or a failed Speech check, and red when it is hostile. Each line in
+  `data/dialogue/droids.json` can say its own; one that does not is blue after a check that
+  succeeded, orange after one that failed, and green otherwise.
+- **Pausing stops the sound too**: a droid's line, the pistol and its bolts carry on from where
+  they were once the game is resumed.
 - **Always someone to talk to.** One of the droids stands just in front of you at the start of
   each round, facing you, and stays there rather than wandering off, even once you have talked
   to it.
@@ -255,7 +263,8 @@ well.
 
 ### Pause menu
 
-Escape pauses the game: the clock, the player and the physics all stop. Switching to another
+Escape pauses the game: the clock, the player, the physics and every sound all stop, sounds
+carrying on from where they were once it is resumed. Switching to another
 window in the middle of a round pauses it too. The menu has:
 
 - **Resume**: carry on where you left off.

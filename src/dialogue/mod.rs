@@ -10,6 +10,10 @@
 //! it. A reply can be a skill check, `[Speech 40%]`, that goes one way if it succeeds and another
 //! if it fails; a check is tried only once. A reply already given is shown dimmed.
 //!
+//! Each line has a mood, which colours the whole panel: green as usual, blue for success, yellow
+//! for a warning or a question, orange for agitation, red for hostility. A line says its own, or
+//! takes one from how the check that led to it went: blue if it succeeded, orange if not.
+//!
 //! Lines can name what is true where the conversation happens, in braces: `{code}`, the droid's
 //! code, and `{exit_far}` and `{exit_way}`, how far off the exit is and which way. Each is put in
 //! System Latin where the droid says it, and in English where the meaning is given.
@@ -45,6 +49,23 @@ pub struct Reply {
     pub fail: Option<String>,
 }
 
+/// How a droid feels saying a line, which colours the panel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mood {
+    /// Green.
+    #[default]
+    Normal,
+    /// Blue.
+    Success,
+    /// Yellow: warning, or questioning.
+    Warning,
+    /// Orange: agitated, or a failed check.
+    Agitated,
+    /// Red.
+    Hostile,
+}
+
 /// Something a droid says, and what the player can say back.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Line {
@@ -56,6 +77,9 @@ pub struct Line {
     /// None at all leaves only walking away.
     #[serde(default)]
     pub replies: Vec<Reply>,
+    /// None takes the mood from how the check that led here went, if one did.
+    #[serde(default)]
+    pub mood: Option<Mood>,
 }
 
 /// A kind of droid, and how a conversation with one goes.
@@ -161,6 +185,7 @@ pub struct View {
     /// How the last check went, if the last reply was one.
     pub note: Option<String>,
     pub choices: Vec<Choice>,
+    pub mood: Mood,
 }
 
 /// Where a conversation with one droid has got to.
@@ -170,8 +195,9 @@ pub struct Conversation {
     line: String,
     /// The replies said so far, by the line they were said to and which of its replies they were.
     said: HashSet<(String, usize)>,
-    /// How the last check went, if the last reply was one.
-    note: Option<String>,
+    /// How the last check went, if the last reply was one: what to say about it, and whether it
+    /// succeeded.
+    note: Option<(String, bool)>,
 }
 
 impl Conversation {
@@ -214,6 +240,7 @@ impl Conversation {
                 means: String::new(),
                 note: None,
                 choices: vec![leave()],
+                mood: Mood::Normal,
             };
         };
         let choices = self
@@ -234,11 +261,17 @@ impl Conversation {
                 }
             })
             .collect();
+        let mood = line.mood.unwrap_or(match self.note {
+            Some((_, true)) => Mood::Success,
+            Some((_, false)) => Mood::Agitated,
+            None => Mood::Normal,
+        });
         View {
             says: facts.fill(&line.says, true),
             means: facts.fill(&line.means, false),
-            note: self.note.clone(),
+            note: self.note.as_ref().map(|(note, _)| note.clone()),
             choices,
+            mood,
         }
     }
 
@@ -259,11 +292,14 @@ impl Conversation {
         let next = match &reply.check {
             Some(check) => {
                 let passed = roll < check.chance;
-                self.note = Some(format!(
-                    "[{} {}%] {}",
-                    check.skill,
-                    check.chance,
-                    if passed { "Succeeded" } else { "Failed" }
+                self.note = Some((
+                    format!(
+                        "[{} {}%] {}",
+                        check.skill,
+                        check.chance,
+                        if passed { "Succeeded" } else { "Failed" }
+                    ),
+                    passed,
                 ));
                 if passed {
                     &reply.to
@@ -305,8 +341,9 @@ mod tests {
                         { "say": "Tell me again.", "to": "hello" },
                         { "say": "Goodbye." } ] },
                 "exit": { "says": "Progreda {exit_way}.", "means": "Go {exit_way}." },
-                "no": { "says": "Negatum.", "means": "No.",
-                    "replies": [ { "say": "Back.", "to": "hello" } ] } } } ] }"#,
+                "no": { "says": "Negativum.", "means": "No.",
+                    "replies": [ { "say": "Back.", "to": "hello" } ] },
+                "cross": { "says": "Sta.", "means": "Stop.", "mood": "hostile" } } } ] }"#,
         )
         .unwrap()
     }
@@ -333,7 +370,7 @@ mod tests {
         let mut talk = Conversation::new(&script, 0).unwrap();
         assert!(talk.choose(&script, 0, 50), "a roll of 50 fails a 50% check");
         let view = talk.view(&script, &facts());
-        assert_eq!(view.says, "Negatum.");
+        assert_eq!(view.says, "Negativum.");
         assert_eq!(view.note.as_deref(), Some("[Speech 50%] Failed"));
         assert!(talk.choose(&script, 0, 0));
         let view = talk.view(&script, &facts());
@@ -343,6 +380,22 @@ mod tests {
         let mut talk = Conversation::new(&script, 0).unwrap();
         assert!(talk.choose(&script, 0, 49));
         assert_eq!(talk.view(&script, &facts()).says, "Progreda ad sinistrum.");
+    }
+
+    #[test]
+    fn a_line_has_its_own_mood_or_the_one_its_check_gives_it() {
+        let script = script();
+        let mut talk = Conversation::new(&script, 0).unwrap();
+        assert_eq!(talk.view(&script, &facts()).mood, Mood::Normal);
+        talk.choose(&script, 0, 99);
+        assert_eq!(talk.view(&script, &facts()).mood, Mood::Agitated, "failed");
+        talk.choose(&script, 0, 0);
+        assert_eq!(talk.view(&script, &facts()).mood, Mood::Normal, "no check this time");
+        let mut talk = Conversation::new(&script, 0).unwrap();
+        talk.choose(&script, 0, 0);
+        assert_eq!(talk.view(&script, &facts()).mood, Mood::Success, "succeeded");
+        talk.line = "cross".into();
+        assert_eq!(talk.view(&script, &facts()).mood, Mood::Hostile, "its own");
     }
 
     #[test]

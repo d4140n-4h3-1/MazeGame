@@ -16,12 +16,12 @@ use fyrox::{
     },
 };
 
-/// How far in front of the face the camera is, in meters, how far out to one side and how far
-/// below its middle, so that the face is seen not quite head on: from a little below, looking
-/// up at it.
+/// How far in front of the face the camera is, in meters. It looks level and square on to the
+/// face, neither up nor down nor from one side, from low enough that the face is up above the
+/// conversation along the bottom of the screen.
 const CLOSE_UP: f32 = 0.85;
-const CLOSE_UP_SIDE: f32 = 0.12;
-const CLOSE_UP_DROP: f32 = 0.22;
+/// How far up the view the face is: 0 in the middle, 1 at the top.
+const FACE_UP_VIEW: f32 = 0.5;
 /// How wide the view is in the close-up, in degrees up and down.
 const CLOSE_UP_FOV: f32 = 40.0;
 /// How long the camera takes to go in to the close-up, or back out, in seconds.
@@ -64,14 +64,15 @@ fn ease(through: f32) -> f32 {
 }
 
 /// Where the camera is for a close-up of a face at `face`, talked to from `from`, and how it
-/// is turned, across the world.
+/// is turned, across the world: level, and as far below the face as puts it [`FACE_UP_VIEW`]
+/// of the way up the view.
 fn close_up(face: Vector3<f32>, from: Vector3<f32>) -> (Vector3<f32>, UnitQuaternion<f32>) {
     let out = Vector3::new(from.x - face.x, 0.0, from.z - face.z)
         .try_normalize(1.0e-4)
         .unwrap_or(Vector3::z());
-    let side = Vector3::y().cross(&out);
-    let at = face + out * CLOSE_UP + side * CLOSE_UP_SIDE - Vector3::y() * CLOSE_UP_DROP;
-    (at, UnitQuaternion::face_towards(&(face - at), &Vector3::y()))
+    let below = CLOSE_UP * (CLOSE_UP_FOV.to_radians() / 2.0).tan() * FACE_UP_VIEW;
+    let at = face + out * CLOSE_UP - Vector3::y() * below;
+    (at, UnitQuaternion::face_towards(&-out, &Vector3::y()))
 }
 
 impl Player {
@@ -162,13 +163,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_close_up_is_in_front_of_the_face_and_looks_at_it() {
+    fn the_close_up_looks_level_at_the_face_from_below_it() {
         let face = Vector3::new(0.0, 1.6, 0.0);
         let from = Vector3::new(0.0, 1.5, 2.0);
         let (at, turn) = close_up(face, from);
         assert!((at.z - CLOSE_UP).abs() < 1.0e-4, "out towards whoever is talking: {at:?}");
         let looking = turn * Vector3::z();
-        assert!((looking - (face - at).normalize()).norm() < 1.0e-4, "{looking:?}");
+        assert!((looking + Vector3::z()).norm() < 1.0e-4, "level and square on: {looking:?}");
+        // Where the face is up the view: how far above the camera, over how far half the view
+        // reaches up at that distance.
+        let up = (face.y - at.y) / (CLOSE_UP * (CLOSE_UP_FOV.to_radians() / 2.0).tan());
+        assert!((up - FACE_UP_VIEW).abs() < 1.0e-4, "{up}");
     }
 
     #[test]

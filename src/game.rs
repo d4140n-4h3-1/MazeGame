@@ -49,7 +49,7 @@ use fyrox::{
         },
         node::Node,
         rigidbody::{RigidBodyBuilder, RigidBodyType},
-        sound::{SoundBuilder, Status as SoundStatus},
+        sound::{Sound, SoundBuilder, Status as SoundStatus},
         transform::TransformBuilder,
         EnvironmentLightingSource, Scene,
     },
@@ -199,6 +199,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     dialogue: DialogueScreen,
+    /// The sounds that were playing as the game was paused, to carry on with once it resumes.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    paused_sounds: Vec<Handle<Node>>,
     #[visit(skip)]
     #[reflect(hidden)]
     stats: FrameStats,
@@ -557,12 +561,11 @@ impl MazeGame {
         self.menu
             .set_open(ctx.user_interfaces.first(), paused, can_restart);
         // The round's clock and the player stop in `update`; this stops everything else that
-        // moves, and holds the player where they are.
-        ctx.scenes[self.scene]
-            .graph
-            .physics
-            .enabled
-            .set_value_and_mark_modified(!paused);
+        // moves, and holds the player where they are, and every sound where it is - a droid's
+        // line, the hum of a bolt - to carry on from there.
+        let graph = &mut ctx.scenes[self.scene].graph;
+        graph.physics.enabled.set_value_and_mark_modified(!paused);
+        self.pause_sounds(graph, paused);
         if paused {
             // Nothing should still be walking when the game carries on, and the mouse is needed
             // for the menu.
@@ -572,6 +575,32 @@ impl MazeGame {
         } else {
             // Talking, the mouse is for picking what to say.
             self.want_mouse = self.talking.is_none();
+        }
+    }
+
+    /// Pauses every sound playing in `graph`, each where it is, or carries on with those it
+    /// paused. The engine sets the scene's own pause every frame, from switches the game has no
+    /// say in, so each sound is paused by itself.
+    fn pause_sounds(&mut self, graph: &mut Graph, paused: bool) {
+        if paused {
+            self.paused_sounds = graph
+                .pair_iter_mut()
+                .filter_map(|(handle, node)| {
+                    let sound = node.cast_mut::<Sound>()?;
+                    (sound.status() == SoundStatus::Playing).then(|| {
+                        sound.pause();
+                        handle
+                    })
+                })
+                .collect();
+        } else {
+            for handle in self.paused_sounds.drain(..) {
+                if let Ok(sound) = graph.try_get_mut_of_type::<Sound>(handle) {
+                    if sound.status() == SoundStatus::Paused {
+                        sound.play();
+                    }
+                }
+            }
         }
     }
 

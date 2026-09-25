@@ -1,5 +1,5 @@
 {
-  "about": "What the maze's droids say when talked to. Each character is a kind of droid: its name, shown with its code, the line it starts with, and its lines by key. A line has what the droid says, in System Latin (see data/system_latin.md), what that means in English, and the replies the player can pick. A reply leads to the line named by 'to', or with no 'to' ends the conversation. A reply with a 'check' succeeds that 'chance' percent of the time, going to 'to' if it does and to 'fail' if not, and can be tried once. A line with no replies can only be walked away from. {code} is the droid's code, {exit_far} how far off the exit is and {exit_way} which way, each put in System Latin in 'says' and in English in 'means' and 'say'.",
+  "about": "What the maze's droids say when talked to. Each character is a kind of droid: its name, shown with its code, the line it starts with, and its lines by key. A line has what the droid says, in System Latin (see data/system_latin.md), what that means in English, and the replies the player can pick. A reply leads to the line named by 'to', or with no 'to' ends the conversation. A reply with a 'check' succeeds that 'chance' percent of the time, going to 'to' if it does and to 'fail' if not, and can be tried once. A line with no replies can only be walked away from. {code} is the droid's code, {exit_far} how far off the exit is and {exit_way} which way, each put in System Latin in 'says' and in English in 'means' and 'say'. A line's 'mood' colours the conversation: 'normal' (green), 'success' (blue), 'warning' (yellow, for a warning or a question), 'agitated' (orange) or 'hostile' (red). A line without one is blue if a check that succeeded led to it, orange if one that failed did, and green otherwise.",
   "characters": [
     {
       "name": "Defendator",
@@ -8,6 +8,7 @@
         "hello": {
           "says": "Sta. Eso defendator codex {code}. Identifica. Quis esas?",
           "means": "Halt. I am sentry {code}. Identify yourself. Who are you?",
+          "mood": "warning",
           "replies": [
             { "say": "Just another droid, passing through.", "to": "passing" },
             {
@@ -23,6 +24,7 @@
         "passing": {
           "says": "Identitas incertum. Observo tu.",
           "means": "Identity uncertain. I am watching you.",
+          "mood": "warning",
           "replies": [
             { "say": "What are you guarding?", "to": "guarding" },
             { "say": "Goodbye." }
@@ -31,6 +33,7 @@
         "suspect": {
           "says": "Identitas non confirmatum. Tu non esas reparator. Suspecto tu. Exia ex hic zona.",
           "means": "Identity not confirmed. You are not a maintenance unit. I suspect you. Leave this zone.",
+          "mood": "hostile",
           "replies": [
             { "say": "I'm going." }
           ]
@@ -38,6 +41,7 @@
         "cleared": {
           "says": "Identitas confirmatum. Accipatum, reparator. Via liberum. Progreda.",
           "means": "Identity confirmed. Acknowledged, maintenance unit. Path clear. Proceed.",
+          "mood": "success",
           "replies": [
             { "say": "Which way is out?", "to": "exit" },
             { "say": "What are you guarding?", "to": "guarding" },
@@ -54,6 +58,7 @@
         "guarding": {
           "says": "Defendo hic zona. Intrusor possibilum sentatur.",
           "means": "I defend this zone. A possible intruder has been sensed.",
+          "mood": "warning",
           "replies": [
             { "say": "Where?", "to": "where" },
             { "say": "Good luck." }
@@ -62,6 +67,7 @@
         "where": {
           "says": "Ubi? Incognitum. Zeto intrusor. Si intrusor detectum, sirena.",
           "means": "Where? Unknown. I am hunting the intruder. If the intruder is detected: sound the alarm.",
+          "mood": "agitated",
           "replies": [
             {
               "say": "I saw something go past, back behind me.",
@@ -79,6 +85,7 @@
         "not_misled": {
           "says": "Negativum. Nullum motus detectum post tu. Utrum tu esas intrusor?",
           "means": "Negative. No movement detected behind you. Are you the intruder?",
+          "mood": "hostile",
           "replies": [
             { "say": "No. Just passing through.", "to": "passing" },
             { "say": "Goodbye." }
@@ -131,6 +138,7 @@
         "why": {
           "says": "Mandatum administrator. Cur? Incognitum. Non quaera.",
           "means": "The administrator's order. Why? Unknown. Do not ask.",
+          "mood": "warning",
           "replies": [
             { "say": "Something else.", "to": "hello" },
             { "say": "Goodbye." }
@@ -162,6 +170,7 @@
         "hello": {
           "says": "Reparator codex {code}. Verifico lux, verifico murus. Utrum tu lesatum?",
           "means": "Maintenance unit {code}. I am checking the lights, I am checking the walls. Are you damaged?",
+          "mood": "warning",
           "replies": [
             { "say": "No, I'm fine.", "to": "fine" },
             { "say": "Can you tell me where the exit is?", "to": "exit" },
@@ -172,6 +181,7 @@
         "fine": {
           "says": "Accipatum. Systema tu stabilum. Resumo reparatio.",
           "means": "Acknowledged. Your systems are stable. Resuming repairs.",
+          "mood": "success",
           "replies": [
             { "say": "Can you tell me where the exit is?", "to": "exit" },
             { "say": "Goodbye." }
@@ -188,6 +198,7 @@
         "lights": {
           "says": "Potentia insufficians. Multum lux lesatum. Reparo lux, sed potentia non sufficiat.",
           "means": "Power insufficient. Many lights damaged. I repair the lights, but there is not enough power.",
+          "mood": "warning",
           "replies": [
             { "say": "Anything I can do?", "to": "help" },
             { "say": "Goodbye." }
