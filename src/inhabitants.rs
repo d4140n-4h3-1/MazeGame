@@ -13,6 +13,10 @@
 //! it stops it, and kept waiting too long, it goes somewhere else instead.
 //!
 //! Only those the player could see are drawn. Like the player's droid, they cast no shadows.
+//!
+//! Each is one of the kinds of droid in the conversations (see [`crate::dialogue`]), with a code
+//! of its own, and can be talked to by a player close by and facing it. While it is, it stands
+//! still and turns to face them, and afterwards stands a moment before going on its way.
 
 use crate::{
     layout::{Rng, WalkGrid},
@@ -81,6 +85,12 @@ const PATIENCE: f32 = 3.0;
 const FLOOR_EASING: f32 = 10.0;
 /// Its walking pace, in meters per second, if the droid has no walk to go by.
 const FALLBACK_PACE: f32 = 1.4;
+/// How near the player's feet a droid's have to be, in meters, and how far off where the
+/// player looks it can be, in radians, for the player to talk to it.
+const TALK_REACH: f32 = 2.5;
+const TALK_CONE: f32 = 40.0 * std::f32::consts::PI / 180.0;
+/// Where a droid's face is above its feet, in meters, if its model has no head to go by.
+const FACE_HEIGHT: f32 = 1.6;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Inhabitant {
@@ -100,6 +110,11 @@ struct Inhabitant {
     waiting: f32,
     /// Where its feet were the last time the graphics effects were told.
     last_seen: Option<Vector3<f32>>,
+    /// Which kind of droid it is, as an index into the conversations' characters, and its code.
+    character: usize,
+    code: u32,
+    /// Whether the player is talking to it.
+    talking: bool,
 }
 
 /// Everyone who lives in the maze.
@@ -254,13 +269,15 @@ impl Inhabitants {
     }
 
     /// Puts the maze's inhabitants into `scene`, as droids from `model`, on the floor of `grid`
-    /// whose corner is at `origin`, well away from the `player`'s feet.
+    /// whose corner is at `origin`, well away from the `player`'s feet. They take turns being
+    /// each of the `characters` kinds of droid there are to talk to.
     pub fn populate(
         &mut self,
         scene: &mut Scene,
         model: &ModelResource,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         player: Vector3<f32>,
+        characters: usize,
         rng: &mut Rng,
     ) {
         self.clear(&mut scene.graph);
@@ -284,7 +301,8 @@ impl Inhabitants {
             .map(|(i, _)| (i % grid.width, i / grid.width))
             .collect();
 
-        for _ in 0..count {
+        let first = rng.below(characters.max(1));
+        for n in 0..count {
             if places.is_empty() {
                 break;
             }
@@ -317,6 +335,9 @@ impl Inhabitants {
                 resting: between(rng, REST),
                 waiting: 0.0,
                 last_seen: None,
+                character: (first + n) % characters.max(1),
+                code: 10 + rng.below(90) as u32,
+                talking: false,
             });
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
@@ -352,7 +373,16 @@ impl Inhabitants {
                 .filter(|&(other, _)| other != me)
                 .map(|(_, &other)| other);
             droid.resting = (droid.resting - dt).max(0.0);
-            if droid.route.is_empty() {
+            // Talking, it stands and faces the player, and rests a moment once they are done.
+            if droid.talking {
+                droid.route.clear();
+                droid.waiting = 0.0;
+                droid.resting = droid.resting.max(REST.0);
+                let to_them = flat(player - droid.feet);
+                if to_them.norm() > 1.0e-3 {
+                    droid.heading = to_them.x.atan2(to_them.z);
+                }
+            } else if droid.route.is_empty() {
                 if let Some(aside) = step_aside(droid.feet, others.clone(), floor_at) {
                     droid.route = vec![aside];
                 } else if droid.resting == 0.0 {
@@ -445,6 +475,49 @@ impl Inhabitants {
         }
     }
 
+    /// The droid the player could talk to, standing at `feet` and looking `ahead` along the
+    /// ground, if there is one: the nearest close by and in front of them, as long as `in_sight`
+    /// says nothing is in the way from the player to where it is.
+    pub fn to_talk_to(
+        &self,
+        feet: Vector3<f32>,
+        ahead: Vector3<f32>,
+        in_sight: impl Fn(Vector3<f32>) -> bool,
+    ) -> Option<usize> {
+        within_talking(self.droids.iter().map(|droid| droid.feet), feet, ahead)
+            .into_iter()
+            .find(|&i| in_sight(self.droids[i].feet))
+    }
+
+    /// Which kind of droid the `n`th is, as an index into the conversations' characters, and its
+    /// code.
+    pub fn who(&self, n: usize) -> Option<(usize, u32)> {
+        self.droids.get(n).map(|droid| (droid.character, droid.code))
+    }
+
+    /// Where the `n`th droid's feet are.
+    pub fn feet(&self, n: usize) -> Option<Vector3<f32>> {
+        self.droids.get(n).map(|droid| droid.feet)
+    }
+
+    /// Where the middle of the `n`th droid's face is, as of the last frame.
+    pub fn face(&self, graph: &Graph, n: usize) -> Option<Vector3<f32>> {
+        let droid = self.droids.get(n)?;
+        Some(
+            droid
+                .avatar
+                .face_at(graph)
+                .unwrap_or(droid.feet + Vector3::new(0.0, FACE_HEIGHT, 0.0)),
+        )
+    }
+
+    /// Has the player talking to the `n`th droid, or done talking to it.
+    pub fn set_talking(&mut self, n: usize, talking: bool) {
+        if let Some(droid) = self.droids.get_mut(n) {
+            droid.talking = talking;
+        }
+    }
+
     /// Draws only those the player could see from where they are in `level`.
     pub fn show(&self, graph: &mut Graph, level: &Level) {
         for droid in &self.droids {
@@ -470,6 +543,30 @@ impl Inhabitants {
     }
 }
 
+/// Those of the droids with their feet at `droids` that a player at `feet`, looking `ahead`
+/// along the ground, is close enough to and facing enough to talk to, nearest first.
+fn within_talking(
+    droids: impl Iterator<Item = Vector3<f32>>,
+    feet: Vector3<f32>,
+    ahead: Vector3<f32>,
+) -> Vec<usize> {
+    let mut near: Vec<(f32, usize)> = droids
+        .enumerate()
+        .filter_map(|(i, there)| {
+            let to_them = flat(there - feet);
+            let distance = to_them.norm();
+            let off = if distance < 1.0e-4 {
+                0.0
+            } else {
+                (to_them.dot(&ahead) / distance).clamp(-1.0, 1.0).acos()
+            };
+            (distance < TALK_REACH && off < TALK_CONE).then_some((distance, i))
+        })
+        .collect();
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    near.into_iter().map(|(_, i)| i).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,6 +576,18 @@ mod tests {
 
     fn standing(x: f32, z: f32) -> (Vector3<f32>, Option<Vector3<f32>>) {
         (Vector3::new(x, 0.0, z), None)
+    }
+
+    #[test]
+    fn only_those_close_by_and_in_front_can_be_talked_to_nearest_first() {
+        let droids = [
+            Vector3::new(0.0, 0.0, 2.0),  // ahead
+            Vector3::new(0.3, 0.0, 1.0),  // nearer, a little to one side
+            Vector3::new(0.0, 0.0, -1.0), // behind
+            Vector3::new(2.0, 0.0, 0.5),  // well off to the side
+            Vector3::new(0.0, 0.0, 4.0),  // too far
+        ];
+        assert_eq!(within_talking(droids.into_iter(), Vector3::zeros(), AHEAD), [1, 0]);
     }
 
     #[test]

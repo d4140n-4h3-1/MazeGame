@@ -145,13 +145,6 @@ impl Player {
             };
             boom = wanted * (self.boom / length);
         }
-        if let Some(avatar) = &self.avatar {
-            avatar.set_visible(graph, third_person && self.boom > HIDE_WITHIN);
-        }
-
-        let camera = graph[self.camera.transmute::<Node>()].local_transform_mut();
-        camera.set_position(head + boom);
-        camera.set_rotation(turn);
         // The camera's own terms are the head's, moved back along the boom.
         let flashlight = if third_person {
             FLASHLIGHT_ON_HEAD - turn.inverse() * boom
@@ -163,6 +156,27 @@ impl Player {
         let shine = turn.inverse()
             * aim
             * UnitQuaternion::from_axis_angle(&Vector3::x_axis(), -90f32.to_radians());
+
+        // Talking, the camera closes in on the face talked to; the flashlight stays where the
+        // droid holds it, and the droid shows once the camera is out of its head.
+        let (at, turned, close) = self.close_in(graph, head, head + boom, turn, dt);
+        let (flashlight, shine, shown) = if close > 0.0 {
+            let held = head + boom + turn * flashlight;
+            (
+                turned.inverse() * (held - at),
+                turned.inverse() * turn * shine,
+                (at - head).norm() > HIDE_WITHIN,
+            )
+        } else {
+            (flashlight, shine, third_person && self.boom > HIDE_WITHIN)
+        };
+        if let Some(avatar) = &self.avatar {
+            avatar.set_visible(graph, shown);
+        }
+
+        let camera = graph[self.camera.transmute::<Node>()].local_transform_mut();
+        camera.set_position(at);
+        camera.set_rotation(turned);
         if let Ok(light) = graph.try_get_mut(self.flashlight) {
             let transform = light.local_transform_mut();
             transform.set_position(flashlight);

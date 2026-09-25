@@ -12,7 +12,8 @@ glowing exit waits at the other end. The clock runs until you reach it.
 - A droid to play as, seen from behind over its shoulder, that walks, runs, sprints and crouches
   with you, as fast as its feet carry it. V switches to seeing through its eyes; holding the
   middle mouse button swings the camera round it.
-- Other droids living in the maze, wandering its corridors on their own.
+- Other droids living in the maze, wandering its corridors on their own, that can be talked to
+  as in Fallout 3. They speak System Latin.
 - Movement with walking, running and a breath-limited sprint, crouching, crawling,
   jumping, taking cover and leaning round corners, and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
@@ -86,6 +87,24 @@ reflections, a budget that keeps shadow maps for the nearest lamps only, and the
 shadows (its `raytracing` feature).
 
 ### The game
+
+25 September 2026:
+
+- **Talking to the droids, as in Fallout 3.** Close to a droid and facing it, its name shows under
+  the middle of the screen with `E) Talk`. E starts talking: the droid stops and turns to you,
+  yours turns to it, and the camera leaves its shoulder for a close-up of the droid's face, the
+  view narrowed as with a long lens. What it says runs along the bottom of the screen in a green
+  panel, in System Latin with the English under it, and under that the replies. Pick one with
+  the mouse, with W and S or the arrows and then E, Enter or Space, or with its number; Tab walks
+  away. A reply can be a Speech check (`[Speech 40%]`), which goes one way if it succeeds and
+  another if it fails, and can be tried only once. Replies already given are dimmed. The clock
+  stops while you talk.
+- **Three kinds of droid**, each with its own code: a sentry (Defendator), a scout (Explorator)
+  and a maintenance unit (Reparator), in turn. Talk the scout or the sentry round and it tells
+  you how far off the exit is and which way, as the crow flies. What they say is in
+  `data/dialogue/droids.json`, which can be rewritten without a rebuild. Every line parses with
+  the System Latin parser in `data/system_latin/`, once `build_lexicon.py system_latin.md` has
+  made its lexicon.
 
 24 September 2026:
 
@@ -215,6 +234,10 @@ well.
 | R                | Draw the pistol, or holster it                                |
 | Left mouse       | Draw the pistol; once it is drawn, fire                       |
 | Right mouse, drawn | Raise the pistol to aim, rather than hold it at the ready   |
+| E                | Talk to the droid close by and in front of you                 |
+| Talking: mouse, W / S, arrows | Pick a reply; E, Enter, Space or a click says it  |
+| Talking: 1 to 9  | Say that reply                                                |
+| Talking: Tab     | Walk away                                                     |
 | N                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |
@@ -288,9 +311,10 @@ and round planning, and the player's movement, breath, head motion, leaning and 
 | `inward.rs`     | Makes the tiles' surfaces visible from inside and out.                     |
 | `hud.rs`        | The status line and the banner.                                            |
 | `menu.rs`       | The pause menu.                                                            |
+| `dialogue/`     | Talking to the droids: their conversations from `data/dialogue/`, and the panel they are shown in. |
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
 | `formants/`     | Sounds made from formants: the file format, and the synthesizer that makes the pistol's sounds from `data/sounds/`. |
-| `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`) and the camera behind it (`third_person`). |
+| `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`), the camera behind it (`third_person`) and its close-up when talking (`talk`). |
 
 The tile models and the droid (`droid_full_deform.glb`) are in `data/`, along with where the
 droid's skids take it (`droid_motion.json`).

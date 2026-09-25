@@ -1,0 +1,2847 @@
+{
+ "version": "1.0",
+ "canonical": "lowercase ASCII (macrons stripped); punctuation: . , : ?",
+ "verbs": {
+  "accip": {
+   "gloss": "accept",
+   "valency": "trans",
+   "ct": false
+  },
+  "activ": {
+   "gloss": "activate",
+   "valency": "trans",
+   "ct": false
+  },
+  "add": {
+   "gloss": "add",
+   "valency": "trans",
+   "ct": false
+  },
+  "analys": {
+   "gloss": "analyze",
+   "valency": "trans",
+   "ct": false
+  },
+  "aperi": {
+   "gloss": "open",
+   "valency": "trans",
+   "ct": false
+  },
+  "appropinqu": {
+   "gloss": "approach",
+   "valency": "intrans",
+   "ct": false
+  },
+  "arm": {
+   "gloss": "arm",
+   "valency": "trans",
+   "ct": false
+  },
+  "augment": {
+   "gloss": "augment",
+   "valency": "trans",
+   "ct": false
+  },
+  "calcul": {
+   "gloss": "calculate",
+   "valency": "trans",
+   "ct": false
+  },
+  "classific": {
+   "gloss": "classify",
+   "valency": "trans",
+   "ct": false
+  },
+  "claud": {
+   "gloss": "close",
+   "valency": "trans",
+   "ct": false
+  },
+  "codific": {
+   "gloss": "codific",
+   "valency": "trans",
+   "ct": false
+  },
+  "communic": {
+   "gloss": "communicate",
+   "valency": "trans",
+   "ct": false
+  },
+  "comput": {
+   "gloss": "compute",
+   "valency": "trans",
+   "ct": false
+  },
+  "confirm": {
+   "gloss": "confirm",
+   "valency": "trans",
+   "ct": false
+  },
+  "confront": {
+   "gloss": "confront",
+   "valency": "trans",
+   "ct": false
+  },
+  "connect": {
+   "gloss": "connect",
+   "valency": "trans",
+   "ct": true
+  },
+  "const": {
+   "gloss": "remain constant",
+   "valency": "intrans",
+   "ct": false
+  },
+  "continu": {
+   "gloss": "continue",
+   "valency": "trans",
+   "ct": false
+  },
+  "corrig": {
+   "gloss": "correct",
+   "valency": "trans",
+   "ct": false
+  },
+  "corrump": {
+   "gloss": "corrupt",
+   "valency": "trans",
+   "ct": false
+  },
+  "cre": {
+   "gloss": "cre",
+   "valency": "trans",
+   "ct": false
+  },
+  "deb": {
+   "gloss": "deb",
+   "valency": "trans",
+   "ct": false
+  },
+  "decid": {
+   "gloss": "decide",
+   "valency": "trans",
+   "ct": false
+  },
+  "decodific": {
+   "gloss": "decodific",
+   "valency": "trans",
+   "ct": false
+  },
+  "deconnect": {
+   "gloss": "disconnect",
+   "valency": "trans",
+   "ct": true
+  },
+  "defend": {
+   "gloss": "defend",
+   "valency": "trans",
+   "ct": false
+  },
+  "delet": {
+   "gloss": "erase / delete",
+   "valency": "trans",
+   "ct": false
+  },
+  "desactiv": {
+   "gloss": "deactivate",
+   "valency": "trans",
+   "ct": false
+  },
+  "destru": {
+   "gloss": "destroy",
+   "valency": "trans",
+   "ct": false
+  },
+  "detect": {
+   "gloss": "detect",
+   "valency": "trans",
+   "ct": true
+  },
+  "elig": {
+   "gloss": "choose / select",
+   "valency": "trans",
+   "ct": false
+  },
+  "elimin": {
+   "gloss": "eliminate",
+   "valency": "trans",
+   "ct": false
+  },
+  "elud": {
+   "gloss": "elud",
+   "valency": "trans",
+   "ct": false
+  },
+  "es": {
+   "gloss": "be (copula, identity statements). regularized from latin **esse/sum**; see the copula note in xlii",
+   "valency": "trans",
+   "ct": false
+  },
+  "evad": {
+   "gloss": "evade",
+   "valency": "intrans",
+   "ct": false
+  },
+  "examin": {
+   "gloss": "examine",
+   "valency": "trans",
+   "ct": false
+  },
+  "execut": {
+   "gloss": "execute",
+   "valency": "trans",
+   "ct": false
+  },
+  "exi": {
+   "gloss": "exit / leave",
+   "valency": "intrans",
+   "ct": false
+  },
+  "explor": {
+   "gloss": "explore",
+   "valency": "trans",
+   "ct": false
+  },
+  "exspect": {
+   "gloss": "wait",
+   "valency": "intrans",
+   "ct": true
+  },
+  "festin": {
+   "gloss": "hurry",
+   "valency": "trans",
+   "ct": false
+  },
+  "frust": {
+   "gloss": "miss",
+   "valency": "trans",
+   "ct": false
+  },
+  "identific": {
+   "gloss": "identify",
+   "valency": "trans",
+   "ct": false
+  },
+  "ignor": {
+   "gloss": "ignore",
+   "valency": "trans",
+   "ct": false
+  },
+  "immin": {
+   "gloss": "be imminent",
+   "valency": "intrans",
+   "ct": false
+  },
+  "incip": {
+   "gloss": "begin / start",
+   "valency": "trans",
+   "ct": false
+  },
+  "initializ": {
+   "gloss": "initialize",
+   "valency": "trans",
+   "ct": false
+  },
+  "interrump": {
+   "gloss": "interrupt",
+   "valency": "trans",
+   "ct": false
+  },
+  "intr": {
+   "gloss": "enter",
+   "valency": "trans",
+   "ct": false
+  },
+  "investig": {
+   "gloss": "investigate",
+   "valency": "trans",
+   "ct": false
+  },
+  "iter": {
+   "gloss": "iterate",
+   "valency": "intrans",
+   "ct": false
+  },
+  "leg": {
+   "gloss": "read",
+   "valency": "trans",
+   "ct": false
+  },
+  "les": {
+   "gloss": "damage",
+   "valency": "trans",
+   "ct": false
+  },
+  "loc": {
+   "gloss": "locate",
+   "valency": "trans",
+   "ct": false
+  },
+  "man": {
+   "gloss": "stay / remain",
+   "valency": "intrans",
+   "ct": false
+  },
+  "minu": {
+   "gloss": "minu",
+   "valency": "trans",
+   "ct": false
+  },
+  "mut": {
+   "gloss": "change",
+   "valency": "trans",
+   "ct": false
+  },
+  "neg": {
+   "gloss": "deny / reject",
+   "valency": "trans",
+   "ct": false
+  },
+  "neutraliz": {
+   "gloss": "neutralize",
+   "valency": "trans",
+   "ct": false
+  },
+  "obser": {
+   "gloss": "lock",
+   "valency": "trans",
+   "ct": false
+  },
+  "observ": {
+   "gloss": "observe",
+   "valency": "trans",
+   "ct": false
+  },
+  "obsid": {
+   "gloss": "surround / besiege",
+   "valency": "trans",
+   "ct": false
+  },
+  "obstru": {
+   "gloss": "obstruct",
+   "valency": "trans",
+   "ct": false
+  },
+  "oti": {
+   "gloss": "idle",
+   "valency": "intrans",
+   "ct": false
+  },
+  "par": {
+   "gloss": "prepare",
+   "valency": "trans",
+   "ct": false
+  },
+  "paus": {
+   "gloss": "pause",
+   "valency": "intrans",
+   "ct": false
+  },
+  "percut": {
+   "gloss": "strike",
+   "valency": "trans",
+   "ct": false
+  },
+  "perd": {
+   "gloss": "lose",
+   "valency": "trans",
+   "ct": false
+  },
+  "permit": {
+   "gloss": "permit",
+   "valency": "trans",
+   "ct": false
+  },
+  "persequ": {
+   "gloss": "pursue",
+   "valency": "trans",
+   "ct": false
+  },
+  "plac": {
+   "gloss": "plac",
+   "valency": "trans",
+   "ct": false
+  },
+  "pon": {
+   "gloss": "set",
+   "valency": "trans",
+   "ct": false
+  },
+  "poss": {
+   "gloss": "poss",
+   "valency": "trans",
+   "ct": false
+  },
+  "progred": {
+   "gloss": "proceed / advance",
+   "valency": "intrans",
+   "ct": false
+  },
+  "prohib": {
+   "gloss": "prohibit",
+   "valency": "trans",
+   "ct": false
+  },
+  "proteg": {
+   "gloss": "protect",
+   "valency": "trans",
+   "ct": false
+  },
+  "provoc": {
+   "gloss": "provoc",
+   "valency": "trans",
+   "ct": false
+  },
+  "quaer": {
+   "gloss": "search / seek",
+   "valency": "trans",
+   "ct": false
+  },
+  "reced": {
+   "gloss": "reced",
+   "valency": "intrans",
+   "ct": false
+  },
+  "recip": {
+   "gloss": "receive",
+   "valency": "trans",
+   "ct": false
+  },
+  "reclud": {
+   "gloss": "unlock / open",
+   "valency": "trans",
+   "ct": false
+  },
+  "reconnect": {
+   "gloss": "reconnect",
+   "valency": "trans",
+   "ct": true
+  },
+  "reconstru": {
+   "gloss": "reconstruct",
+   "valency": "trans",
+   "ct": false
+  },
+  "recuper": {
+   "gloss": "recover",
+   "valency": "trans",
+   "ct": false
+  },
+  "redi": {
+   "gloss": "return",
+   "valency": "intrans",
+   "ct": false
+  },
+  "reiniti": {
+   "gloss": "restart / reinitialize",
+   "valency": "trans",
+   "ct": false
+  },
+  "remov": {
+   "gloss": "remove",
+   "valency": "trans",
+   "ct": false
+  },
+  "renov": {
+   "gloss": "renew",
+   "valency": "trans",
+   "ct": false
+  },
+  "repar": {
+   "gloss": "repair",
+   "valency": "trans",
+   "ct": false
+  },
+  "repet": {
+   "gloss": "repeat",
+   "valency": "trans",
+   "ct": false
+  },
+  "requir": {
+   "gloss": "require",
+   "valency": "trans",
+   "ct": false
+  },
+  "resett": {
+   "gloss": "reset",
+   "valency": "trans",
+   "ct": false
+  },
+  "restitu": {
+   "gloss": "restore",
+   "valency": "trans",
+   "ct": false
+  },
+  "restrict": {
+   "gloss": "restrict",
+   "valency": "trans",
+   "ct": true
+  },
+  "resum": {
+   "gloss": "resume",
+   "valency": "trans",
+   "ct": false
+  },
+  "retir": {
+   "gloss": "retir",
+   "valency": "trans",
+   "ct": false
+  },
+  "retrah": {
+   "gloss": "withdraw / retreat",
+   "valency": "trans",
+   "ct": false
+  },
+  "revert": {
+   "gloss": "revert",
+   "valency": "trans",
+   "ct": false
+  },
+  "salv": {
+   "gloss": "save",
+   "valency": "trans",
+   "ct": false
+  },
+  "scan": {
+   "gloss": "scan",
+   "valency": "trans",
+   "ct": false
+  },
+  "sent": {
+   "gloss": "sense",
+   "valency": "trans",
+   "ct": false
+  },
+  "sequ": {
+   "gloss": "follow",
+   "valency": "trans",
+   "ct": false
+  },
+  "serv": {
+   "gloss": "preserve / save",
+   "valency": "trans",
+   "ct": false
+  },
+  "siren": {
+   "gloss": "sound the alarm. hellenistic loan (greek **seiren**, the origin of \"siren\"); see the lexical sourcing note in xlii",
+   "valency": "trans",
+   "ct": false
+  },
+  "st": {
+   "gloss": "stop",
+   "valency": "intrans",
+   "ct": false
+  },
+  "suffici": {
+   "gloss": "suffice",
+   "valency": "intrans",
+   "ct": false
+  },
+  "suspect": {
+   "gloss": "suspect",
+   "valency": "trans",
+   "ct": true
+  },
+  "suspend": {
+   "gloss": "suspend",
+   "valency": "trans",
+   "ct": false
+  },
+  "tent": {
+   "gloss": "try",
+   "valency": "trans",
+   "ct": false
+  },
+  "termin": {
+   "gloss": "end / terminate",
+   "valency": "trans",
+   "ct": false
+  },
+  "transmit": {
+   "gloss": "transmit",
+   "valency": "trans",
+   "ct": false
+  },
+  "urg": {
+   "gloss": "be urgent",
+   "valency": "intrans",
+   "ct": false
+  },
+  "verific": {
+   "gloss": "verify",
+   "valency": "trans",
+   "ct": false
+  },
+  "vol": {
+   "gloss": "fly",
+   "valency": "intrans",
+   "ct": false
+  },
+  "zet": {
+   "gloss": "search for",
+   "valency": "trans",
+   "ct": false
+  }
+ },
+ "words": {
+  "ab": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "from / away from"
+  },
+  "accessus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "access"
+  },
+  "actio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "activitas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "activum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "active"
+  },
+  "actuator": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "actuator"
+  },
+  "ad": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "toward / to"
+  },
+  "administrator": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "administrator"
+  },
+  "adversarius": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "adversary"
+  },
+  "aequale": {
+   "pos": [
+    "cmp"
+   ],
+   "gloss": "equal"
+  },
+  "affirmatum": {
+   "pos": [
+    "ans"
+   ],
+   "gloss": "yes"
+  },
+  "agent": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "agent"
+  },
+  "aggressio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "attack / assault"
+  },
+  "aggressor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "attacker"
+  },
+  "algorithmus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "algorithm"
+  },
+  "aliquid": {
+   "pos": [
+    "quant"
+   ],
+   "gloss": "any"
+  },
+  "aliter": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "else"
+  },
+  "alius": {
+   "pos": [
+    "dem"
+   ],
+   "gloss": "other"
+  },
+  "altum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "ambitus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "environment / surroundings"
+  },
+  "anomalia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "ante": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "before / ahead"
+  },
+  "apparatus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "device / apparatus"
+  },
+  "archivum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "archive"
+  },
+  "area": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "area"
+  },
+  "auctoritas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "authority / authorization"
+  },
+  "auditus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "hearing"
+  },
+  "aut": {
+   "pos": [
+    "conj"
+   ],
+   "gloss": "or"
+  },
+  "authenticatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "authentication"
+  },
+  "automaticum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "automatic"
+  },
+  "automatum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "automated system"
+  },
+  "autonomia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "autonomy"
+  },
+  "autonomum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "autonomous"
+  },
+  "bateria": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "battery"
+  },
+  "cablum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "cable"
+  },
+  "calculus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "calculation"
+  },
+  "calor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "heat"
+  },
+  "camera": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "room / chamber"
+  },
+  "campus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "field / area"
+  },
+  "canalis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "channel"
+  },
+  "capacitas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "capacity"
+  },
+  "causa": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "cause"
+  },
+  "celerum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "cellula": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "cell / compartment"
+  },
+  "centum": {
+   "pos": [
+    "place"
+   ],
+   "gloss": "100"
+  },
+  "certamen": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "combat / engagement"
+  },
+  "certum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "certain"
+  },
+  "chaosum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "chaotic / systemically disordered (distinct from **corrumpatum**, one specific corruption). hellenistic loan (greek **khaos**), recognizable via english \"chaos.\""
+  },
+  "charta": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "map / chart"
+  },
+  "circa": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "around"
+  },
+  "circuitus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "circuit"
+  },
+  "circulus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "loop / cycle"
+  },
+  "clades": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "defeat / disaster"
+  },
+  "classis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "class"
+  },
+  "clavis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "key"
+  },
+  "cliens": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "client"
+  },
+  "codex": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "code / coded text"
+  },
+  "color": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "color"
+  },
+  "combatum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "comparatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "comparison"
+  },
+  "completum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "complete"
+  },
+  "componentum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "component"
+  },
+  "conclusio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "conclusion"
+  },
+  "conditio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "condition"
+  },
+  "conditionalum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "conditional"
+  },
+  "connectio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "connection"
+  },
+  "console": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "console"
+  },
+  "consumptio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "consumption"
+  },
+  "contactus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "contact"
+  },
+  "contra": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "against / opposite"
+  },
+  "controlum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "control"
+  },
+  "copia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "corridorium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "corridor / passage"
+  },
+  "crisis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "crisis / emergency, as a noun distinct from the adjective **criticum**. hellenistic loan (greek **krisis**), recognizable via english \"crisis.\""
+  },
+  "criticum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "critical"
+  },
+  "cur": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "why"
+  },
+  "damnum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "damage"
+  },
+  "data": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "data"
+  },
+  "datum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "data item / given fact"
+  },
+  "debilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "decem": {
+   "pos": [
+    "place"
+   ],
+   "gloss": "10"
+  },
+  "decrementum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "decrease"
+  },
+  "defectum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "defectus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "defect / failure"
+  },
+  "dextrum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "right"
+  },
+  "diagnostica": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "diagnostics"
+  },
+  "differentia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "difference"
+  },
+  "directio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "direction"
+  },
+  "directiva": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "directive"
+  },
+  "disponibilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "available"
+  },
+  "dispositivum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "device"
+  },
+  "documentum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "document"
+  },
+  "domina": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "ruler / matriarch (a female authority figure; a title, not the -a form of any verb). real classical latin"
+  },
+  "dominatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "control / domination"
+  },
+  "donec": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "until"
+  },
+  "dubium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "doubt / uncertainty"
+  },
+  "dum": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "while"
+  },
+  "duo": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "2"
+  },
+  "duratio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "duration"
+  },
+  "ea": {
+   "pos": [
+    "pron"
+   ],
+   "gloss": "they"
+  },
+  "effectus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "effect / result"
+  },
+  "ego": {
+   "pos": [
+    "pron"
+   ],
+   "gloss": "I"
+  },
+  "egressus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "exit"
+  },
+  "emitter": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "emitter"
+  },
+  "energia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "energy"
+  },
+  "error": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "error"
+  },
+  "et": {
+   "pos": [
+    "conj"
+   ],
+   "gloss": "and"
+  },
+  "ex": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "out of / from"
+  },
+  "exitus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "exit"
+  },
+  "extra": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "outside"
+  },
+  "falsum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "falsehood / false"
+  },
+  "fasciculus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "file"
+  },
+  "figura": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "figure / shape"
+  },
+  "finis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "end"
+  },
+  "fons": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "source"
+  },
+  "forma": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "shape / form"
+  },
+  "formatum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "format"
+  },
+  "fortum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "fragmentum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "fragment"
+  },
+  "frequentia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "frequency"
+  },
+  "frigus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "cold"
+  },
+  "functio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "function"
+  },
+  "generator": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "generator"
+  },
+  "genus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "type / kind"
+  },
+  "gradus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "step / level"
+  },
+  "hic": {
+   "pos": [
+    "dem"
+   ],
+   "gloss": "this (near)"
+  },
+  "homo": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "human being (species, biological)"
+  },
+  "hospes": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "host"
+  },
+  "hostile": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "hostilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "hostis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "enemy / adversary"
+  },
+  "humile": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "humilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "hypothesis": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "hypothesis"
+  },
+  "iam": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "already / now"
+  },
+  "id": {
+   "pos": [
+    "pron"
+   ],
+   "gloss": "it"
+  },
+  "idem": {
+   "pos": [
+    "dem"
+   ],
+   "gloss": "the same"
+  },
+  "identitas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "identity"
+  },
+  "ille": {
+   "pos": [
+    "dem"
+   ],
+   "gloss": "that (far)"
+  },
+  "imago": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "image"
+  },
+  "immediatum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "imparatum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "not ready"
+  },
+  "imperium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "command / control / authority"
+  },
+  "impossibilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "impossible"
+  },
+  "improbabilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "improbable"
+  },
+  "in": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "in / into / on"
+  },
+  "inactivum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "inactive"
+  },
+  "incertum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "uncertain"
+  },
+  "incognitum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "unknown"
+  },
+  "incompletum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "incomplete"
+  },
+  "incorrigatum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "incorrect"
+  },
+  "incrementum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "increase"
+  },
+  "index": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "index"
+  },
+  "indicium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "evidence / indication"
+  },
+  "indisponibilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "unavailable"
+  },
+  "inermum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "unarmed"
+  },
+  "informatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "information"
+  },
+  "infra": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "below"
+  },
+  "ingressus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "entry"
+  },
+  "initium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "initialization / beginning"
+  },
+  "inputum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "input"
+  },
+  "instabilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "unstable"
+  },
+  "instansia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "instance"
+  },
+  "instructio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "instruction"
+  },
+  "instrumentum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "tool / instrument"
+  },
+  "insufficians": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "integritas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "integrity"
+  },
+  "inter": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "between / among"
+  },
+  "intervallum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "interval"
+  },
+  "intrusio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "intrusion"
+  },
+  "intrusor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "intruder"
+  },
+  "intus": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "inside / within"
+  },
+  "invalidum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "invalid"
+  },
+  "iter": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "route / journey"
+  },
+  "iterum": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "again"
+  },
+  "latentia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "latency"
+  },
+  "liberum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "free / clear"
+  },
+  "locus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "location / place"
+  },
+  "logica": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "logic"
+  },
+  "longe": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "far"
+  },
+  "lux": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "light"
+  },
+  "machina": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "machine"
+  },
+  "maius": {
+   "pos": [
+    "cmp"
+   ],
+   "gloss": "greater"
+  },
+  "mandatum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "directive / order / command"
+  },
+  "manualum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "manual"
+  },
+  "manutentio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "maintenance"
+  },
+  "maximum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "maximum"
+  },
+  "memorandum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "stored note / memory record"
+  },
+  "memoria": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "memory"
+  },
+  "methodus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "method"
+  },
+  "milio": {
+   "pos": [
+    "place"
+   ],
+   "gloss": "1000000"
+  },
+  "mille": {
+   "pos": [
+    "place"
+   ],
+   "gloss": "1000"
+  },
+  "minatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "threat"
+  },
+  "minimum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "minimum"
+  },
+  "minus": {
+   "pos": [
+    "adj",
+    "cmp"
+   ],
+   "gloss": "less"
+  },
+  "modulus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "module"
+  },
+  "motor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "motor"
+  },
+  "motus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "movement"
+  },
+  "multum": {
+   "pos": [
+    "quant"
+   ],
+   "gloss": "many / much"
+  },
+  "murus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "wall"
+  },
+  "necessarium": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "necessary"
+  },
+  "negativum": {
+   "pos": [
+    "ans"
+   ],
+   "gloss": "no"
+  },
+  "negatum": {
+   "pos": [
+    "numop"
+   ],
+   "gloss": "negative sign"
+  },
+  "nisi": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "unless"
+  },
+  "nodus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "node"
+  },
+  "nomen": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "name"
+  },
+  "non": {
+   "pos": [
+    "neg"
+   ],
+   "gloss": "not"
+  },
+  "normalum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "normal"
+  },
+  "nos": {
+   "pos": [
+    "pron"
+   ],
+   "gloss": "we"
+  },
+  "novem": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "9"
+  },
+  "novissimum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "newest / latest"
+  },
+  "novum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "new"
+  },
+  "nullum": {
+   "pos": [
+    "quant"
+   ],
+   "gloss": "none / no"
+  },
+  "numerus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "number"
+  },
+  "numquam": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "never"
+  },
+  "nunc": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "now"
+  },
+  "nuntius": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "message"
+  },
+  "objectum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "object"
+  },
+  "obstaculum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "obstacle"
+  },
+  "occupatum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "occupied / busy"
+  },
+  "octo": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "8"
+  },
+  "odor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "smell / odor"
+  },
+  "omnia": {
+   "pos": [
+    "quant"
+   ],
+   "gloss": "all"
+  },
+  "onus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "load"
+  },
+  "operatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "operation"
+  },
+  "operator": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "operator"
+  },
+  "optionalum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "optional"
+  },
+  "ordo": {
+   "pos": [
+    "numop"
+   ],
+   "gloss": "ordinal marker"
+  },
+  "outputum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "output"
+  },
+  "packetum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "packet"
+  },
+  "parameter": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "parameter"
+  },
+  "pars": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "part"
+  },
+  "patrolium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "patrol"
+  },
+  "per": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "through"
+  },
+  "periculosum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "dangerous"
+  },
+  "periculum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "danger"
+  },
+  "persona": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "person / user identity"
+  },
+  "phantasma": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "phantom / false detection (a sensor ghost, distinct from a false alarm already raised). hellenistic loan (greek **phantasma**, \"apparition\"), recognizable via english \"phantom.\""
+  },
+  "plenum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "porta": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "gate / door"
+  },
+  "portus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "port"
+  },
+  "possibilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "possible"
+  },
+  "post": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "after / behind"
+  },
+  "postea": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "later"
+  },
+  "potentia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "power"
+  },
+  "potestas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "power / authority"
+  },
+  "praeda": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "spoils / prize / plunder (a successful mission's yield); **sine praeda** is the standing idiom for a mission that returned empty-handed"
+  },
+  "praesidium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "protection / guard"
+  },
+  "pressio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "pressure"
+  },
+  "primarium": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "primary"
+  },
+  "primum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "first"
+  },
+  "prioritarium": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "prioritas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "priority"
+  },
+  "prius": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "previous / prior"
+  },
+  "priusum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "previous / prior"
+  },
+  "privatum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "private"
+  },
+  "probabilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "probable"
+  },
+  "probatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "proof / verification"
+  },
+  "processus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "process"
+  },
+  "proelium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "battle / engagement"
+  },
+  "prope": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "near"
+  },
+  "protocolum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "protocol"
+  },
+  "proximum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "next / nearest"
+  },
+  "publicum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "public"
+  },
+  "pugna": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "fight / combat"
+  },
+  "punctum": {
+   "pos": [
+    "numop"
+   ],
+   "gloss": "decimal point"
+  },
+  "quale": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "which"
+  },
+  "quando": {
+   "pos": [
+    "rule",
+    "qw"
+   ],
+   "gloss": "when"
+  },
+  "quantitas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "quantity"
+  },
+  "quantum": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "how much / many"
+  },
+  "quattuor": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "4"
+  },
+  "quid": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "what"
+  },
+  "quinque": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "5"
+  },
+  "quis": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "who"
+  },
+  "quisque": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "each"
+  },
+  "quomodo": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "how"
+  },
+  "radiatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": ""
+  },
+  "ratio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "reason / logic / method"
+  },
+  "recordum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "record"
+  },
+  "rectum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "straight"
+  },
+  "recursio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "recursion"
+  },
+  "refectio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "replenishment / refilling"
+  },
+  "regio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "region"
+  },
+  "reiectio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "rejection"
+  },
+  "relatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "relation"
+  },
+  "remotum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "distant"
+  },
+  "res": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "thing / object"
+  },
+  "reserva": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "reserves"
+  },
+  "reservatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "reservation / reserved allocation"
+  },
+  "responsum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "response"
+  },
+  "resultatum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "result"
+  },
+  "rete": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "network"
+  },
+  "retro": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "backward / behind"
+  },
+  "sapiens": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "wise (used only in the fixed compound **homo sapiens**)"
+  },
+  "schema": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "structure / blueprint / plan, distinct from **forma** (shape). hellenistic loan (greek **skhema**), recognizable via english \"schema.\""
+  },
+  "scopus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "target / aim"
+  },
+  "scutum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "shield"
+  },
+  "secundarium": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "secondary"
+  },
+  "securitas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "security"
+  },
+  "securum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "safe"
+  },
+  "sed": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "but (contrastive; distinct from **aliter**, which is a rule branch, not a connector)"
+  },
+  "segmentum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "segment"
+  },
+  "semper": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "always"
+  },
+  "sensor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "sensor"
+  },
+  "septem": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "7"
+  },
+  "series": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "series"
+  },
+  "servitium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "service"
+  },
+  "servitor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "server"
+  },
+  "sex": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "6"
+  },
+  "si": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "if"
+  },
+  "signum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "signal"
+  },
+  "silentium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "silence"
+  },
+  "simia": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "ape / monkey (a demeaning biological downgrade from **homo sapiens** when a speaker wants to diminish, not classify)"
+  },
+  "sine": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "without / lacking"
+  },
+  "sinistrum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "left"
+  },
+  "socius": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "ally / associate"
+  },
+  "solum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "ground / floor"
+  },
+  "sonus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "sound"
+  },
+  "species": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "species / type"
+  },
+  "stabilum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "stable"
+  },
+  "statim": {
+   "pos": [
+    "adv"
+   ],
+   "gloss": "immediately / at once"
+  },
+  "status": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "state / status"
+  },
+  "structura": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "structure"
+  },
+  "sub": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "under"
+  },
+  "submissio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "submission"
+  },
+  "super": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "above / over"
+  },
+  "supra": {
+   "pos": [
+    "prep",
+    "adv"
+   ],
+   "gloss": "above"
+  },
+  "symptoma": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "symptom / diagnostic sign, distinct from **status**. hellenistic loan (greek **symptoma**), recognizable via english \"symptom.\""
+  },
+  "systema": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "system"
+  },
+  "ta": {
+   "pos": [
+    "art"
+   ],
+   "gloss": "the (plural)"
+  },
+  "tabula": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "table / board / data table"
+  },
+  "tamen": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "still / nevertheless"
+  },
+  "tardum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "targetum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "target"
+  },
+  "tectum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "roof / ceiling"
+  },
+  "telos": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "objective / goal / purpose"
+  },
+  "telum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "weapon / projectile"
+  },
+  "tempus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "time"
+  },
+  "tenebra": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "darkness"
+  },
+  "terminale": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "terminal"
+  },
+  "tertiarium": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "tertiary / third-level"
+  },
+  "testum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "test"
+  },
+  "threadum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "thread"
+  },
+  "ti": {
+   "pos": [
+    "art"
+   ],
+   "gloss": "a / an (indefinite)"
+  },
+  "to": {
+   "pos": [
+    "art"
+   ],
+   "gloss": "the"
+  },
+  "trans": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "across / beyond"
+  },
+  "tria": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "3"
+  },
+  "tu": {
+   "pos": [
+    "pron"
+   ],
+   "gloss": "you"
+  },
+  "tunc": {
+   "pos": [
+    "rule"
+   ],
+   "gloss": "then"
+  },
+  "tutum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "typus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "type"
+  },
+  "ubi": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "where"
+  },
+  "ultimum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "last / final"
+  },
+  "unitas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "unit"
+  },
+  "unum": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "1"
+  },
+  "usor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "user"
+  },
+  "utrum": {
+   "pos": [
+    "qw"
+   ],
+   "gloss": "whether"
+  },
+  "validum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "valid"
+  },
+  "valor": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "value"
+  },
+  "variabilum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "variable"
+  },
+  "vehiculum": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "vehicle"
+  },
+  "veritas": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "truth"
+  },
+  "verum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "true"
+  },
+  "vestigium": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "trace / track"
+  },
+  "vetusum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": "old / previous"
+  },
+  "via": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "way / path / route"
+  },
+  "vibratio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "vibration"
+  },
+  "victoria": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "victory"
+  },
+  "violatio": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "breach / violation"
+  },
+  "violatum": {
+   "pos": [
+    "adj"
+   ],
+   "gloss": ""
+  },
+  "virus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "malware / malicious code. latin, repurposed: **virus** already meant \"poison,\" and is the source of the english and international word for the same concept. not a hellenistic loan"
+  },
+  "visus": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "sight / vision"
+  },
+  "vos": {
+   "pos": [
+    "pron"
+   ],
+   "gloss": "you (all)"
+  },
+  "zero": {
+   "pos": [
+    "digit"
+   ],
+   "gloss": "0"
+  },
+  "zona": {
+   "pos": [
+    "noun"
+   ],
+   "gloss": "zone"
+  }
+ }
+}

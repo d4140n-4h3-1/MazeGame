@@ -2,6 +2,10 @@
 
 use crate::{
     diagnostics::{self, FrameStats},
+    dialogue::{
+        screen::{DialogueScreen, Pointer},
+        Conversation, Facts, Script, SCRIPT,
+    },
     generate::Maze,
     hud::{self, Hud, Status},
     inhabitants::Inhabitants,
@@ -55,6 +59,10 @@ const EXIT_RADIUS: f32 = 1.5;
 /// The ambient light. Low: the lamps do the lighting, and a flat ambient term lights corners as
 /// much as open floor, which is what makes a room look like untextured geometry.
 const AMBIENT: Color = Color::opaque(24, 26, 34);
+/// How near the exit is, in meters as the crow flies, for a droid to call it near, and to call
+/// it not far off; any further is far.
+const EXIT_NEAR: f32 = 25.0;
+const EXIT_NOT_FAR: f32 = 60.0;
 /// The ambient light with the lights off: next to none, so that what the flashlight is not
 /// pointed at is as good as black.
 const DARK_AMBIENT: Color = Color::opaque(3, 3, 5);
@@ -70,6 +78,18 @@ enum Phase {
     Won,
     /// The maze could not be used; the reason is on screen.
     Broken,
+}
+
+/// A conversation under way.
+#[derive(Debug, PartialEq)]
+struct Talking {
+    /// The droid being talked to, as an index into the inhabitants.
+    droid: usize,
+    conversation: Conversation,
+    /// What is true where it is happening, for its lines.
+    facts: Facts,
+    /// Who is talking, as the screen names them.
+    who: String,
 }
 
 #[derive(Default, Debug, PartialEq, Visit, Reflect)]
@@ -135,6 +155,23 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     menu: PauseMenu,
+    /// What the droids say, if it could be read.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    script: Option<Script>,
+    /// The conversation under way, if there is one; while it is, the clock and the player
+    /// stand still.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    talking: Option<Talking>,
+    /// The droid the player could talk to right now, as an index into the inhabitants, and who
+    /// it is as the hint to talk names it.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    talkable: Option<(usize, String)>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    dialogue: DialogueScreen,
     #[visit(skip)]
     #[reflect(hidden)]
     stats: FrameStats,
@@ -285,6 +322,7 @@ impl MazeGame {
     }
 
     fn start_round(&mut self, ctx: &mut PluginContext) {
+        self.stop_talking(ctx);
         // Made (and seeded) first: the grid below borrows the game.
         self.rng();
         let Some((grid, origin)) = self.level.grid.as_ref() else {
@@ -358,8 +396,11 @@ impl MazeGame {
                 time: self.round_time,
                 best: self.best_time,
                 breath: self.player.breath(),
-                // The menu says what to do next, so the hint to click would only be in the way.
-                mouse_captured: self.mouse_captured || self.menu.is_open(),
+                // The menu and the conversation say what to do next, so the hint to click would
+                // only be in the way.
+                mouse_captured: self.mouse_captured
+                    || self.menu.is_open()
+                    || self.talking.is_some(),
             },
         };
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
@@ -414,6 +455,8 @@ impl MazeGame {
                 self.show_look_settings();
             }
             KeyCode::Escape => self.set_paused(ctx, !self.menu.is_open()),
+            _ if self.talking.is_some() && !self.menu.is_open() => self.on_talking_key(ctx, code),
+            KeyCode::KeyE if !self.menu.is_open() => self.start_talking(ctx),
             KeyCode::KeyN => self.restart(ctx),
             _ => (),
         }
@@ -426,6 +469,7 @@ impl MazeGame {
             return;
         }
         self.set_paused(ctx, false);
+        self.stop_talking(ctx);
         if self.prefabs.is_some() {
             // Out of the way first: the new maze's survey would take them for walls.
             self.inhabitants
@@ -461,8 +505,9 @@ impl MazeGame {
         let scene = &mut ctx.scenes[self.scene];
         let player = self.player.feet(&scene.graph);
         if !self.inhabitants.is_populated() {
+            let characters = self.script.as_ref().map_or(0, |s| s.characters.len());
             self.inhabitants
-                .populate(scene, model, (grid, *origin), player, rng);
+                .populate(scene, model, (grid, *origin), player, characters, rng);
         }
         self.inhabitants
             .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt);
@@ -490,7 +535,181 @@ impl MazeGame {
             self.want_mouse = false;
             self.set_mouse_captured(ctx, false);
         } else {
-            self.want_mouse = true;
+            // Talking, the mouse is for picking what to say.
+            self.want_mouse = self.talking.is_none();
+        }
+    }
+
+    /// Finds the droid the player could talk to, if any, and puts the hint to talk to it on
+    /// screen. Nobody, while the player cannot talk.
+    fn look_for_someone(&mut self, ctx: &mut PluginContext) {
+        let can_talk = self.phase == Phase::Playing
+            && self.talking.is_none()
+            && !self.menu.is_open()
+            && self.script.is_some();
+        let found = if can_talk {
+            let graph = &ctx.scenes[self.scene].graph;
+            let (player, feet, ahead) = (&self.player, self.player.feet(graph), self.player.ahead());
+            self.inhabitants
+                .to_talk_to(feet, ahead, |there| player.can_see(graph, there))
+        } else {
+            None
+        };
+        let talkable = found.and_then(|n| Some((n, self.name_of(n)?)));
+        if talkable != self.talkable {
+            let who = talkable.as_ref().map(|(_, who)| who.as_str());
+            self.dialogue.set_prompt(ctx.user_interfaces.first(), who);
+            self.talkable = talkable;
+        }
+    }
+
+    /// What the `n`th inhabitant is called on screen: what kind of droid it is, and its code.
+    fn name_of(&self, n: usize) -> Option<String> {
+        let (character, code) = self.inhabitants.who(n)?;
+        let name = &self.script.as_ref()?.characters.get(character)?.name;
+        Some(format!("{} {code}", name.to_uppercase()))
+    }
+
+    /// What a conversation with the `n`th inhabitant can talk about: its code, and how far off
+    /// the exit is and which way, as the crow flies, for a player facing it.
+    fn facts(&self, graph: &Graph, n: usize) -> Option<Facts> {
+        let (_, code) = self.inhabitants.who(n)?;
+        let player = self.player.feet(graph);
+        let flat = |v: Vector3<f32>| Vector3::new(v.x, 0.0, v.z);
+        let ahead = flat(self.inhabitants.feet(n)? - player)
+            .try_normalize(1.0e-4)
+            .unwrap_or_else(|| self.player.ahead());
+        // Facing +z, the right is -x.
+        let right = Vector3::new(-ahead.z, 0.0, ahead.x);
+        let exit = flat(graph[self.exit].global_position() - player);
+        let far = match exit.norm() {
+            d if d < EXIT_NEAR => ("prope", "near"),
+            d if d < EXIT_NOT_FAR => ("non longe", "not far off"),
+            _ => ("longe", "far off"),
+        };
+        let off = exit.dot(&right).atan2(exit.dot(&ahead)).to_degrees();
+        let way = match off {
+            o if o.abs() <= 45.0 => ("rectum", "straight ahead"),
+            o if o.abs() >= 135.0 => ("retro", "back behind you"),
+            o if o > 0.0 => ("dextrum", "to your right"),
+            _ => ("sinistrum", "to your left"),
+        };
+        Some(
+            Facts::default()
+                .with("code", crate::dialogue::digits(code), code.to_string())
+                .with("exit_far", far.0, far.1)
+                .with("exit_way", way.0, way.1),
+        )
+    }
+
+    /// Starts talking to the droid the player could talk to, if there is one: it stops and
+    /// faces them, the camera closes in on its face, and the mouse is let go to pick replies.
+    fn start_talking(&mut self, ctx: &mut PluginContext) {
+        if self.phase != Phase::Playing || self.talking.is_some() {
+            return;
+        }
+        let Some((droid, who)) = self.talkable.clone() else {
+            return;
+        };
+        let graph = &ctx.scenes[self.scene].graph;
+        let (Some(script), Some((character, _)), Some(facts), Some(face)) = (
+            &self.script,
+            self.inhabitants.who(droid),
+            self.facts(graph, droid),
+            self.inhabitants.face(graph, droid),
+        ) else {
+            return;
+        };
+        let Some(conversation) = Conversation::new(script, character) else {
+            return;
+        };
+        let ui = ctx.user_interfaces.first();
+        self.dialogue.set_open(ui, true);
+        self.dialogue
+            .show(ui, &who, &conversation.view(script, &facts));
+        self.dialogue.set_prompt(ui, None);
+        self.talkable = None;
+        self.inhabitants.set_talking(droid, true);
+        self.player.release_keys();
+        self.player.talk_to(Some(face));
+        self.want_mouse = false;
+        self.set_mouse_captured(ctx, false);
+        self.talking = Some(Talking {
+            droid,
+            conversation,
+            facts,
+            who,
+        });
+    }
+
+    /// Says the `choice`th reply on offer, and shows what comes of it, or ends the conversation.
+    fn say(&mut self, ctx: &mut PluginContext, choice: usize) {
+        let roll = self.rng().below(100) as u32;
+        let (Some(talking), Some(script)) = (self.talking.as_mut(), self.script.as_ref()) else {
+            return;
+        };
+        if talking.conversation.choose(script, choice, roll) {
+            let view = talking.conversation.view(script, &talking.facts);
+            self.dialogue
+                .show(ctx.user_interfaces.first(), &talking.who, &view);
+        } else {
+            self.stop_talking(ctx);
+        }
+    }
+
+    /// Ends the conversation, if there is one: the droid goes on its way, the camera goes back
+    /// and the mouse is taken again to look around.
+    fn stop_talking(&mut self, ctx: &mut PluginContext) {
+        let Some(talking) = self.talking.take() else {
+            return;
+        };
+        self.inhabitants.set_talking(talking.droid, false);
+        self.player.talk_to(None);
+        self.dialogue.set_open(ctx.user_interfaces.first(), false);
+        self.want_mouse = !self.menu.is_open();
+    }
+
+    /// Keeps the camera on the face of the droid being talked to, as it moves.
+    fn keep_talking(&mut self, ctx: &mut PluginContext) {
+        let Some(droid) = self.talking.as_ref().map(|talking| talking.droid) else {
+            return;
+        };
+        match self.inhabitants.face(&ctx.scenes[self.scene].graph, droid) {
+            Some(face) => self.player.talk_to(Some(face)),
+            None => self.stop_talking(ctx),
+        }
+    }
+
+    /// A key pressed while talking: W and S or the arrows to go through the replies, E, Enter or
+    /// Space to say the one picked, a number to say that one, and Tab to walk away.
+    fn on_talking_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
+        let ui = ctx.user_interfaces.first();
+        let number = [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+            KeyCode::Digit6,
+            KeyCode::Digit7,
+            KeyCode::Digit8,
+            KeyCode::Digit9,
+        ]
+        .iter()
+        .position(|&digit| digit == code);
+        match code {
+            KeyCode::KeyW | KeyCode::ArrowUp => self.dialogue.step(ui, -1),
+            KeyCode::KeyS | KeyCode::ArrowDown => self.dialogue.step(ui, 1),
+            KeyCode::KeyE | KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space => {
+                let choice = self.dialogue.selected();
+                self.say(ctx, choice);
+            }
+            KeyCode::Tab => self.stop_talking(ctx),
+            _ => {
+                if let Some(n) = number.filter(|&n| n < self.dialogue.count()) {
+                    self.say(ctx, n);
+                }
+            }
         }
     }
 }
@@ -500,6 +719,15 @@ impl Plugin for MazeGame {
         self.focused = true;
         self.build_scene(&mut ctx);
         self.hud = Hud::build(&mut ctx);
+        // Under the menu, which is built after it.
+        self.dialogue = DialogueScreen::build(ctx.user_interfaces.first_mut());
+        self.script = match Script::load(SCRIPT) {
+            Ok(script) => Some(script),
+            Err(error) => {
+                Log::err(format!("Maze: the droids have nothing to say: {error}"));
+                None
+            }
+        };
         let restart = if self.prefabs.is_some() {
             "New maze"
         } else {
@@ -579,9 +807,15 @@ impl Plugin for MazeGame {
                 }
             }
             Phase::Playing => {
-                self.round_time += ctx.dt;
+                // Talking stops the clock, and holds the player where they are.
+                let talking = self.talking.is_some();
+                if !talking {
+                    self.round_time += ctx.dt;
+                }
+                self.keep_talking(ctx);
                 let scene = &mut ctx.scenes[self.scene];
-                self.player.update(&mut scene.graph, ctx.dt, self.focused);
+                self.player
+                    .update(&mut scene.graph, ctx.dt, self.focused && !talking);
                 self.update_inhabitants(ctx);
                 let scene = &mut ctx.scenes[self.scene];
                 let exit = scene.graph[self.exit].global_position();
@@ -595,7 +829,7 @@ impl Plugin for MazeGame {
                     let record = self.best_time.is_none_or(|b| self.round_time < b);
                     self.best_time = Some(best);
                     let text = format!(
-                        "You escaped in {}{}\nPress R for another maze",
+                        "You escaped in {}{}\nPress N for another maze",
                         hud::format_time(self.round_time),
                         if record { " - a new best!" } else { "" }
                     );
@@ -647,6 +881,7 @@ impl Plugin for MazeGame {
             self.set_mouse_captured(ctx, true);
         }
 
+        self.look_for_someone(ctx);
         self.update_hud(ctx);
         self.stats.update(ctx);
         Ok(())
@@ -658,6 +893,13 @@ impl Plugin for MazeGame {
         message: &UiMessage,
         _ui: Handle<UserInterface>,
     ) -> GameResult {
+        if !self.menu.is_open() {
+            match self.dialogue.pointer(message) {
+                Some(Pointer::Over(n)) => self.dialogue.select(ctx.user_interfaces.first(), n),
+                Some(Pointer::Picked(n)) => self.say(ctx, n),
+                None => (),
+            }
+        }
         match self.menu.choice(message) {
             Some(Choice::Resume) => self.set_paused(ctx, false),
             Some(Choice::Lights) => {
@@ -685,8 +927,9 @@ impl Plugin for MazeGame {
                 WindowEvent::KeyboardInput { event: input, .. } => {
                     if let PhysicalKey::Code(code) = input.physical_key {
                         let pressed = input.state == ElementState::Pressed;
-                        // The menu holds the player still; letting go of a key still counts.
-                        if !self.menu.is_open() || !pressed {
+                        // The menu and talking hold the player still; letting go of a key still
+                        // counts.
+                        if (!self.menu.is_open() && self.talking.is_none()) || !pressed {
                             self.player.on_key(code, pressed);
                         }
                         if pressed && !input.repeat {
@@ -705,7 +948,7 @@ impl Plugin for MazeGame {
                     if !held || (!self.menu.is_open() && self.mouse_captured) {
                         self.player.set_orbiting(held);
                     }
-                    if held && !self.menu.is_open() {
+                    if held && !self.menu.is_open() && self.talking.is_none() {
                         self.want_mouse = true;
                     }
                 }
@@ -715,8 +958,8 @@ impl Plugin for MazeGame {
                     ..
                 } => {
                     // The click that takes the mouse is only for that; after it, the left button
-                    // is the pistol's.
-                    if !self.menu.is_open() {
+                    // is the pistol's. Talking, it picks what to say instead.
+                    if !self.menu.is_open() && self.talking.is_none() {
                         if self.mouse_captured {
                             self.player.pull_trigger();
                         }
@@ -734,7 +977,7 @@ impl Plugin for MazeGame {
                     if !held || (!self.menu.is_open() && self.mouse_captured) {
                         self.player.set_strafing(held);
                     }
-                    if held && !self.menu.is_open() {
+                    if held && !self.menu.is_open() && self.talking.is_none() {
                         self.want_mouse = true;
                     }
                 }
@@ -742,8 +985,8 @@ impl Plugin for MazeGame {
                     state: ElementState::Pressed,
                     ..
                 } => {
-                    // With the menu open, a click is for the menu.
-                    if !self.menu.is_open() {
+                    // With the menu open, or talking, a click is for that.
+                    if !self.menu.is_open() && self.talking.is_none() {
                         self.want_mouse = true;
                     }
                 }

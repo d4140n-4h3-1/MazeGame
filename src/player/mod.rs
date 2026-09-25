@@ -44,6 +44,9 @@
 //! shoulder; V goes between that and seeing through its eyes, and holding the middle mouse button
 //! swings the camera round it - see [`third_person`].
 //!
+//! Talking to another droid, the droid turns to face it and the camera closes in on its face -
+//! see [`talk`].
+//!
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
 pub(crate) mod avatar;
@@ -55,6 +58,7 @@ mod lean;
 mod movement;
 mod pistol;
 pub(crate) mod posture;
+mod talk;
 mod third_person;
 mod view;
 
@@ -160,6 +164,8 @@ pub struct Player {
     armed: bool,
     /// The pistol's shots.
     bolts: pistol::Bolts,
+    /// Who the player is talking to, and how far in to them the camera is.
+    talk: talk::Talk,
     keys: Keys,
 }
 
@@ -202,6 +208,7 @@ impl Default for Player {
             last_seen: None,
             armed: false,
             bolts: Default::default(),
+            talk: Default::default(),
             keys: Default::default(),
         }
     }
@@ -320,6 +327,7 @@ impl Player {
         // A new round puts the body somewhere else rather than moving it there.
         self.last_seen = None;
         self.armed = false;
+        self.talk.cut();
     }
 
     /// Applies input for this frame. With `can_move` off the player only looks around.
@@ -341,6 +349,7 @@ impl Player {
                 flashlight.set_visibility(self.flashlight_on);
             }
         }
+        self.face_speaker(graph, dt);
         let rotation = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.yaw);
         let right = rotation * -Vector3::x();
         self.fit_lean(graph, right, dt);

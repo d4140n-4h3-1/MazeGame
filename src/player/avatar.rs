@@ -72,7 +72,7 @@
 use super::posture::{Gait, Posture};
 use fyrox::{
     core::{
-        algebra::{UnitQuaternion, Vector3},
+        algebra::{Point3, UnitQuaternion, Vector3},
         color::Color,
         log::Log,
         pool::Handle,
@@ -218,6 +218,9 @@ const UPPER_BODY: &str = "DEF-spine.002";
 /// Its head, and the tops of its arms, which its face and its shoulders go by.
 const HEAD: &str = "DEF-spine.006";
 const SHOULDERS: [&str; 2] = ["DEF-upper_arm.L", "DEF-upper_arm.R"];
+/// How far above the head bone, in the model's own units up the bone, the middle of the face is:
+/// the bone sits at the bottom of the head, 0.22 below the top of the model.
+const FACE_ABOVE_HEAD: f32 = 0.11;
 /// How long the face and shoulders take to square up to straight ahead as the droid starts
 /// strafing, or to let go as it stops, in seconds.
 const SQUARE_FADE: f32 = 0.2;
@@ -1676,6 +1679,16 @@ impl Avatar {
     /// Which way the droid faces from the way the body faces, in radians, left positive.
     pub(crate) fn facing(&self) -> f32 {
         self.heading
+    }
+
+    /// Where the middle of the droid's face is, across the world, as of the last frame: a little
+    /// above its head bone, which sits at the bottom of the head. None without the bone.
+    pub(crate) fn face_at(&self, graph: &Graph) -> Option<Vector3<f32>> {
+        let &head = self.square.as_ref()?.head.last()?;
+        let point = graph[head]
+            .global_transform()
+            .transform_point(&Point3::new(0.0, FACE_ABOVE_HEAD, 0.0));
+        Some(point.coords)
     }
 
     pub(crate) fn is_visible(&self, graph: &Graph) -> bool {

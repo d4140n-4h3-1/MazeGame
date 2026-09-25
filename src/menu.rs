@@ -20,7 +20,7 @@ const CONTROLS: &str = "WASD move    Mouse look    Space jump\n\
     Caps Lock walk or run    Shift sprint\n\
     C crouch    Z crawl    Tab cover    Q look behind\n\
     Right mouse strafe    R pistol    Left mouse draw, fire\n\
-    F flashlight    N new maze\n\
+    E talk    F flashlight    N new maze\n\
     [ ] turn speed    - = view width";
 
 /// What the player picked in the menu.
