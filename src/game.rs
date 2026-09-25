@@ -725,10 +725,12 @@ impl MazeGame {
         let Some(voice) = voices.voice(&script.characters[character].name) else {
             return;
         };
-        let says = talking.conversation.view(script, &talking.facts).says;
-        // Each a little higher or lower than the rest of its kind, and always the same.
-        let pitch = 1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0);
-        let sound = voices.speak(&says, voice, pitch);
+        let view = talking.conversation.view(script, &talking.facts);
+        // Each a little higher or lower than the rest of its kind, and always the same; and
+        // higher or lower again with how it feels.
+        let pitch = (1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0))
+            * voices.mood_pitch(view.mood);
+        let sound = voices.speak(&view.says, voice, pitch);
         let (sender, receiver) = std::sync::mpsc::channel();
         let (rate, reach) = (voices.sample_rate, sound.reach);
         std::thread::spawn(move || sender.send(synth::make(&sound, rate)));

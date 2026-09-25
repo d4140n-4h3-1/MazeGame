@@ -12,9 +12,10 @@
 //! down about a line that falls over the sentence - the way a machine would read - and falls
 //! further at a full stop, or rises at a question. Each kind of droid has a voice of its own: its
 //! pitch, how quickly it speaks, how big it sounds, how much its notes step about, and how
-//! breathy it is.
+//! breathy it is. How a droid feels raises or lowers its pitch: see [`Voices::mood_pitch`].
 
 use super::{Curve, Formant, Sound};
+use crate::dialogue::Mood;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -78,6 +79,9 @@ pub struct Voices {
     pub pauses: Pauses,
     pub phones: HashMap<String, Phone>,
     pub voices: HashMap<String, Voice>,
+    /// How many times its usual pitch a voice speaks at in each mood; 1 for any not given.
+    #[serde(default)]
+    pub moods: HashMap<Mood, f32>,
 }
 
 /// What a piece of text is to be spoken as.
@@ -219,6 +223,11 @@ impl Voices {
     /// The voice called `name`, or failing that the one called `default`.
     pub fn voice(&self, name: &str) -> Option<&Voice> {
         self.voices.get(name).or_else(|| self.voices.get("default"))
+    }
+
+    /// How many times its usual pitch a voice speaks at in `mood`.
+    pub fn mood_pitch(&self, mood: Mood) -> f32 {
+        self.moods.get(&mood).copied().unwrap_or(1.0)
     }
 
     /// `text` spoken by `voice`, its pitch `pitch` times its own, as a sound to make.
@@ -419,6 +428,18 @@ mod tests {
         for character in &script.characters {
             assert!(voices.voices.contains_key(&character.name), "{}", character.name);
         }
+    }
+
+    #[test]
+    fn a_mood_raises_or_lowers_the_voice() {
+        let voices = voices();
+        assert_eq!(voices.mood_pitch(Mood::Normal), 1.0);
+        assert!(voices.mood_pitch(Mood::Agitated) > 1.0, "agitated, higher");
+        assert!(voices.mood_pitch(Mood::Hostile) < 1.0, "hostile, lower");
+        let voice = voices.voice("default").unwrap();
+        let first = |pitch: f32| voices.speak("Sta.", voice, pitch).pitch.0[0][1];
+        let agitated = voices.mood_pitch(Mood::Agitated);
+        assert!((first(agitated) - first(1.0) * agitated).abs() < 1.0e-3);
     }
 
     #[test]

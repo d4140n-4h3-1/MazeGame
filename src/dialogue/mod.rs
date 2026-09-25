@@ -50,7 +50,7 @@ pub struct Reply {
 }
 
 /// How a droid feels saying a line, which colours the panel.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mood {
     /// Green.

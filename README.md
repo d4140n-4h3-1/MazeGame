@@ -118,6 +118,8 @@ shadows (its `raytracing` feature).
   agitation or a failed Speech check, and red when it is hostile. Each line in
   `data/dialogue/droids.json` can say its own; one that does not is blue after a check that
   succeeded, orange after one that failed, and green otherwise.
+- **The voice goes with the mood**: higher when pleased, questioning or agitated, lower when
+  hostile, as `moods` in `data/sounds/voice_formants.json` has it.
 - **Pausing stops the sound too**: a droid's line, the pistol and its bolts carry on from where
   they were once the game is resumed.
 - **Always someone to talk to.** One of the droids stands just in front of you at the start of
