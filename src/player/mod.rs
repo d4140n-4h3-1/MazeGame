@@ -141,6 +141,12 @@ pub struct Player {
     /// How far behind the head the camera is right now, in meters: all the way back, or pulled
     /// in by a wall.
     boom: f32,
+    /// Which way the head faces, in the body's own terms: as the camera does, but for swinging
+    /// it round the droid with the middle mouse button.
+    head_aim: UnitQuaternion<f32>,
+    /// How far in to aim over the shoulder the camera is, from 0 to 1: all the way while the
+    /// right mouse button is held.
+    aim_zoom: f32,
     /// How far the camera is swung round the droid with the middle mouse button.
     orbit: Orbit,
     /// Where the droid's feet were the last time the graphics effects were told.
@@ -183,6 +189,8 @@ impl Default for Player {
             avatar: None,
             third_person: true,
             boom: BOOM_LENGTH,
+            aim_zoom: 0.0,
+            head_aim: UnitQuaternion::identity(),
             orbit: Orbit::default(),
             last_seen: None,
             armed: false,
@@ -344,12 +352,10 @@ impl Player {
         let keys = &self.keys;
         // Which way the body is going, from the way it faces: its left is +x.
         let local = rotation.inverse() * horizontal;
-        // Which way the camera looks, likewise, as of the last frame: for the pistol to follow.
-        let look = rotation.inverse()
-            * graph[self.camera.transmute::<Node>()]
-                .look_vector()
-                .try_normalize(1.0e-6)
-                .unwrap_or_else(Vector3::z);
+        // Which way the head looks, in the body's own terms, for the pistol to follow: the way the
+        // camera does, but for swinging it round the droid with the middle mouse button, which
+        // is for looking at the droid, and leaves it be.
+        let look = self.head_aim * Vector3::z();
         let going = Going {
             heading: can_move.then(|| {
                 self.cover_heading()

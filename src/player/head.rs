@@ -121,10 +121,12 @@ impl Player {
                 * UnitQuaternion::from_axis_angle(&Vector3::x_axis(), self.pitch + pitch)
                 * tilt
         };
-        // The camera swings round the droid with the middle mouse button; the head does not.
+        // The camera swings round the droid with the middle mouse button; the head does not, and
+        // nor does the pistol, which goes by the head.
         self.orbit.settle(dt);
         let turn = turned(self.orbit.yaw, self.orbit.pitch);
         let aim = turned(0.0, 0.0);
+        self.head_aim = aim;
         self.place_camera(graph, head, turn, aim, dt);
     }
 }

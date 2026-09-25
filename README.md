@@ -110,6 +110,12 @@ shadows (its `raytracing` feature).
 - **Square to the front.** Strafing, or with the pistol drawn, the droid's face and shoulders
   stay square to straight ahead, however its hips turn to the way it steps.
 - **N for a new maze**, since R is the pistol's now.
+- **Over the right shoulder.** The camera sits closer and further out to the droid's right, as in
+  Fallout: the droid stands to the left of the view, the way ahead clear on the right. It had
+  been over the left shoulder. Holding the right mouse button brings it in closer, to aim over
+  the shoulder, and letting go takes it back out. Holding the middle mouse button to swing the
+  camera round and look at the droid leaves the droid as it was: its pistol no longer follows
+  the camera round.
 - **The pistol sounds.** A shot cracks at the muzzle, and each bolt hums as it flies. The sounds
   are made from formants when the game starts - a buzz and noise shaped by resonances, as a
   voice is - described in `data/sounds/pistol_formants.json`, which can be retuned without a

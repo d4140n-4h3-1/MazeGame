@@ -1,9 +1,10 @@
-//! Seeing the player from behind: the camera held back over the droid's shoulder, pulled in
+//! Seeing the player from behind: the camera held back over the droid's right shoulder - and closer
+//! in, to aim, while the right mouse button is held - pulled in
 //! wherever a wall would come between it and the head, and V to go between that and seeing
 //! through the droid's own eyes.
 //!
 //! Holding the middle mouse button swings the camera round the droid instead of turning it, to
-//! see it from any side - from first person too, which shows the droid until the button is let
+//! see it from any side, the droid and its pistol staying just as they were - from first person too, which shows the droid until the button is let
 //! go. Let go, the camera swings back behind it.
 //!
 //! Everything that moves the head - the bob, the landing, the lean, the look behind - still moves
@@ -19,11 +20,18 @@ use fyrox::{
 };
 
 /// How far behind the head the camera is held, in meters, how far above it, and how far out to
-/// the side, over the right shoulder, so the droid does not stand in the middle of the view. The
-/// body's right is its +x.
-pub(super) const BOOM_LENGTH: f32 = 2.6;
-const BOOM_RISE: f32 = 0.3;
-const BOOM_SHOULDER: f32 = 0.45;
+/// the right, over the right shoulder: close in and well to the side, so that the droid stands
+/// to the left of the view and the way ahead is clear on the right.
+pub(super) const BOOM_LENGTH: f32 = 1.8;
+const BOOM_RISE: f32 = 0.15;
+const BOOM_SHOULDER: f32 = 0.75;
+/// The same, held closer in while the right mouse button is down, to aim over the shoulder.
+const AIM_BOOM_LENGTH: f32 = 0.9;
+const AIM_BOOM_RISE: f32 = 0.1;
+const AIM_BOOM_SHOULDER: f32 = 0.55;
+/// How quickly the camera comes in to aim, or goes back out, like
+/// [`EYE_EASING`](super::posture::EYE_EASING).
+const AIM_EASING: f32 = 12.0;
 /// How far the camera keeps from a wall behind it, in meters. The near plane is 0.1 m.
 const BOOM_CLEARANCE: f32 = 0.25;
 /// How quickly the camera swings back out once a wall is out of the way, like
@@ -42,6 +50,25 @@ pub(super) const PITCH_LIMIT: f32 = 85.0 * std::f32::consts::PI / 180.0;
 /// person against the head, a little in front of the droid's face.
 const FLASHLIGHT_IN_HAND: Vector3<f32> = Vector3::new(0.2, -0.2, 0.0);
 const FLASHLIGHT_ON_HEAD: Vector3<f32> = Vector3::new(0.0, -0.1, 0.4);
+
+/// Where the camera is held from the head, in the body's own terms, with the view turned by
+/// `turn` and `aim` of the way in to aim, from 0 to 1: behind, above and out to the right,
+/// turning with the view. The body's right, and the camera's, is its -x.
+fn boom_for(turn: UnitQuaternion<f32>, aim: f32) -> Vector3<f32> {
+    let between = |far: f32, near: f32| far + (near - far) * aim;
+    turn * Vector3::new(
+        -between(BOOM_SHOULDER, AIM_BOOM_SHOULDER),
+        between(BOOM_RISE, AIM_BOOM_RISE),
+        -between(BOOM_LENGTH, AIM_BOOM_LENGTH),
+    )
+}
+
+/// How far in to aim the camera is after another `dt`, from `aim`, going in while `aiming` and
+/// back out while not.
+fn ease_aim(aim: f32, aiming: bool, dt: f32) -> f32 {
+    let wanted = if aiming { 1.0 } else { 0.0 };
+    aim + (wanted - aim) * (1.0 - (-AIM_EASING * dt).exp())
+}
 
 /// How far the camera is swung round the droid with the middle mouse button, on top of where the
 /// player is looking: across, and up or down, in radians.
@@ -99,7 +126,8 @@ impl Player {
         let third_person = (self.third_person || self.orbit.is_active()) && self.avatar.is_some();
         let mut boom = Vector3::zeros();
         if third_person {
-            let wanted = turn * Vector3::new(BOOM_SHOULDER, BOOM_RISE, -BOOM_LENGTH);
+            self.aim_zoom = ease_aim(self.aim_zoom, self.keys.strafe, dt);
+            let wanted = boom_for(turn, self.aim_zoom);
             let length = wanted.norm();
             let facing = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.yaw);
             let from = graph[self.body].global_position() + facing * head;
@@ -216,6 +244,36 @@ mod tests {
         };
         orbit.settle(1.0 / 60.0);
         assert!(orbit.yaw < 0.0 && orbit.yaw > -0.2, "{}", orbit.yaw);
+    }
+
+    #[test]
+    fn the_camera_is_over_the_right_shoulder() {
+        // Facing ahead (+z), the body's right is -x, as the rest of the player has it.
+        let right = UnitQuaternion::<f32>::identity() * -Vector3::x();
+        let boom = boom_for(UnitQuaternion::identity(), 0.0);
+        assert!(boom.dot(&right) > 0.5, "out to the right: {boom:?}");
+        assert!(boom.z < -1.0 && boom.y > 0.0, "behind and above: {boom:?}");
+        // Turned, it stays over the same shoulder of the view.
+        let turn = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), 1.0);
+        assert!(boom_for(turn, 0.0).dot(&(turn * -Vector3::x())) > 0.5);
+        // In to aim: closer, and still over the right shoulder.
+        let aimed = boom_for(UnitQuaternion::identity(), 1.0);
+        assert!(aimed.norm() < 0.7 * boom.norm() && aimed.dot(&right) > 0.3, "{aimed:?}");
+    }
+
+    #[test]
+    fn it_comes_in_to_aim_smoothly_and_goes_back_out() {
+        let mut aim = 0.0;
+        aim = ease_aim(aim, true, 1.0 / 60.0);
+        assert!(aim > 0.0 && aim < 0.5, "on its way in: {aim}");
+        for _ in 0..60 {
+            aim = ease_aim(aim, true, 1.0 / 60.0);
+        }
+        assert!(aim > 0.99, "in: {aim}");
+        for _ in 0..60 {
+            aim = ease_aim(aim, false, 1.0 / 60.0);
+        }
+        assert!(aim < 0.01, "back out: {aim}");
     }
 
     #[test]
