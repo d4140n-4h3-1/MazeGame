@@ -12,8 +12,9 @@
 //! draw or holster the pistol, the left mouse button to draw it and fire, E to talk to a droid
 //! close by, N for a new maze, Escape to pause. Run with `cargo run` from this directory;
 //! `MAZE_SIZE=<w>x<d>` sets how many junctions wide and deep the maze is, `MAZE_DEBUG=1` also prints
-//! the walkable map the game made of the level, `MAZE_SEED=<n>` makes every maze identical, and
-//! `MAZE_MODEL=<path>` plays a fixed maze model instead, such as `data/maze_full.fbx`.
+//! the walkable map the game made of the level, `MAZE_SEED=<n>` makes every maze identical,
+//! `MAZE_WINDOWED=1` opens a window instead of filling the screen, and `MAZE_MODEL=<path>` plays a
+//! fixed maze model instead, such as `data/maze_full.fbx`.
 
 mod culling;
 mod diagnostics;
@@ -35,6 +36,7 @@ mod tiles;
 use fyrox::{
     engine::{executor::Executor, GraphicsContextParams},
     event_loop::EventLoop,
+    window::{Fullscreen, WindowAttributes},
 };
 use fyrox_gfx::GraphicsEffects;
 use game::MazeGame;
@@ -46,7 +48,7 @@ fn main() {
     let mut executor = Executor::from_params(
         Some(EventLoop::new().unwrap()),
         GraphicsContextParams {
-            window_attributes: Default::default(),
+            window_attributes: window_attributes(),
             // MAZE_VSYNC=0 uncaps the frame rate, which is how the cost of a frame is measured.
             vsync: std::env::var("MAZE_VSYNC").as_deref() != Ok("0"),
             msaa_sample_count: None,
@@ -61,6 +63,16 @@ fn main() {
     executor.add_plugin(effects);
     executor.add_plugin(MazeGame::new(moving));
     executor.run()
+}
+
+/// The game fills the screen it starts on, borderless, so the monitor keeps its own resolution.
+/// MAZE_WINDOWED=1 opens it in an ordinary window instead.
+fn window_attributes() -> WindowAttributes {
+    let mut attributes = WindowAttributes::default().with_title("Maze").with_resizable(true);
+    if std::env::var("MAZE_WINDOWED").as_deref() != Ok("1") {
+        attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+    }
+    attributes
 }
 
 /// Refractive glass for the ceiling panes, softer shadow edges, anti-aliasing, a budget that keeps

@@ -7,6 +7,10 @@ Every round is a new maze, put together at random from four tile models: a strai
 corner, a T and a crossroads. You start at one end of the longest route through it, and a
 glowing exit waits at the other end. The clock runs until you reach it.
 
+[![Talking to one of the droids in the maze (video)](media/talking_to_a_droid.jpg)](media/talking_to_a_droid.mp4)
+
+*Talking to one of the droids. Click the picture to watch the video.*
+
 - Random mazes of any size, with loops, built from tiles whose shapes are measured from the models
   themselves.
 - A droid to play as, seen from behind over its shoulder, that walks, runs, sprints and crouches
@@ -293,6 +297,7 @@ Options are set with environment variables, for example `MAZE_SIZE=10x10 cargo r
 | `MAZE_MODEL=<path>`      | Plays a fixed maze model (`.glb`, `.gltf` or `.fbx`) instead of random mazes. |
 | `MAZE_INHABITANTS=<n>`   | How many droids live in the maze. The default is 6.                     |
 | `MAZE_DEBUG=1`           | Logs the walkable map of each level, and rendering statistics once a second. |
+| `MAZE_WINDOWED=1`        | Opens the game in a window instead of filling the screen.               |
 | `MAZE_VSYNC=0`           | Uncaps the frame rate, for measuring what a frame costs.                |
 | `MAZE_RT=0`              | Shadow maps instead of ray-traced shadows.                              |
 | `MAZE_HARD_SHADOWS=1`    | Ray-traced shadows with sharp edges instead of soft ones.               |
