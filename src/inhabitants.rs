@@ -40,8 +40,10 @@
 //! Out of Alert, it also listens (see [`Inhabitants::hear`]): a noise that carries as far as it
 //! is, along the corridors, has it run to where the noise was and search from there.
 //!
-//! Hostile, it cannot be talked to any more, but after [`HITS`] bolts it goes down, crouched
-//! with its eyes dark, and stays there.
+//! Hostile, it cannot be talked to any more, but after [`HITS`] bolts it goes down, its eyes
+//! dark: it goes limp and falls, knocked back by the last bolt, and lies where it falls (see
+//! [`crate::ragdoll`]) - or, without a ragdoll, crouches. Lying there, a bolt still shoves it.
+//! [`VANISH_AFTER`] seconds after it went down, it is gone.
 //!
 //! A droid that is not hostile minds having the player's pistol pointed at it (see
 //! [`Inhabitants::feel_aimed_at`]): for as long as its kind stands for it, and then it stops,
@@ -57,7 +59,9 @@ use crate::{
     player::{
         avatar::{self, Avatar, Going},
         posture::{Gait, Posture},
+        Strike,
     },
+    ragdoll::{self, Ragdoll},
     survey,
 };
 use fyrox::{
@@ -184,6 +188,8 @@ const CATCH: f32 = 0.9;
 const CATCH_HEIGHT: f32 = 1.0;
 /// How many of the pistol's bolts it takes to stop a hostile droid.
 pub const HITS: u32 = 3;
+/// How long, in seconds, a droid that has been stopped lies there before it is gone.
+pub const VANISH_AFTER: f32 = 4.0;
 /// How tall a droid that has been stopped is, crouched, in meters.
 const DOWN_HEIGHT: f32 = 1.1;
 
@@ -281,6 +287,30 @@ struct Inhabitant {
     hits: u32,
     /// Whether it has been stopped, and stays where it went down.
     down: bool,
+    /// Its body gone limp, once it has been stopped, if it has a ragdoll.
+    ragdoll: Option<Ragdoll>,
+    /// How long it has been down, in seconds; and whether it is gone: out of sight and out of
+    /// everyone's way for good.
+    down_for: f32,
+    gone: bool,
+}
+
+impl Inhabitant {
+    /// Takes it away for good, [`VANISH_AFTER`] seconds after it went down: out of sight, its
+    /// limp bodies out of the physics, and its capsule too if it still has one. Its place among
+    /// the droids stays, since they are known by where they are in the list.
+    fn vanish(&mut self, graph: &mut Graph) {
+        self.gone = true;
+        self.avatar.set_visible(graph, false);
+        if let Some(ragdoll) = self.ragdoll.take() {
+            ragdoll.remove(graph);
+        }
+        if graph.is_valid_handle(self.collider) {
+            graph.remove_node(self.collider);
+        }
+        self.route.clear();
+        self.speed = 0.0;
+    }
 }
 
 /// Everyone who lives in the maze.
@@ -577,6 +607,9 @@ impl Inhabitants {
             if graph.is_valid_handle(droid.body) {
                 graph.remove_node(droid.body);
             }
+            if let Some(ragdoll) = &droid.ragdoll {
+                ragdoll.remove(graph);
+            }
         }
         self.populated = false;
     }
@@ -599,6 +632,7 @@ impl Inhabitants {
     ) {
         self.clear(&mut scene.graph);
         self.populated = true;
+        ragdoll::prepare(&mut scene.graph);
         let count = std::env::var("MAZE_INHABITANTS")
             .ok()
             .and_then(|n| n.trim().parse().ok())
@@ -637,6 +671,7 @@ impl Inhabitants {
             };
             let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
                 .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
+                .with_collision_groups(ragdoll::character_groups())
                 .build(&mut scene.graph);
             let body = RigidBodyBuilder::new(
                 BaseBuilder::new().with_child(collider).with_local_transform(
@@ -693,6 +728,9 @@ impl Inhabitants {
                 windup: 0.0,
                 hits: 0,
                 down: false,
+                ragdoll: None,
+                down_for: 0.0,
+                gone: false,
             });
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
@@ -734,13 +772,45 @@ impl Inhabitants {
             .chain(std::iter::once((player, None)))
             .collect();
         let the_player = everyone.len() - 1;
+        let gone: Vec<bool> = self.droids.iter().map(|droid| droid.gone).collect();
         for (me, droid) in self.droids.iter_mut().enumerate() {
+            if droid.gone {
+                continue;
+            }
+            if droid.down {
+                droid.down_for += dt;
+                if droid.down_for >= VANISH_AFTER {
+                    droid.vanish(graph);
+                    continue;
+                }
+            }
+            // Limp, the physics has it: its bones follow its bodies, its capsule is gone, and it
+            // is wherever its pelvis has got to.
+            if let Some(ragdoll) = droid.ragdoll.as_mut() {
+                ragdoll.update(graph);
+                if ragdoll.is_limp() {
+                    if graph.is_valid_handle(droid.collider) {
+                        graph.remove_node(droid.collider);
+                    }
+                    if let Some(pelvis) = ragdoll.pelvis(graph) {
+                        droid.feet.x = pelvis.x;
+                        droid.feet.z = pelvis.z;
+                    }
+                    droid.speed = 0.0;
+                    droid.route.clear();
+                    continue;
+                }
+            }
             // After the player, it goes straight for them rather than round them.
             let hunting = droid.alert == Some(Alert::Alert);
             let others = everyone
                 .iter()
                 .enumerate()
-                .filter(|&(other, _)| other != me && !(hunting && other == the_player))
+                .filter(|&(other, _)| {
+                    other != me
+                        && !gone.get(other).copied().unwrap_or(false)
+                        && !(hunting && other == the_player)
+                })
                 .map(|(_, &other)| other);
             droid.resting = (droid.resting - dt).max(0.0);
             droid.windup = (droid.windup - dt).max(0.0);
@@ -1140,16 +1210,44 @@ impl Inhabitants {
         }
     }
 
-    /// A bolt from the pistol of the player at `player` has hit `collider`. If it is a hostile
-    /// droid's, that is another hit on it, and at [`HITS`] it goes down: crouched, with its eyes
-    /// dark, and no taller than it is crouched. Short of that, if it has not seen who fired, it
-    /// searches for them where they fired from. The droid that went down, if one did.
-    pub fn shot(
-        &mut self,
-        graph: &mut Graph,
-        collider: Handle<Collider>,
-        player: Vector3<f32>,
-    ) -> Option<usize> {
+    /// Shoots down the droid nearest the `player`'s feet, as bolts from them would, [`HITS`]
+    /// times over, for MAZE_KNOCKDOWN. Which one, if any is standing.
+    pub fn knock_down(&mut self, graph: &mut Graph, player: Vector3<f32>) -> Option<usize> {
+        let n = (0..self.droids.len())
+            .filter(|&n| !self.droids[n].down)
+            .min_by(|&a, &b| {
+                let distance = |n: usize| (self.droids[n].feet - player).norm();
+                distance(a).total_cmp(&distance(b))
+            })?;
+        self.set_hostile(n);
+        let droid = &self.droids[n];
+        let at = droid.feet + Vector3::new(0.0, 1.2, 0.0);
+        let from = player + Vector3::new(0.0, 1.5, 0.0);
+        let strike = Strike {
+            collider: droid.collider,
+            at,
+            way: (at - from).try_normalize(1.0e-6).unwrap_or_else(Vector3::z),
+        };
+        (0..HITS).find_map(|_| self.shot(graph, strike, player))
+    }
+
+    /// A bolt from the pistol of the player at `player` has struck something. If it is a hostile
+    /// droid, that is another hit on it, and at [`HITS`] it goes down, its eyes dark: limp,
+    /// knocked back by the bolt, or without a ragdoll crouched, and no taller than it is
+    /// crouched. Short of that, if it has not seen who fired, it searches for them where they
+    /// fired from. A droid already lying there is just shoved. The droid that went down, if one
+    /// did.
+    pub fn shot(&mut self, graph: &mut Graph, strike: Strike, player: Vector3<f32>) -> Option<usize> {
+        let collider = strike.collider;
+        if let Some(ragdoll) = self
+            .droids
+            .iter()
+            .filter_map(|droid| droid.ragdoll.as_ref())
+            .find(|ragdoll| ragdoll.owns(collider))
+        {
+            ragdoll.shove(graph, collider, strike.way * ragdoll::SHOVE, strike.at);
+            return None;
+        }
         let (n, droid) = self
             .droids
             .iter_mut()
@@ -1174,6 +1272,15 @@ impl Inhabitants {
         droid.alert = None;
         droid.sees_player = false;
         droid.avatar.set_eyes(Some(Color::BLACK));
+        droid.ragdoll = Ragdoll::start(
+            graph,
+            droid.avatar.root(),
+            forward(droid.heading) * droid.speed,
+            Some((strike.way * ragdoll::STOPPING_BLOW, strike.at)),
+        );
+        if droid.ragdoll.is_some() {
+            return Some(n);
+        }
         if let Ok(shape) = graph.try_get_mut(droid.collider) {
             shape.set_shape(ColliderShape::capsule_y(0.5 * DOWN_HEIGHT - RADIUS, RADIUS));
             shape
@@ -1241,7 +1348,7 @@ impl Inhabitants {
     /// Draws only those the player could see from where they are in `level`.
     pub fn show(&self, graph: &mut Graph, level: &Level) {
         for droid in &self.droids {
-            droid.avatar.set_visible(graph, level.can_see(droid.feet));
+            droid.avatar.set_visible(graph, !droid.gone && level.can_see(droid.feet));
         }
     }
 

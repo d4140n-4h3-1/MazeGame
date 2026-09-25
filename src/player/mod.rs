@@ -69,6 +69,7 @@ mod view;
 mod viewmodel;
 
 pub use avatar::DROID_MODEL;
+pub use pistol::Strike;
 use avatar::{heading, Avatar, Going};
 use fyrox::{
     core::{
@@ -273,6 +274,7 @@ impl Player {
         let collider = ColliderBuilder::new(BaseBuilder::new())
             .with_shape(Posture::Standing.shape().0)
             .with_friction(0.0)
+            .with_collision_groups(crate::ragdoll::character_groups())
             .build(graph);
 
         let body = RigidBodyBuilder::new(

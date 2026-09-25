@@ -97,7 +97,7 @@ use fyrox_gfx::{replace_materials, GlassMaterial};
 /// The droid's model.
 pub const DROID_MODEL: &str = "data/droid_full_deform.glb";
 /// How much the model is scaled. It stands 2 m tall; the body is 1.7 m.
-const SCALE: f32 = 0.85;
+pub(crate) const SCALE: f32 = 0.85;
 /// The droid's cycles by name, with the gait each is for. The crouch, for no gait, is for
 /// crouching and crawling at any of them.
 const CYCLES: [(&str, Option<Gait>); 4] = [
@@ -1781,6 +1781,11 @@ impl Avatar {
             .try_get_mut_of_type::<AnimationPlayer>(self.animations)
             .ok()?;
         Some(player.animations_mut().get_value_mut_silent())
+    }
+
+    /// The model's root, which every bone hangs off.
+    pub(crate) fn root(&self) -> Handle<Node> {
+        self.root
     }
 
     /// Which way the droid faces from the way the body faces, in radians, left positive.

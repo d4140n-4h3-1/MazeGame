@@ -4230,5 +4230,2018 @@
    "DEF-upper_arm.R",
    "DEF-upper_arm.R.001"
   ]
+ },
+ "eyes": {
+  "node": "eyes",
+  "material": "eye_glow",
+  "emissive_strength": 1.5,
+  "default": "normal",
+  "moods": {
+   "normal": {
+    "linear": [
+     0.0,
+     1.0,
+     0.05
+    ],
+    "srgb8": [
+     0,
+     255,
+     63
+    ]
+   },
+   "warning": {
+    "linear": [
+     1.0,
+     0.8,
+     0.0
+    ],
+    "srgb8": [
+     255,
+     231,
+     0
+    ]
+   },
+   "agitated": {
+    "linear": [
+     1.0,
+     0.22,
+     0.0
+    ],
+    "srgb8": [
+     255,
+     129,
+     0
+    ]
+   },
+   "hostile": {
+    "linear": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "srgb8": [
+     255,
+     0,
+     0
+    ]
+   }
+  },
+  "note": "set base colour and emissive of eye_glow to the mood colour; keep emission on in every mood"
+ },
+ "ragdoll": {
+  "about": "Ragdoll for droid_full_deform.glb, built by build_ragdoll.py. One rigid body per entry in `bodies`, driving `bone`; `passengers` are deform bones that just ride along (they keep their last local pose).",
+  "frames": "Every position/rotation is in the body's bone-local frame as the GLB has it (origin at the bone's head, Y along the bone, X = the bend axis). A body's global transform IS its bone's global transform (what Fyrox's Ragdoll node syncs). Quaternions are [x, y, z, w]. rest_gltf = the bone's bind pose in glTF model space (Y up, droid facing +Z), at model scale 1.",
+  "scale": "Lengths are at model scale 1. The game draws the droid at avatar SCALE (0.85): multiply every position, radius and half-extent by it, and masses by SCALE^3 if the density should stay the same.",
+  "units": "metres, kilograms, degrees",
+  "total_mass_kg": 85.0,
+  "joints": "Ball joints (Fyrox BallJoint). Build them with the droid in its bind pose (nodes as loaded), each joint node at the body's own bone frame (= parent body * frame_in_parent), so Fyrox's auto-computed local frames equal frame_in_parent / frame_in_body. Then turn auto-rebinding off. limits_deg are Rapier angular limits on the joint's x/y/z (enable all three); rest pose = 0 on every axis.",
+  "collisions": "Each body is alone in its collision_bit. Collider InteractionGroups: memberships = 1 << bit, filter = everything except the bits of the bodies in `ignores` (jointed neighbours, and pairs that touch in some clip). The droid's own character capsule must stop colliding with the limbs while the ragdoll is active (make it a sensor or take it out of the limbs' filter).",
+  "physics": {
+   "friction": 0.8,
+   "restitution": 0.0,
+   "linear_damping": 0.1,
+   "angular_damping": 0.5,
+   "joint_damping": 8.0,
+   "joint_max_torque": 150.0,
+   "ccd": [
+    "hand.L",
+    "hand.R",
+    "foot.L",
+    "foot.R",
+    "head"
+   ],
+   "solver_iterations": 8,
+   "note": "joint damping = Joint::set_motor_resistive_torque_as_ball(0, joint_max_torque, joint_damping) on every joint. solver_iterations is the scene's IntegrationParameters::num_solver_iterations (Fyrox default 4): with 4 the joints stretch more on impact and the shoulders overshoot their limits by 10-40 deg; with 8 by under 5. Values are the ones ragdoll_sim was tuned with."
+  },
+  "fyrox": [
+   "Spawn the model; before it animates, for each body in order: a RigidBody as a child of one Ragdoll node that has the scene root's transform (not the scaled model), at the bone's global transform, its colliders as children with density = density_kg_m3 (that gives mass_kg AND the inertia; don't use the body's additional mass with density-0 colliders: Rapier scales the inertia from the colliders, so the limbs could not turn).",
+   "For each body with a joint: a Joint node at the body's global transform, body1 = parent body, body2 = this body, BallJoint with limits_deg in radians, contacts off, auto-rebinding off.",
+   "Ragdoll root_limb = pelvis, children as in `parent`; is_active false while animated (the bodies then follow the bones kinematically).",
+   "To fall: stop the animation player's writes to the body bones, set is_active true, set character_rigid_body (its velocity is handed to the limbs), apply the hit as an impulse on the body that was hit."
+  ],
+  "bodies": [
+   {
+    "name": "pelvis",
+    "bone": "DEF-spine",
+    "parent": null,
+    "passengers": [
+     "DEF-pelvis.L",
+     "DEF-pelvis.R",
+     "DEF-spine.001"
+    ],
+    "mass_kg": 11.806,
+    "density_kg_m3": 585.3,
+    "collision_bit": 0,
+    "ignores": [
+     "abdomen",
+     "thigh.L",
+     "thigh.R"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       0.00065,
+       0.14477,
+       0.00856
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_extents": [
+       0.14827,
+       0.14295,
+       0.11896
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.0,
+      1.0099,
+      -0.0552
+     ],
+     "rotation": [
+      0.12582,
+      0.0,
+      0.0,
+      0.992053
+     ]
+    }
+   },
+   {
+    "name": "abdomen",
+    "bone": "DEF-spine.002",
+    "parent": "pelvis",
+    "passengers": [],
+    "mass_kg": 7.87,
+    "density_kg_m3": 805.3,
+    "collision_bit": 1,
+    "ignores": [
+     "chest",
+     "forearm.L",
+     "forearm.R",
+     "pelvis",
+     "upper_arm.L",
+     "upper_arm.R"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       9e-05,
+       0.08644,
+       0.02979
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_extents": [
+       0.13121,
+       0.08644,
+       0.10771
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.0,
+      1.2929,
+      -0.0004
+     ],
+     "rotation": [
+      -0.015908,
+      0.0,
+      -0.0,
+      0.999873
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.28772,
+       -0.01758
+      ],
+      "rotation": [
+       -0.141586,
+       0.0,
+       -0.0,
+       0.989926
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -25,
+       35
+      ],
+      "y": [
+       -48.0,
+       48.0
+      ],
+      "z": [
+       -20,
+       20
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -16.3,
+       24.1
+      ],
+      "y": [
+       -43.0,
+       43.0
+      ],
+      "z": [
+       -14.7,
+       14.1
+      ]
+     },
+     "anchor_error_mm": 11.5
+    }
+   },
+   {
+    "name": "chest",
+    "bone": "DEF-spine.003",
+    "parent": "abdomen",
+    "passengers": [],
+    "mass_kg": 14.954,
+    "density_kg_m3": 1162.9,
+    "collision_bit": 2,
+    "ignores": [
+     "abdomen",
+     "clavicle.L",
+     "clavicle.R",
+     "head",
+     "upper_arm.L",
+     "upper_arm.R"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       0.00057,
+       0.09629,
+       0.0078
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_extents": [
+       0.13121,
+       0.09629,
+       0.12723
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.0,
+      1.4657,
+      -0.0059
+     ],
+     "rotation": [
+      -0.014281,
+      0.0,
+      -0.0,
+      0.999898
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.17289,
+       0.0
+      ],
+      "rotation": [
+       0.001627,
+       -0.0,
+       0.0,
+       0.999999
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -25,
+       35
+      ],
+      "y": [
+       -50.0,
+       50.0
+      ],
+      "z": [
+       -20,
+       20
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -16.3,
+       24.2
+      ],
+      "y": [
+       -45.0,
+       45.0
+      ],
+      "z": [
+       -14.3,
+       14.3
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "head",
+    "bone": "DEF-spine.004",
+    "parent": "chest",
+    "passengers": [
+     "DEF-spine.005",
+     "DEF-spine.006"
+    ],
+    "mass_kg": 6.296,
+    "density_kg_m3": 1117.1,
+    "collision_bit": 3,
+    "ignores": [
+     "chest"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.00025,
+       0.04308,
+       -0.05235
+      ],
+      "end": [
+       -0.00029,
+       0.09453,
+       0.06759
+      ],
+      "radius": 0.04087
+     },
+     {
+      "shape": "capsule",
+      "begin": [
+       -0.00018,
+       0.21051,
+       -0.07735
+      ],
+      "end": [
+       -2e-05,
+       0.24195,
+       -0.0296
+      ],
+      "radius": 0.09116
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.0,
+      1.6582,
+      -0.0114
+     ],
+     "rotation": [
+      0.18773,
+      0.0,
+      0.0,
+      0.982221
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.0,
+       0.19258,
+       0.0
+      ],
+      "rotation": [
+       0.201738,
+       0.0,
+       0.0,
+       0.97944
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -50,
+       40
+      ],
+      "y": [
+       -60,
+       60
+      ],
+      "z": [
+       -35,
+       35
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -41.9,
+       11.9
+      ],
+      "y": [
+       -12.2,
+       13.5
+      ],
+      "z": [
+       -13.6,
+       13.6
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "clavicle.L",
+    "bone": "DEF-shoulder.L",
+    "parent": "chest",
+    "passengers": [],
+    "mass_kg": 3.148,
+    "density_kg_m3": 3562.9,
+    "collision_bit": 4,
+    "ignores": [
+     "chest",
+     "upper_arm.L"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.0,
+       0.05259,
+       0.0
+      ],
+      "end": [
+       0.0,
+       0.13148,
+       0.0
+      ],
+      "radius": 0.045
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.0183,
+      1.64462,
+      0.0684
+     ],
+     "rotation": [
+      -0.613981,
+      -0.350913,
+      -0.351159,
+      0.613657
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0183,
+       0.17672,
+       0.07938
+      ],
+      "rotation": [
+       -0.605155,
+       -0.345862,
+       -0.356134,
+       0.622363
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -15,
+       15
+      ],
+      "y": [
+       -15,
+       15
+      ],
+      "z": [
+       -33.0,
+       15
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -4.9,
+       1.3
+      ],
+      "y": [
+       -0.8,
+       1.2
+      ],
+      "z": [
+       -28.0,
+       0.0
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "upper_arm.L",
+    "bone": "DEF-upper_arm.L",
+    "parent": "clavicle.L",
+    "passengers": [
+     "DEF-upper_arm.L.001"
+    ],
+    "mass_kg": 2.361,
+    "density_kg_m3": 554.4,
+    "collision_bit": 5,
+    "ignores": [
+     "abdomen",
+     "chest",
+     "clavicle.L",
+     "forearm.L"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.03675,
+       0.0385,
+       -0.00996
+      ],
+      "end": [
+       0.03675,
+       0.28213,
+       -0.00996
+      ],
+      "radius": 0.06417
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.1953,
+      1.61514,
+      -0.0267
+     ],
+     "rotation": [
+      -0.119696,
+      -0.011505,
+      -0.955336,
+      0.269951
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.00779,
+       0.2008,
+       -0.02937
+      ],
+      "rotation": [
+       -0.238908,
+       0.632196,
+       -0.456514,
+       0.57866
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -62.7,
+       120
+      ],
+      "y": [
+       -60,
+       60
+      ],
+      "z": [
+       -70,
+       70
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -57.7,
+       111.1
+      ],
+      "y": [
+       -0.0,
+       0.0
+      ],
+      "z": [
+       -63.9,
+       63.7
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "forearm.L",
+    "bone": "DEF-forearm.L",
+    "parent": "upper_arm.L",
+    "passengers": [
+     "DEF-forearm.L.001"
+    ],
+    "mass_kg": 1.574,
+    "density_kg_m3": 1400.9,
+    "collision_bit": 6,
+    "ignores": [
+     "abdomen",
+     "hand.L",
+     "upper_arm.L"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.00399,
+       0.02458,
+       -0.01217
+      ],
+      "end": [
+       0.00399,
+       0.1831,
+       -0.01217
+      ],
+      "radius": 0.04096
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.36156,
+      1.34132,
+      -0.04037
+     ],
+     "rotation": [
+      -0.07098,
+      -0.177292,
+      -0.938811,
+      0.28664
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.32064,
+       -0.0
+      ],
+      "rotation": [
+       0.173721,
+       -0.0,
+       0.0,
+       0.984795
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -29.8,
+       140
+      ],
+      "y": [
+       -53.1,
+       60.0
+      ],
+      "z": [
+       -51.7,
+       37.0
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -24.8,
+       78.4
+      ],
+      "y": [
+       -48.1,
+       53.4
+      ],
+      "z": [
+       -46.7,
+       32.0
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "hand.L",
+    "bone": "DEF-hand.L",
+    "parent": "forearm.L",
+    "passengers": [
+     "DEF-f_index.01.L",
+     "DEF-f_index.02.L",
+     "DEF-f_index.03.L",
+     "DEF-f_middle.01.L",
+     "DEF-f_middle.02.L",
+     "DEF-f_middle.03.L",
+     "DEF-f_pinky.01.L",
+     "DEF-f_pinky.02.L",
+     "DEF-f_pinky.03.L",
+     "DEF-f_ring.01.L",
+     "DEF-f_ring.02.L",
+     "DEF-f_ring.03.L",
+     "DEF-palm.01.L",
+     "DEF-palm.02.L",
+     "DEF-palm.03.L",
+     "DEF-palm.04.L",
+     "DEF-thumb.01.L",
+     "DEF-thumb.02.L",
+     "DEF-thumb.03.L"
+    ],
+    "mass_kg": 1.181,
+    "density_kg_m3": 563.4,
+    "collision_bit": 7,
+    "ignores": [
+     "forearm.L",
+     "forearm.R",
+     "hand.R",
+     "thigh.L"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       0.02116,
+       0.16182,
+       -0.0091
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_extents": [
+       0.04396,
+       0.12094,
+       0.04927
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.47856,
+      1.18082,
+      0.02031
+     ],
+     "rotation": [
+      -0.090978,
+      -0.12055,
+      -0.938411,
+      0.310767
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.20768,
+       -0.0
+      ],
+      "rotation": [
+       -0.057218,
+       0.00174,
+       0.030338,
+       0.997899
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -60,
+       60
+      ],
+      "y": [
+       -81.2,
+       30
+      ],
+      "z": [
+       -64.4,
+       32.6
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -49.9,
+       13.0
+      ],
+      "y": [
+       -76.2,
+       -0.0
+      ],
+      "z": [
+       -59.4,
+       13.5
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "thigh.L",
+    "bone": "DEF-thigh.L",
+    "parent": "pelvis",
+    "passengers": [
+     "DEF-thigh.L.001"
+    ],
+    "mass_kg": 7.87,
+    "density_kg_m3": 626.5,
+    "collision_bit": 8,
+    "ignores": [
+     "hand.L",
+     "pelvis",
+     "shin.L"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       -0.00227,
+       0.05628,
+       -0.00458
+      ],
+      "end": [
+       -0.00227,
+       0.38562,
+       -0.00458
+      ],
+      "radius": 0.0938
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.098,
+      1.072,
+      -0.0124
+     ],
+     "rotation": [
+      -0.9893,
+      -0.068117,
+      0.128995,
+      0.002437
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.098,
+       0.07082,
+       0.02594
+      ],
+      "rotation": [
+       0.981745,
+       0.051346,
+       -0.13654,
+       0.122055
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -120,
+       30
+      ],
+      "y": [
+       -40,
+       40
+      ],
+      "z": [
+       -35,
+       35
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -109.3,
+       17.3
+      ],
+      "y": [
+       -0.0,
+       -0.0
+      ],
+      "z": [
+       -25.8,
+       25.5
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "shin.L",
+    "bone": "DEF-shin.L",
+    "parent": "thigh.L",
+    "passengers": [
+     "DEF-shin.L.001"
+    ],
+    "mass_kg": 3.542,
+    "density_kg_m3": 494.0,
+    "collision_bit": 9,
+    "ignores": [
+     "foot.L",
+     "thigh.L"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.00575,
+       0.04163,
+       0.04354
+      ],
+      "end": [
+       0.00575,
+       0.42328,
+       0.04354
+      ],
+      "radius": 0.06938
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.15728,
+      0.6342,
+      -0.0223
+     ],
+     "rotation": [
+      -0.987568,
+      -0.060687,
+      0.132652,
+      0.05857
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.4419,
+       0.0
+      ],
+      "rotation": [
+       0.056744,
+       0.0,
+       0.0,
+       0.998389
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -6,
+       145
+      ],
+      "y": [
+       -15.9,
+       17.7
+      ],
+      "z": [
+       -26.8,
+       31.9
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       16.9,
+       136.5
+      ],
+      "y": [
+       -10.9,
+       10.1
+      ],
+      "z": [
+       -19.1,
+       26.9
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "foot.L",
+    "bone": "DEF-foot.L",
+    "parent": "shin.L",
+    "passengers": [
+     "DEF-toe.L"
+    ],
+    "mass_kg": 2.361,
+    "density_kg_m3": 402.6,
+    "collision_bit": 10,
+    "ignores": [
+     "shin.L"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       0.00629,
+       0.12662,
+       0.02861
+      ],
+      "rotation": [
+       0.94731,
+       0.082963,
+       -0.026993,
+       0.308208
+      ],
+      "half_extents": [
+       0.07326,
+       0.17167,
+       0.05828
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      0.20578,
+      0.17592,
+      -0.08356
+     ],
+     "rotation": [
+      0.887785,
+      0.039577,
+      -0.07775,
+      0.451913
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.4649,
+       0.0
+      ],
+      "rotation": [
+       -0.498824,
+       0.011239,
+       0.079293,
+       0.862995
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -86.4,
+       35
+      ],
+      "y": [
+       -30.6,
+       57.1
+      ],
+      "z": [
+       -47.1,
+       74.4
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -81.4,
+       25.3
+      ],
+      "y": [
+       -25.6,
+       48.7
+      ],
+      "z": [
+       -42.1,
+       62.8
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "clavicle.R",
+    "bone": "DEF-shoulder.R",
+    "parent": "chest",
+    "passengers": [],
+    "mass_kg": 3.148,
+    "density_kg_m3": 3562.9,
+    "collision_bit": 11,
+    "ignores": [
+     "chest",
+     "upper_arm.R"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.0,
+       0.05259,
+       0.0
+      ],
+      "end": [
+       0.0,
+       0.13148,
+       0.0
+      ],
+      "radius": 0.045
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.0183,
+      1.64462,
+      0.0684
+     ],
+     "rotation": [
+      -0.613981,
+      0.350913,
+      0.351159,
+      0.613657
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.0183,
+       0.17672,
+       0.07938
+      ],
+      "rotation": [
+       -0.605155,
+       0.345862,
+       0.356134,
+       0.622363
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -15,
+       15
+      ],
+      "y": [
+       -15,
+       15
+      ],
+      "z": [
+       -15,
+       33.0
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -5.0,
+       1.3
+      ],
+      "y": [
+       -0.8,
+       0.8
+      ],
+      "z": [
+       -0.0,
+       0.0
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "upper_arm.R",
+    "bone": "DEF-upper_arm.R",
+    "parent": "clavicle.R",
+    "passengers": [
+     "DEF-upper_arm.R.001"
+    ],
+    "mass_kg": 2.361,
+    "density_kg_m3": 556.3,
+    "collision_bit": 12,
+    "ignores": [
+     "abdomen",
+     "chest",
+     "clavicle.R",
+     "forearm.R"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       -0.03596,
+       0.03844,
+       -0.00965
+      ],
+      "end": [
+       -0.03596,
+       0.2822,
+       -0.00965
+      ],
+      "radius": 0.06406
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.1953,
+      1.61514,
+      -0.0267
+     ],
+     "rotation": [
+      -0.119696,
+      0.011505,
+      0.955336,
+      0.269951
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.00779,
+       0.2008,
+       -0.02937
+      ],
+      "rotation": [
+       -0.238908,
+       -0.632196,
+       0.456513,
+       0.57866
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -62.7,
+       120
+      ],
+      "y": [
+       -60,
+       60
+      ],
+      "z": [
+       -70,
+       70
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -57.7,
+       114.0
+      ],
+      "y": [
+       -0.0,
+       0.0
+      ],
+      "z": [
+       -48.2,
+       63.1
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "forearm.R",
+    "bone": "DEF-forearm.R",
+    "parent": "upper_arm.R",
+    "passengers": [
+     "DEF-forearm.R.001"
+    ],
+    "mass_kg": 1.574,
+    "density_kg_m3": 1222.1,
+    "collision_bit": 13,
+    "ignores": [
+     "abdomen",
+     "hand.L",
+     "hand.R",
+     "upper_arm.R"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.00029,
+       0.02629,
+       0.00366
+      ],
+      "end": [
+       0.00029,
+       0.18139,
+       0.00366
+      ],
+      "radius": 0.04382
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.36156,
+      1.34132,
+      -0.04037
+     ],
+     "rotation": [
+      -0.07098,
+      0.177292,
+      0.938811,
+      0.286641
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.0,
+       0.32064,
+       -0.0
+      ],
+      "rotation": [
+       0.173721,
+       -0.0,
+       -1e-06,
+       0.984795
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -29.8,
+       140
+      ],
+      "y": [
+       -60.0,
+       53.1
+      ],
+      "z": [
+       -37.0,
+       51.7
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -24.8,
+       74.0
+      ],
+      "y": [
+       -55.0,
+       40.3
+      ],
+      "z": [
+       -25.6,
+       33.6
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "hand.R",
+    "bone": "DEF-hand.R",
+    "parent": "forearm.R",
+    "passengers": [
+     "DEF-f_index.01.R",
+     "DEF-f_index.02.R",
+     "DEF-f_index.03.R",
+     "DEF-f_middle.01.R",
+     "DEF-f_middle.02.R",
+     "DEF-f_middle.03.R",
+     "DEF-f_pinky.01.R",
+     "DEF-f_pinky.02.R",
+     "DEF-f_pinky.03.R",
+     "DEF-f_ring.01.R",
+     "DEF-f_ring.02.R",
+     "DEF-f_ring.03.R",
+     "DEF-palm.01.R",
+     "DEF-palm.02.R",
+     "DEF-palm.03.R",
+     "DEF-palm.04.R",
+     "DEF-thumb.01.R",
+     "DEF-thumb.02.R",
+     "DEF-thumb.03.R"
+    ],
+    "mass_kg": 1.181,
+    "density_kg_m3": 547.6,
+    "collision_bit": 14,
+    "ignores": [
+     "forearm.R",
+     "hand.L",
+     "thigh.R"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       -0.02271,
+       0.15911,
+       -0.00802
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ],
+      "half_extents": [
+       0.04445,
+       0.1231,
+       0.04925
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.47856,
+      1.18082,
+      0.02031
+     ],
+     "rotation": [
+      -0.090979,
+      0.12055,
+      0.938411,
+      0.310766
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       0.0,
+       0.20768,
+       -0.0
+      ],
+      "rotation": [
+       -0.057219,
+       -0.001738,
+       -0.030337,
+       0.997899
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -60,
+       60
+      ],
+      "y": [
+       -30,
+       81.2
+      ],
+      "z": [
+       -32.6,
+       64.4
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -14.4,
+       22.2
+      ],
+      "y": [
+       -23.3,
+       70.9
+      ],
+      "z": [
+       -27.6,
+       14.5
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "thigh.R",
+    "bone": "DEF-thigh.R",
+    "parent": "pelvis",
+    "passengers": [
+     "DEF-thigh.R.001"
+    ],
+    "mass_kg": 7.87,
+    "density_kg_m3": 627.0,
+    "collision_bit": 15,
+    "ignores": [
+     "hand.R",
+     "pelvis",
+     "shin.R"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.00234,
+       0.05626,
+       -0.00446
+      ],
+      "end": [
+       0.00234,
+       0.38564,
+       -0.00446
+      ],
+      "radius": 0.09377
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.098,
+      1.072,
+      -0.0124
+     ],
+     "rotation": [
+      -0.9893,
+      0.068117,
+      -0.128995,
+      0.002437
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.098,
+       0.07082,
+       0.02594
+      ],
+      "rotation": [
+       0.981745,
+       -0.051346,
+       0.13654,
+       0.122055
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -120,
+       30
+      ],
+      "y": [
+       -40,
+       40
+      ],
+      "z": [
+       -35,
+       35
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -103.2,
+       17.3
+      ],
+      "y": [
+       0.0,
+       0.0
+      ],
+      "z": [
+       -25.7,
+       25.8
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "shin.R",
+    "bone": "DEF-shin.R",
+    "parent": "thigh.R",
+    "passengers": [
+     "DEF-shin.R.001"
+    ],
+    "mass_kg": 3.542,
+    "density_kg_m3": 609.1,
+    "collision_bit": 16,
+    "ignores": [
+     "foot.R",
+     "thigh.R"
+    ],
+    "colliders": [
+     {
+      "shape": "capsule",
+      "begin": [
+       0.00375,
+       0.03752,
+       0.02383
+      ],
+      "end": [
+       0.00375,
+       0.42738,
+       0.02383
+      ],
+      "radius": 0.06254
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.15728,
+      0.6342,
+      -0.0223
+     ],
+     "rotation": [
+      -0.987568,
+      0.060687,
+      -0.132652,
+      0.05857
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.0,
+       0.4419,
+       -0.0
+      ],
+      "rotation": [
+       0.056744,
+       -0.0,
+       -0.0,
+       0.998389
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -6,
+       145
+      ],
+      "y": [
+       -17.7,
+       15.9
+      ],
+      "z": [
+       -31.9,
+       26.8
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       16.9,
+       136.5
+      ],
+      "y": [
+       -12.7,
+       10.9
+      ],
+      "z": [
+       -26.9,
+       21.8
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   },
+   {
+    "name": "foot.R",
+    "bone": "DEF-foot.R",
+    "parent": "shin.R",
+    "passengers": [
+     "DEF-toe.R"
+    ],
+    "mass_kg": 2.361,
+    "density_kg_m3": 396.5,
+    "collision_bit": 17,
+    "ignores": [
+     "shin.R"
+    ],
+    "colliders": [
+     {
+      "shape": "cuboid",
+      "position": [
+       -0.00737,
+       0.12635,
+       0.02881
+      ],
+      "rotation": [
+       0.94731,
+       -0.082963,
+       0.026993,
+       0.308208
+      ],
+      "half_extents": [
+       0.0742,
+       0.17212,
+       0.05828
+      ]
+     }
+    ],
+    "rest_gltf": {
+     "position": [
+      -0.20578,
+      0.17592,
+      -0.08356
+     ],
+     "rotation": [
+      0.887786,
+      -0.039577,
+      0.07775,
+      0.451913
+     ]
+    },
+    "joint": {
+     "type": "ball",
+     "frame_in_parent": {
+      "position": [
+       -0.0,
+       0.4649,
+       -0.0
+      ],
+      "rotation": [
+       -0.498824,
+       -0.011239,
+       -0.079293,
+       0.862995
+      ]
+     },
+     "frame_in_body": {
+      "position": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "rotation": [
+       0.0,
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "limits_deg": {
+      "x": [
+       -86.4,
+       35
+      ],
+      "y": [
+       -57.1,
+       30.6
+      ],
+      "z": [
+       -74.4,
+       47.1
+      ]
+     },
+     "clip_range_deg": {
+      "x": [
+       -81.4,
+       25.3
+      ],
+      "y": [
+       -52.1,
+       19.6
+      ],
+      "z": [
+       -69.4,
+       42.1
+      ]
+     },
+     "anchor_error_mm": 0.0
+    }
+   }
+  ],
+  "checks": {
+   "glb_frame_error": 2.8014183044433594e-06,
+   "clip_frames": 1312,
+   "touching_pairs": {
+    "abdomen / upper_arm.R": {
+     "overlap_mm": 114.3,
+     "at": "droid_pistol_draw:7"
+    },
+    "chest / upper_arm.L": {
+     "overlap_mm": 110.2,
+     "at": "droid_pistol_aim_d60_r60:2"
+    },
+    "abdomen / upper_arm.L": {
+     "overlap_mm": 101.7,
+     "at": "droid_pistol_draw:5"
+    },
+    "chest / upper_arm.R": {
+     "overlap_mm": 100.9,
+     "at": "droid_pistol_draw:9"
+    },
+    "hand.R / thigh.R": {
+     "overlap_mm": 66.0,
+     "at": "droid_strafe_run_BL:3"
+    },
+    "hand.L / thigh.L": {
+     "overlap_mm": 65.0,
+     "at": "droid_strafe_run_FL:15"
+    },
+    "abdomen / forearm.L": {
+     "overlap_mm": 49.5,
+     "at": "droid_pistol_draw:9"
+    },
+    "abdomen / forearm.R": {
+     "overlap_mm": 47.3,
+     "at": "droid_pistol_draw:7"
+    },
+    "forearm.R / hand.L": {
+     "overlap_mm": 43.0,
+     "at": "droid_pistol_draw:11"
+    },
+    "hand.L / hand.R": {
+     "overlap_mm": 38.3,
+     "at": "droid_pistol_draw:5"
+    }
+   }
+  }
  }
 }

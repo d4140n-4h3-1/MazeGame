@@ -66,6 +66,14 @@ const FLASH_BRIGHTNESS: f32 = 3.0;
 /// How long a bolt that has hit something glows where it hit, in seconds.
 const IMPACT: f32 = 0.12;
 
+/// A bolt hitting something: what, where, and which way it was going, one meter long.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Strike {
+    pub collider: Handle<Collider>,
+    pub at: Vector3<f32>,
+    pub way: Vector3<f32>,
+}
+
 /// A bolt in the air.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Bolt {
@@ -87,7 +95,7 @@ pub(super) struct Bolts {
     /// The sound of a shot, and how far off it is heard at full volume, if there is one.
     shot: Option<(SoundBufferResource, f32)>,
     /// What bolts have hit since the game last asked.
-    struck: Vec<Handle<Collider>>,
+    struck: Vec<Strike>,
 }
 
 /// The sound called `name` in `sounds`, made to play, with how far off it is heard at full
@@ -288,7 +296,11 @@ impl Player {
             let Some((reach, hit, stopped)) = flight else {
                 continue;
             };
-            self.bolts.struck.extend(hit);
+            self.bolts.struck.extend(hit.map(|collider| Strike {
+                collider,
+                at: flying.position + flying.direction * reach,
+                way: flying.direction,
+            }));
             if hit.is_some() {
                 // Its tip against what it hit, its flash lighting it up; and quiet, and the first
                 // to go if another is fired.
@@ -326,7 +338,7 @@ impl Player {
     }
 
     /// What the pistol's bolts have hit since this was last asked, each once for every bolt.
-    pub fn struck(&mut self) -> Vec<Handle<Collider>> {
+    pub fn struck(&mut self) -> Vec<Strike> {
         std::mem::take(&mut self.bolts.struck)
     }
 

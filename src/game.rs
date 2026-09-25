@@ -195,6 +195,8 @@ pub struct MazeGame {
     #[reflect(hidden)]
     phase: Phase,
     round_time: f32,
+    /// Whether MAZE_KNOCKDOWN has shot a droid down this round yet.
+    knocked_down: bool,
     best_time: Option<f32>,
     /// How long ago the player was deleted, in seconds.
     #[visit(skip)]
@@ -445,6 +447,7 @@ impl MazeGame {
         );
 
         self.round_time = 0.0;
+        self.knocked_down = false;
         self.phase = Phase::Playing;
         self.set_banner(ctx, "");
     }
@@ -615,9 +618,19 @@ impl MazeGame {
     fn land_shots(&mut self, ctx: &mut PluginContext) {
         let graph = &mut ctx.scenes[self.scene].graph;
         let player = self.player.feet(graph);
+        // With MAZE_KNOCKDOWN=<seconds>, to try the droids' fall out: that far into the round,
+        // the droid nearest the player is shot down, as if by the player where they stand.
+        let knockdown = std::env::var("MAZE_KNOCKDOWN").ok().and_then(|s| s.trim().parse::<f32>().ok());
+        if knockdown.is_some_and(|at| self.round_time >= at) && !self.knocked_down {
+            self.knocked_down = true;
+            if let Some(n) = self.inhabitants.knock_down(graph, player) {
+                Log::info(format!("MAZE_KNOCKDOWN: droid {n} shot down"));
+            }
+        }
         let mut provoked = Vec::new();
-        for collider in self.player.struck() {
-            if let Some(n) = self.inhabitants.shot(graph, collider, player) {
+        for strike in self.player.struck() {
+            let collider = strike.collider;
+            if let Some(n) = self.inhabitants.shot(graph, strike, player) {
                 let name = self.name_of(n).unwrap_or_else(|| "The droid".into());
                 self.hud.show_note(format!("{name} is down"));
             }

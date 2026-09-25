@@ -29,6 +29,7 @@ mod inward;
 mod layout;
 mod level;
 mod menu;
+mod ragdoll;
 mod player;
 mod survey;
 mod tiles;
