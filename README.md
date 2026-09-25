@@ -276,6 +276,9 @@ window in the middle of a round pauses it too. The menu has:
 - **Lights**: switch the maze's lights off, or back on. Off, the lamps, the glow of their
   fixtures, the sun and nearly all the ambient light go out, leaving your flashlight and the
   exit's own glow. The setting carries over to each new maze.
+- **Options**: switch the subtitles of what the droids say on or off, the System Latin and the
+  English each by itself. With only the English on, it is as big as the System Latin would be.
+  Back, or Escape, returns to the menu.
 - **New maze**: the same as N. **New round** when playing a fixed maze model.
 - **Quit**.
 

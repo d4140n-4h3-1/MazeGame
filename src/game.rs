@@ -3,7 +3,7 @@
 use crate::{
     diagnostics::{self, FrameStats},
     dialogue::{
-        screen::{self, DialogueScreen, Pointer},
+        screen::{self, DialogueScreen, Pointer, Subtitles},
         Conversation, Facts, Script, SCRIPT,
     },
     formants::{
@@ -164,6 +164,11 @@ pub struct MazeGame {
     /// Whether the player has switched the maze's lights off, leaving the flashlight to see by.
     /// It stays that way from one maze to the next.
     lights_off: bool,
+    /// Which of what the droids say the player has on screen: the System Latin, the English, or
+    /// both, as usual.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    subtitles: Subtitles,
     #[visit(skip)]
     #[reflect(hidden)]
     rng: Option<Rng>,
@@ -485,6 +490,9 @@ impl MazeGame {
                 self.player.nudge_fov(step, &mut scene.graph);
                 self.show_look_settings();
             }
+            KeyCode::Escape if self.menu.in_options() => {
+                self.menu.set_in_options(ctx.user_interfaces.first(), false)
+            }
             KeyCode::Escape => self.set_paused(ctx, !self.menu.is_open()),
             _ if self.talking.is_some() && !self.menu.is_open() => self.on_talking_key(ctx, code),
             KeyCode::KeyE if !self.menu.is_open() => self.start_talking(ctx),
@@ -523,6 +531,13 @@ impl MazeGame {
         scene.graph[self.sun].set_visibility(on);
         self.level.set_lights(&mut scene.graph, on);
         self.menu.set_lights(ctx.user_interfaces.first(), on);
+    }
+
+    /// Shows what the droids say, and what it means, as the player has them.
+    fn apply_subtitles(&mut self, ctx: &mut PluginContext) {
+        let ui = ctx.user_interfaces.first();
+        self.menu.set_subtitles(ui, self.subtitles);
+        self.dialogue.set_subtitles(ui, self.subtitles);
     }
 
     /// Puts the maze's inhabitants into it once there is a droid to make them from, and moves
@@ -1055,6 +1070,16 @@ impl Plugin for MazeGame {
             Some(Choice::Lights) => {
                 self.lights_off = !self.lights_off;
                 self.apply_lights(ctx);
+            }
+            Some(Choice::Options) => self.menu.set_in_options(ctx.user_interfaces.first(), true),
+            Some(Choice::Back) => self.menu.set_in_options(ctx.user_interfaces.first(), false),
+            Some(Choice::LatinSubtitles) => {
+                self.subtitles.latin = !self.subtitles.latin;
+                self.apply_subtitles(ctx);
+            }
+            Some(Choice::EnglishSubtitles) => {
+                self.subtitles.english = !self.subtitles.english;
+                self.apply_subtitles(ctx);
             }
             Some(Choice::Restart) => self.restart(ctx),
             Some(Choice::Quit) => ctx.loop_controller.exit(),

@@ -11,8 +11,9 @@
 //! if it fails; a check is tried only once. A reply already given is shown dimmed.
 //!
 //! Each line has a mood, which colours the whole panel, and the droid's eyes: green as usual, blue
-//! for success, yellow for a warning or a question, orange for agitation, red for hostility. A line says its own, or
-//! takes one from how the check that led to it went: blue if it succeeded, orange if not.
+//! for success, yellow for a warning or a question, orange for agitation, red for hostility. A
+//! line says its own, or takes one from how the check that led to it went: blue if it succeeded,
+//! orange if not.
 //!
 //! Lines can name what is true where the conversation happens, in braces: `{code}`, the droid's
 //! code, and `{exit_far}` and `{exit_way}`, how far off the exit is and which way. Each is put in

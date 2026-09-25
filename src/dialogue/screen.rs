@@ -2,7 +2,9 @@
 //! what they say and what it means, how the last check went, and the replies to pick from, the
 //! one picked lit up; and the hint to talk, under the middle of the screen, while there is
 //! someone close enough. The panel is coloured by the mood of what is being said: green as
-//! usual, blue, yellow, orange or red (see [`Mood`]).
+//! usual, blue, yellow, orange or red (see [`Mood`]). What is said, in System Latin, and what it
+//! means, in English, can each be switched off in the options (see [`Subtitles`]); the English
+//! alone is as big as the System Latin.
 
 use super::{Mood, View};
 use fyrox::{
@@ -24,6 +26,10 @@ use fyrox::{
 pub const MOST_REPLIES: usize = 8;
 /// How wide the panel is, in pixels.
 const WIDTH: f32 = 860.0;
+/// How big what is said is, in System Latin, and what it means, in English, under it. With only
+/// the English on, it is as big as the System Latin would be.
+const SAYS_SIZE: f32 = 27.0;
+const MEANS_SIZE: f32 = 19.0;
 
 /// The colours of the panel in one mood: bright for what is being said and the reply picked, the
 /// usual for the rest, dim for what has been said already and for the panel's edge; the panel's
@@ -91,6 +97,23 @@ pub fn eyes(mood: Mood) -> Option<Color> {
     (mood != Mood::Normal).then(|| palette(mood).usual)
 }
 
+/// Which of what a droid says is shown: the words themselves, in System Latin, and what they
+/// mean, in English. Both, as usual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Subtitles {
+    pub latin: bool,
+    pub english: bool,
+}
+
+impl Default for Subtitles {
+    fn default() -> Self {
+        Self {
+            latin: true,
+            english: true,
+        }
+    }
+}
+
 /// Something done with the mouse to a reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pointer {
@@ -117,6 +140,9 @@ pub struct DialogueScreen {
     selected: usize,
     /// The colours of the mood of what is being said.
     palette: Palette,
+    /// Which of what is said is shown, and whether the line showing has a meaning to show.
+    subtitles: Subtitles,
+    has_means: bool,
     prompt: Handle<Text>,
     open: bool,
 }
@@ -135,6 +161,8 @@ impl Default for DialogueScreen {
             said: Vec::new(),
             selected: 0,
             palette: GREEN,
+            subtitles: Subtitles::default(),
+            has_means: false,
             prompt: Handle::NONE,
             open: false,
         }
@@ -157,8 +185,8 @@ impl DialogueScreen {
     pub fn build(ui: &mut UserInterface) -> Self {
         let ctx = &mut ui.build_ctx();
         let name = text(ctx, GREEN.dim, 17.0, Thickness::bottom(6.0));
-        let says = text(ctx, GREEN.bright, 27.0, Thickness::bottom(4.0));
-        let means = text(ctx, GREEN.usual, 19.0, Thickness::bottom(4.0));
+        let says = text(ctx, GREEN.bright, SAYS_SIZE, Thickness::bottom(4.0));
+        let means = text(ctx, GREEN.usual, MEANS_SIZE, Thickness::bottom(4.0));
         let note = text(ctx, GREEN.bright, 17.0, Thickness::bottom(4.0));
         let rule = BorderBuilder::new(
             WidgetBuilder::new()
@@ -268,7 +296,8 @@ impl DialogueScreen {
         ui.send(self.name, TextMessage::Text(who.to_string()));
         ui.send(self.says, TextMessage::Text(view.says.clone()));
         ui.send(self.means, TextMessage::Text(view.means.clone()));
-        ui.send(self.means, WidgetMessage::Visibility(!view.means.is_empty()));
+        self.has_means = !view.means.is_empty();
+        self.show_subtitles(ui);
         ui.send(self.note, TextMessage::Text(view.note.clone().unwrap_or_default()));
         ui.send(self.note, WidgetMessage::Visibility(view.note.is_some()));
         self.said.clear();
@@ -281,6 +310,22 @@ impl DialogueScreen {
             }
         }
         self.select(ui, 0);
+    }
+
+    /// Shows what is said, and what it means, only as `subtitles` has them.
+    pub fn set_subtitles(&mut self, ui: &UserInterface, subtitles: Subtitles) {
+        self.subtitles = subtitles;
+        self.show_subtitles(ui);
+    }
+
+    fn show_subtitles(&self, ui: &UserInterface) {
+        ui.send(self.says, WidgetMessage::Visibility(self.subtitles.latin));
+        ui.send(
+            self.means,
+            WidgetMessage::Visibility(self.subtitles.english && self.has_means),
+        );
+        let size = if self.subtitles.latin { MEANS_SIZE } else { SAYS_SIZE };
+        ui.send(self.means, TextMessage::FontSize(size.into()));
     }
 
     /// Colours the panel, and all that is in it but the replies, with `palette`; the replies are
