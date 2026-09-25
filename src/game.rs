@@ -3,7 +3,7 @@
 use crate::{
     diagnostics::{self, FrameStats},
     dialogue::{
-        screen::{DialogueScreen, Pointer},
+        screen::{self, DialogueScreen, Pointer},
         Conversation, Facts, Script, SCRIPT,
     },
     formants::{
@@ -688,12 +688,13 @@ impl MazeGame {
             return;
         };
         let ui = ctx.user_interfaces.first();
+        let view = conversation.view(script, &facts);
         self.dialogue.set_open(ui, true);
-        self.dialogue
-            .show(ui, &who, &conversation.view(script, &facts));
+        self.dialogue.show(ui, &who, &view);
         self.dialogue.set_prompt(ui, None);
         self.talkable = None;
         self.inhabitants.set_talking(droid, true);
+        self.inhabitants.set_eyes(droid, screen::eyes(view.mood));
         self.player.release_keys();
         self.player.talk_to(Some(face));
         self.want_mouse = false;
@@ -792,6 +793,7 @@ impl MazeGame {
             let view = talking.conversation.view(script, &talking.facts);
             self.dialogue
                 .show(ctx.user_interfaces.first(), &talking.who, &view);
+            self.inhabitants.set_eyes(talking.droid, screen::eyes(view.mood));
             self.speak(ctx);
         } else {
             self.stop_talking(ctx);
@@ -806,6 +808,7 @@ impl MazeGame {
             return;
         };
         self.inhabitants.set_talking(talking.droid, false);
+        self.inhabitants.set_eyes(talking.droid, None);
         self.player.talk_to(None);
         self.dialogue.set_open(ctx.user_interfaces.first(), false);
         self.want_mouse = !self.menu.is_open();

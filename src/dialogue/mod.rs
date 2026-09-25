@@ -10,8 +10,8 @@
 //! it. A reply can be a skill check, `[Speech 40%]`, that goes one way if it succeeds and another
 //! if it fails; a check is tried only once. A reply already given is shown dimmed.
 //!
-//! Each line has a mood, which colours the whole panel: green as usual, blue for success, yellow
-//! for a warning or a question, orange for agitation, red for hostility. A line says its own, or
+//! Each line has a mood, which colours the whole panel, and the droid's eyes: green as usual, blue
+//! for success, yellow for a warning or a question, orange for agitation, red for hostility. A line says its own, or
 //! takes one from how the check that led to it went: blue if it succeeded, orange if not.
 //!
 //! Lines can name what is true where the conversation happens, in braces: `{code}`, the droid's

@@ -70,6 +70,7 @@
 //! removed, so a droid in them would leave its shadow behind where it was first put down.
 
 use super::posture::{Gait, Posture};
+use crate::fixtures::{glow_strength, property, DIFFUSE_COLOR, EMISSION_STRENGTH};
 use fyrox::{
     core::{
         algebra::{Point3, UnitQuaternion, Vector3},
@@ -80,6 +81,7 @@ use fyrox::{
     fxhash::FxHashMap,
     generic_animation::value::{TrackValue, ValueBinding},
     graph::SceneGraph,
+    material::{MaterialProperty, MaterialResource},
     resource::model::{ModelResource, ModelResourceExtension},
     scene::{
         animation::{Animation, AnimationContainer, AnimationPlayer},
@@ -244,6 +246,37 @@ const SCREEN_TINT: f32 = 0.6;
 const SCREEN_GLOW: f32 = 1.5;
 const SHELL_TINT: f32 = 0.4;
 const SHELL_GLOW: f32 = 0.5;
+/// The droid's eyes, which glow the colour of its mood while it talks, and their own otherwise.
+const EYES: &str = "eyes";
+
+/// The glowing surfaces of the droid's eyes: a material the droid has to itself, since the
+/// model's is shared with every other droid, with the colour and the glow it came with.
+#[derive(Debug, Clone, PartialEq)]
+struct Eyes {
+    material: MaterialResource,
+    colour: MaterialProperty,
+    glow: MaterialProperty,
+}
+
+/// Gives the droid its own copy of the glowing material of the eyes under `eyes`, if they glow.
+fn claim_eyes(graph: &mut Graph, eyes: Handle<Node>) -> Option<Eyes> {
+    let mesh = graph[eyes].cast_mut::<Mesh>()?;
+    let (key, eyes) = mesh.surfaces().iter().find_map(|surface| {
+        let original = surface.material();
+        let state = original.state();
+        let material = state.data_ref()?;
+        let glow = glow_strength(material)?;
+        let colour = property(material, DIFFUSE_COLOR)?;
+        let copy = MaterialResource::new_embedded(material.clone());
+        Some((original.key(), Eyes { material: copy, colour, glow }))
+    })?;
+    for surface in mesh.surfaces_mut() {
+        if surface.material().key() == key {
+            surface.set_material(eyes.material.clone());
+        }
+    }
+    Some(eyes)
+}
 
 /// How far round something tumbling at [`SPIN`] has gone after `time` seconds.
 fn tumbled(time: f32) -> UnitQuaternion<f32> {
@@ -1032,6 +1065,8 @@ pub(crate) struct Avatar {
     shot: Option<(Vector3<f32>, Vector3<f32>)>,
     /// Its pistol's screen, which flashes as the trigger is pulled, if it has a pistol.
     flash: Option<Flash>,
+    /// Its eyes, if they glow.
+    eyes: Option<Eyes>,
     /// The shell and the core of the ball at the muzzle, each with whether it tumbles the
     /// opposite way round to how [`SPIN`] has it; and how long they have been tumbling, in
     /// seconds.
@@ -1281,6 +1316,7 @@ impl Avatar {
         let barrel_chain = muzzle.map_or_else(Vec::new, |muzzle| chain(parent_of, root, muzzle));
         let parents: FxHashMap<Handle<Node>, Handle<Node>> =
             rest.keys().map(|&bone| (bone, graph[bone].parent())).collect();
+        let eyes = find(EYES).and_then(|eyes| claim_eyes(graph, eyes));
         // The screen and the shell as see-through green glass - the model's own see-through
         // shell comes in solid, and would hide the core - and the screen dark until the trigger
         // is pulled.
@@ -1638,6 +1674,7 @@ impl Avatar {
             barrel: Vector3::z(),
             shot: None,
             flash,
+            eyes,
             spinning,
             spun: 0.0,
             aims,
@@ -1689,6 +1726,29 @@ impl Avatar {
             .global_transform()
             .transform_point(&Point3::new(0.0, FACE_ABOVE_HEAD, 0.0));
         Some(point.coords)
+    }
+
+    /// Has the droid's eyes glow `colour`, as brightly as they were made to, or as they were made
+    /// to with none.
+    pub(crate) fn set_eyes(&self, colour: Option<Color>) {
+        let Some(eyes) = &self.eyes else {
+            return;
+        };
+        let (colour, glow) = match colour {
+            Some(colour) => {
+                let brightest = match eyes.glow {
+                    MaterialProperty::Vector3(glow) => glow.max(),
+                    MaterialProperty::Float(glow) => glow,
+                    _ => 1.0,
+                };
+                let glow = Vector3::new(colour.r, colour.g, colour.b).cast::<f32>() / 255.0;
+                (colour.into(), MaterialProperty::Vector3(glow * brightest))
+            }
+            None => (eyes.colour.clone(), eyes.glow.clone()),
+        };
+        let mut material = eyes.material.data_ref();
+        material.set_property(DIFFUSE_COLOR, colour);
+        material.set_property(EMISSION_STRENGTH, glow);
     }
 
     pub(crate) fn is_visible(&self, graph: &Graph) -> bool {

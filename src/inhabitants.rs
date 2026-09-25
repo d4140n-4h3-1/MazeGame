@@ -30,7 +30,7 @@ use crate::{
     survey,
 };
 use fyrox::{
-    core::{algebra::Vector3, log::Log, pool::Handle},
+    core::{algebra::Vector3, color::Color, log::Log, pool::Handle},
     graph::SceneGraph,
     resource::model::ModelResource,
     scene::{
@@ -562,6 +562,13 @@ impl Inhabitants {
             if !talking && !droid.stays {
                 droid.resting = REST.0;
             }
+        }
+    }
+
+    /// Has the `n`th droid's eyes glow `colour`, or their own colour with none.
+    pub fn set_eyes(&self, n: usize, colour: Option<Color>) {
+        if let Some(droid) = self.droids.get(n) {
+            droid.avatar.set_eyes(colour);
         }
     }
 

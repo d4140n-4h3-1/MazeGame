@@ -37,7 +37,9 @@ pub const LAMP_RADIUS: f32 = 7.5;
 const PANE_GLOW: f32 = 0.5;
 /// The material property that says how brightly a surface glows by itself, in the engine's
 /// standard shaders and in the glass alike.
-const EMISSION_STRENGTH: &str = "emissionStrength";
+pub(crate) const EMISSION_STRENGTH: &str = "emissionStrength";
+/// The material property that says what colour a surface is, in the engine's standard shaders.
+pub(crate) const DIFFUSE_COLOR: &str = "diffuseColor";
 
 /// Everything in a level that glows by itself: the glass panes and the bulbs behind them. Each
 /// is a material the level has to itself, with how brightly it glows while the lights are on.
@@ -92,18 +94,23 @@ pub fn claim_glow(graph: &mut Graph, root: Handle<Node>) -> Glow {
 }
 
 /// How brightly `material` glows by itself, if it does at all.
-fn glow_strength(material: &Material) -> Option<MaterialProperty> {
-    let key = ImmutableString::new("properties");
-    let Some(MaterialResourceBinding::PropertyGroup(group)) = material.bindings().get(&key) else {
-        return None;
-    };
-    let strength = group.property_ref(EMISSION_STRENGTH)?;
-    let glows = match strength {
+pub(crate) fn glow_strength(material: &Material) -> Option<MaterialProperty> {
+    let strength = property(material, EMISSION_STRENGTH)?;
+    let glows = match &strength {
         MaterialProperty::Float(strength) => *strength > 0.0,
         MaterialProperty::Vector3(strength) => strength.max() > 0.0,
         _ => false,
     };
-    glows.then(|| strength.clone())
+    glows.then_some(strength)
+}
+
+/// The property of `material` called `name`, if it was given one.
+pub(crate) fn property(material: &Material, name: &str) -> Option<MaterialProperty> {
+    let key = ImmutableString::new("properties");
+    let Some(MaterialResourceBinding::PropertyGroup(group)) = material.bindings().get(&key) else {
+        return None;
+    };
+    group.property_ref(name).cloned()
 }
 
 /// A glow strength like `strength`, turned all the way down.
@@ -285,12 +292,8 @@ fn surface_bounds(data: &SurfaceResource, transform: &Matrix4<f32>) -> AxisAlign
 
 /// The glass of the maze model: surfaces colored pure magenta.
 fn is_glass_marker(material: &Material) -> bool {
-    let key = ImmutableString::new("properties");
-    let Some(MaterialResourceBinding::PropertyGroup(group)) = material.bindings().get(&key) else {
-        return false;
-    };
     matches!(
-        group.property_ref("diffuseColor"),
+        property(material, DIFFUSE_COLOR),
         Some(MaterialProperty::Color(color)) if color.r == 255 && color.g == 0 && color.b == 255
     )
 }

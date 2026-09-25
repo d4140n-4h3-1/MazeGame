@@ -85,6 +85,12 @@ fn palette(mood: Mood) -> Palette {
     }
 }
 
+/// The colour a droid's eyes glow saying something in `mood`: that of the panel, but none - their
+/// own - as usual.
+pub fn eyes(mood: Mood) -> Option<Color> {
+    (mood != Mood::Normal).then(|| palette(mood).usual)
+}
+
 /// Something done with the mouse to a reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pointer {
