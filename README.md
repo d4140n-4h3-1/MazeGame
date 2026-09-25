@@ -104,6 +104,17 @@ shadows (its `raytracing` feature).
   you how far off the exit is and which way, as the crow flies. What they say is in
   `data/dialogue/droids.json`, which can be rewritten without a rebuild. Every line parses with
   the System Latin parser in `data/system_latin/`.
+- **The droids speak.** Each line is said out loud in a voice made from formants, as the pistol's
+  sounds are, heard from the droid's face. System Latin is read as it is written, each sound
+  gliding into the next, each word a moment apart and each vowel on a note of its own, falling
+  at the end of a sentence and rising at a question. The sentry speaks low and slow, the scout
+  high and quick, and the maintenance unit breathily; every droid a little higher or lower than
+  the rest of its kind. The sounds and voices are in `data/sounds/voice_formants.json`, which
+  can be retuned without a rebuild. A line is cut off by the next one, or by walking away.
+- **The close-up is lower**, looking up into the droid's face.
+- **Always someone to talk to.** One of the droids stands just in front of you at the start of
+  each round, facing you, and stays there rather than wandering off, even once you have talked
+  to it.
 
 24 September 2026:
 
@@ -312,7 +323,7 @@ and round planning, and the player's movement, breath, head motion, leaning and 
 | `menu.rs`       | The pause menu.                                                            |
 | `dialogue/`     | Talking to the droids: their conversations from `data/dialogue/`, and the panel they are shown in. |
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
-| `formants/`     | Sounds made from formants: the file format, and the synthesizer that makes the pistol's sounds from `data/sounds/`. |
+| `formants/`     | Sounds made from formants: the file format, the synthesizer that makes the pistol's sounds from `data/sounds/`, and the droids' speech. |
 | `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`), the camera behind it (`third_person`) and its close-up when talking (`talk`). |
 
 The tile models and the droid (`droid_full_deform.glb`) are in `data/`, along with where the

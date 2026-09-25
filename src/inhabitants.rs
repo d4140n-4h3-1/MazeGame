@@ -16,7 +16,9 @@
 //!
 //! Each is one of the kinds of droid in the conversations (see [`crate::dialogue`]), with a code
 //! of its own, and can be talked to by a player close by and facing it. While it is, it stands
-//! still and turns to face them, and afterwards stands a moment before going on its way.
+//! still and turns to face them, and afterwards stands a moment before going on its way. One of
+//! them does not wander at all: it stands just in front of where the player starts, and stays
+//! there, so that there is always someone near to talk to.
 
 use crate::{
     layout::{Rng, WalkGrid},
@@ -89,6 +91,9 @@ const FALLBACK_PACE: f32 = 1.4;
 /// player looks it can be, in radians, for the player to talk to it.
 const TALK_REACH: f32 = 2.5;
 const TALK_CONE: f32 = 40.0 * std::f32::consts::PI / 180.0;
+/// How far ahead of the player, in meters, the droid that stays near them stands: the first of
+/// these that is on the floor.
+const MEET_AT: [f32; 3] = [2.2, 1.8, 1.4];
 /// Where a droid's face is above its feet, in meters, if its model has no head to go by.
 const FACE_HEIGHT: f32 = 1.6;
 
@@ -115,6 +120,8 @@ struct Inhabitant {
     code: u32,
     /// Whether the player is talking to it.
     talking: bool,
+    /// Whether it stays where it was put, near where the player starts, rather than wandering.
+    stays: bool,
 }
 
 /// Everyone who lives in the maze.
@@ -270,13 +277,17 @@ impl Inhabitants {
 
     /// Puts the maze's inhabitants into `scene`, as droids from `model`, on the floor of `grid`
     /// whose corner is at `origin`, well away from the `player`'s feet. They take turns being
-    /// each of the `characters` kinds of droid there are to talk to.
+    /// each of the `characters` kinds of droid there are to talk to. The first stands just in
+    /// front of the player instead, `ahead` of them, facing them, and stays there, so that there
+    /// is always someone near to talk to.
+    #[allow(clippy::too_many_arguments)]
     pub fn populate(
         &mut self,
         scene: &mut Scene,
         model: &ModelResource,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         player: Vector3<f32>,
+        ahead: Vector3<f32>,
         characters: usize,
         rng: &mut Rng,
     ) {
@@ -301,12 +312,23 @@ impl Inhabitants {
             .map(|(i, _)| (i % grid.width, i / grid.width))
             .collect();
 
+        // Where the one that stays near the player stands: the furthest of a few steps ahead of
+        // them that is on the floor.
+        let waiting = MEET_AT.iter().find_map(|&distance| {
+            survey::cell_at(grid, origin, player + ahead * distance)
+                .filter(|&(x, z)| grid.is_walkable(x, z))
+                .map(|cell| on_floor(grid, origin, cell))
+        });
         let first = rng.below(characters.max(1));
         for n in 0..count {
-            if places.is_empty() {
+            let meeting = n == 0 && waiting.is_some();
+            if places.is_empty() && !meeting {
                 break;
             }
-            let feet = on_floor(grid, origin, places.swap_remove(rng.below(places.len())));
+            let feet = match waiting.filter(|_| meeting) {
+                Some(spot) => spot,
+                None => on_floor(grid, origin, places.swap_remove(rng.below(places.len()))),
+            };
             let collider = ColliderBuilder::new(BaseBuilder::new())
                 .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
                 .build(&mut scene.graph);
@@ -324,23 +346,40 @@ impl Inhabitants {
                 scene.graph.remove_node(body);
                 break;
             };
+            let to_player = flat(player - feet);
             self.droids.push(Inhabitant {
                 body,
                 avatar,
                 feet,
                 speed: 0.0,
-                heading: between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
+                heading: if meeting {
+                    to_player.x.atan2(to_player.z)
+                } else {
+                    between(rng, (-std::f32::consts::PI, std::f32::consts::PI))
+                },
                 route: Vec::new(),
-                // Not all setting off at once.
-                resting: between(rng, REST),
+                // Not all setting off at once; and the one that stays never.
+                resting: if meeting {
+                    f32::INFINITY
+                } else {
+                    between(rng, REST)
+                },
                 waiting: 0.0,
                 last_seen: None,
                 character: (first + n) % characters.max(1),
                 code: 10 + rng.below(90) as u32,
                 talking: false,
+                stays: meeting,
             });
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
+        match waiting {
+            Some(spot) => Log::info(format!(
+                "Maze: one stays {:.1} m in front of the player",
+                flat(spot - player).norm()
+            )),
+            None => Log::warn("Maze: no floor in front of the player for a droid to stay on"),
+        }
     }
 
     /// Moves everyone along for another `dt`, over `grid` whose corner is at `origin`, making
@@ -373,6 +412,10 @@ impl Inhabitants {
                 .filter(|&(other, _)| other != me)
                 .map(|(_, &other)| other);
             droid.resting = (droid.resting - dt).max(0.0);
+            // The one that stays may step out of someone's way, but never sets off anywhere.
+            if droid.stays {
+                droid.resting = f32::INFINITY;
+            }
             // Talking, it stands and faces the player, and rests a moment once they are done.
             if droid.talking {
                 droid.route.clear();
@@ -511,10 +554,14 @@ impl Inhabitants {
         )
     }
 
-    /// Has the player talking to the `n`th droid, or done talking to it.
+    /// Has the player talking to the `n`th droid, or done talking to it; done, it stands a
+    /// moment before going on its way, unless it is the one that stays.
     pub fn set_talking(&mut self, n: usize, talking: bool) {
         if let Some(droid) = self.droids.get_mut(n) {
             droid.talking = talking;
+            if !talking && !droid.stays {
+                droid.resting = REST.0;
+            }
         }
     }
 

@@ -17,10 +17,11 @@ use fyrox::{
 };
 
 /// How far in front of the face the camera is, in meters, how far out to one side and how far
-/// below its middle, so that the face is seen not quite head on.
+/// below its middle, so that the face is seen not quite head on: from a little below, looking
+/// up at it.
 const CLOSE_UP: f32 = 0.85;
 const CLOSE_UP_SIDE: f32 = 0.12;
-const CLOSE_UP_DROP: f32 = 0.03;
+const CLOSE_UP_DROP: f32 = 0.22;
 /// How wide the view is in the close-up, in degrees up and down.
 const CLOSE_UP_FOV: f32 = 40.0;
 /// How long the camera takes to go in to the close-up, or back out, in seconds.

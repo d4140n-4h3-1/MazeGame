@@ -6,6 +6,11 @@ use crate::{
         screen::{DialogueScreen, Pointer},
         Conversation, Facts, Script, SCRIPT,
     },
+    formants::{
+        self,
+        speech::{Voices, VOICES},
+        synth,
+    },
     generate::Maze,
     hud::{self, Hud, Status},
     inhabitants::Inhabitants,
@@ -44,6 +49,7 @@ use fyrox::{
         },
         node::Node,
         rigidbody::{RigidBodyBuilder, RigidBodyType},
+        sound::{SoundBuilder, Status as SoundStatus},
         transform::TransformBuilder,
         EnvironmentLightingSource, Scene,
     },
@@ -59,6 +65,9 @@ const EXIT_RADIUS: f32 = 1.5;
 /// The ambient light. Low: the lamps do the lighting, and a flat ambient term lights corners as
 /// much as open floor, which is what makes a room look like untextured geometry.
 const AMBIENT: Color = Color::opaque(24, 26, 34);
+/// How much higher or lower each droid speaks than the rest of its kind, at most, as a part of
+/// their pitch.
+const VOICE_SPREAD: f32 = 0.06;
 /// How near the exit is, in meters as the crow flies, for a droid to call it near, and to call
 /// it not far off; any further is far.
 const EXIT_NEAR: f32 = 25.0;
@@ -90,6 +99,21 @@ struct Talking {
     facts: Facts,
     /// Who is talking, as the screen names them.
     who: String,
+    /// What the droid is saying out loud, while it is.
+    voice: Handle<Node>,
+    /// The line it is about to say, while it is being made.
+    making: Option<Making>,
+}
+
+/// A line being made into a voice, away from the game so as not to hold it up: the samples to
+/// come, and how far off they are heard at full volume.
+#[derive(Debug)]
+struct Making(std::sync::mpsc::Receiver<Vec<f32>>, f32);
+
+impl PartialEq for Making {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
 }
 
 #[derive(Default, Debug, PartialEq, Visit, Reflect)]
@@ -155,10 +179,13 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     menu: PauseMenu,
-    /// What the droids say, if it could be read.
+    /// What the droids say, if it could be read, and how they sound saying it.
     #[visit(skip)]
     #[reflect(hidden)]
     script: Option<Script>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    voices: Option<Voices>,
     /// The conversation under way, if there is one; while it is, the clock and the player
     /// stand still.
     #[visit(skip)]
@@ -506,8 +533,16 @@ impl MazeGame {
         let player = self.player.feet(&scene.graph);
         if !self.inhabitants.is_populated() {
             let characters = self.script.as_ref().map_or(0, |s| s.characters.len());
-            self.inhabitants
-                .populate(scene, model, (grid, *origin), player, characters, rng);
+            let ahead = self.player.ahead();
+            self.inhabitants.populate(
+                scene,
+                model,
+                (grid, *origin),
+                player,
+                ahead,
+                characters,
+                rng,
+            );
         }
         self.inhabitants
             .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt);
@@ -639,7 +674,81 @@ impl MazeGame {
             conversation,
             facts,
             who,
+            voice: Handle::NONE,
+            making: None,
         });
+        self.speak(ctx);
+    }
+
+    /// Has the droid being talked to say its line out loud, cutting off whatever it was saying
+    /// before. The line is made into a voice away from the game, and said once it is ready: see
+    /// [`MazeGame::keep_talking`].
+    fn speak(&mut self, ctx: &mut PluginContext) {
+        self.hush(ctx);
+        let (Some(talking), Some(script), Some(voices)) =
+            (self.talking.as_mut(), &self.script, &self.voices)
+        else {
+            return;
+        };
+        let Some((character, code)) = self.inhabitants.who(talking.droid) else {
+            return;
+        };
+        let Some(voice) = voices.voice(&script.characters[character].name) else {
+            return;
+        };
+        let says = talking.conversation.view(script, &talking.facts).says;
+        // Each a little higher or lower than the rest of its kind, and always the same.
+        let pitch = 1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0);
+        let sound = voices.speak(&says, voice, pitch);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (rate, reach) = (voices.sample_rate, sound.reach);
+        std::thread::spawn(move || sender.send(synth::make(&sound, rate)));
+        talking.making = Some(Making(receiver, reach));
+    }
+
+    /// Says the line that has been made into a voice, if it is ready, from the droid's face.
+    fn say_when_made(&mut self, ctx: &mut PluginContext) {
+        let (Some(talking), Some(voices)) = (self.talking.as_mut(), &self.voices) else {
+            return;
+        };
+        let Some(Making(receiver, reach)) = &talking.making else {
+            return;
+        };
+        let Ok(samples) = receiver.try_recv() else {
+            return;
+        };
+        let reach = *reach;
+        talking.making = None;
+        let graph = &mut ctx.scenes[self.scene].graph;
+        let (Some(face), Some(buffer)) = (
+            self.inhabitants.face(graph, talking.droid),
+            formants::playable(samples, voices.sample_rate),
+        ) else {
+            return;
+        };
+        talking.voice = SoundBuilder::new(BaseBuilder::new().with_local_transform(
+            TransformBuilder::new().with_local_position(face).build(),
+        ))
+        .with_buffer(Some(buffer))
+        .with_radius(reach)
+        .with_play_once(true)
+        .with_status(SoundStatus::Playing)
+        .build(graph)
+        .to_base();
+    }
+
+    /// Stops the droid being talked to from saying any more of its line.
+    fn hush(&mut self, ctx: &mut PluginContext) {
+        let Some(talking) = self.talking.as_mut() else {
+            return;
+        };
+        let graph = &mut ctx.scenes[self.scene].graph;
+        if graph.is_valid_handle(talking.voice) {
+            graph.remove_node(talking.voice);
+        }
+        talking.voice = Handle::NONE;
+        // Whatever was being made is not wanted any more.
+        talking.making = None;
     }
 
     /// Says the `choice`th reply on offer, and shows what comes of it, or ends the conversation.
@@ -652,6 +761,7 @@ impl MazeGame {
             let view = talking.conversation.view(script, &talking.facts);
             self.dialogue
                 .show(ctx.user_interfaces.first(), &talking.who, &view);
+            self.speak(ctx);
         } else {
             self.stop_talking(ctx);
         }
@@ -660,6 +770,7 @@ impl MazeGame {
     /// Ends the conversation, if there is one: the droid goes on its way, the camera goes back
     /// and the mouse is taken again to look around.
     fn stop_talking(&mut self, ctx: &mut PluginContext) {
+        self.hush(ctx);
         let Some(talking) = self.talking.take() else {
             return;
         };
@@ -669,7 +780,8 @@ impl MazeGame {
         self.want_mouse = !self.menu.is_open();
     }
 
-    /// Keeps the camera on the face of the droid being talked to, as it moves.
+    /// Keeps the camera on the face of the droid being talked to, as it moves, and has it say its
+    /// line once that is ready.
     fn keep_talking(&mut self, ctx: &mut PluginContext) {
         let Some(droid) = self.talking.as_ref().map(|talking| talking.droid) else {
             return;
@@ -678,6 +790,7 @@ impl MazeGame {
             Some(face) => self.player.talk_to(Some(face)),
             None => self.stop_talking(ctx),
         }
+        self.say_when_made(ctx);
     }
 
     /// A key pressed while talking: W and S or the arrows to go through the replies, E, Enter or
@@ -728,6 +841,9 @@ impl Plugin for MazeGame {
                 None
             }
         };
+        self.voices = Voices::load(VOICES)
+            .inspect_err(|error| Log::err(format!("Maze: the droids are silent: {error}")))
+            .ok();
         let restart = if self.prefabs.is_some() {
             "New maze"
         } else {

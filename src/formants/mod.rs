@@ -2,13 +2,15 @@
 //! a few resonances, the formants, which give it its colour, the way the mouth gives a vowel its
 //! own. Each sound is described in a file of its own kind (see `data/sounds/pistol_formants.json`,
 //! whose `about` says what everything in it means), and made into samples here when the game
-//! starts; [`synth`] does the making.
+//! starts; [`synth`] does the making. [`speech`] makes a voice speak, as the maze's droids do.
 //!
 //! Everything that changes over a sound - the pitch, how much buzz and noise there is, how loud
 //! it is, where each formant sits - is a [`Curve`]: points in time, joined by straight lines.
 
+pub mod speech;
 pub mod synth;
 
+use fyrox::scene::sound::{DataSource, SoundBuffer, SoundBufferResource};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -85,6 +87,21 @@ impl Sounds {
         let text = std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
         serde_json::from_str(&text).map_err(|error| format!("{path}: {error}"))
     }
+}
+
+/// `sound`, made at `sample_rate` into something to play.
+pub fn buffer(sound: &Sound, sample_rate: u32) -> Option<SoundBufferResource> {
+    playable(synth::make(sound, sample_rate), sample_rate)
+}
+
+/// `samples`, one channel at `sample_rate` a second, as something to play.
+pub fn playable(samples: Vec<f32>, sample_rate: u32) -> Option<SoundBufferResource> {
+    let data = DataSource::Raw {
+        sample_rate: sample_rate as usize,
+        channel_count: 1,
+        samples,
+    };
+    SoundBuffer::raw_generic(data).ok().map(SoundBufferResource::new_embedded)
 }
 
 #[cfg(test)]

@@ -1,0 +1,50 @@
+{
+  "about": "The droids' voices, made from formants as each line is spoken: see src/formants/speech.rs. 'phones' are the sounds of speech, one per letter as System Latin reads it (j is the y of 'iam', w the u of 'qu'): where the three formants sit, in Hz, how long it lasts, in seconds, how much buzz (voice) and noise (hiss) it is made of, and how loud it is. A 'stop' is a moment's silence and then a burst of its noise; a voiced one murmurs while it is closed. 'widths' is how wide each of the three formants is, in Hz, and 'gains' how loud. 'pauses' are the gaps between words, at a comma and at the end of a sentence, in seconds. 'voices' are each kind of droid's voice, by the name it has in data/dialogue/droids.json, with 'default' for any other: its 'pitch' in Hz, its 'speed' (2 is twice as fast), its 'size' (every formant is this many times as high, so under 1 sounds bigger), how far each vowel's note steps up or down ('lilt'), how far a sentence falls over its length ('fall') and a question rises at its end ('rise'), each as a part of the pitch, how much hiss goes along with its voice ('breath'), how loud it is at its loudest ('volume', from 0 to 1), and how far off, in meters, it is heard at full volume ('reach'). Each droid speaks a little higher or lower than the rest of its kind.",
+  "sample_rate": 22050,
+  "widths": [100.0, 140.0, 220.0],
+  "gains": [1.0, 0.55, 0.35],
+  "pauses": { "word": 0.035, "comma": 0.18, "stop": 0.32 },
+  "phones": {
+    "a": { "formants": [730.0, 1090.0, 2440.0], "length": 0.10, "buzz": 1.0, "loudness": 1.0 },
+    "e": { "formants": [530.0, 1840.0, 2480.0], "length": 0.09, "buzz": 1.0, "loudness": 0.95 },
+    "i": { "formants": [300.0, 2250.0, 2950.0], "length": 0.08, "buzz": 1.0, "loudness": 0.85 },
+    "o": { "formants": [570.0, 840.0, 2410.0], "length": 0.10, "buzz": 1.0, "loudness": 1.0 },
+    "u": { "formants": [320.0, 870.0, 2240.0], "length": 0.09, "buzz": 1.0, "loudness": 0.85 },
+    "y": { "formants": [280.0, 1750.0, 2200.0], "length": 0.08, "buzz": 1.0, "loudness": 0.85 },
+    "j": { "formants": [300.0, 2200.0, 2950.0], "length": 0.05, "buzz": 1.0, "loudness": 0.7 },
+    "w": { "formants": [320.0, 800.0, 2240.0], "length": 0.05, "buzz": 1.0, "loudness": 0.7 },
+    "m": { "formants": [250.0, 1100.0, 2200.0], "length": 0.07, "buzz": 1.0, "loudness": 0.45 },
+    "n": { "formants": [250.0, 1700.0, 2500.0], "length": 0.06, "buzz": 1.0, "loudness": 0.45 },
+    "l": { "formants": [360.0, 1300.0, 2800.0], "length": 0.06, "buzz": 1.0, "loudness": 0.6 },
+    "r": { "formants": [420.0, 1300.0, 1650.0], "length": 0.05, "buzz": 1.0, "loudness": 0.55 },
+    "s": { "formants": [4200.0, 5200.0, 6400.0], "length": 0.10, "noise": 1.0, "loudness": 0.3 },
+    "z": { "formants": [4200.0, 5200.0, 6400.0], "length": 0.08, "buzz": 0.5, "noise": 0.8, "loudness": 0.3 },
+    "f": { "formants": [1400.0, 3800.0, 5800.0], "length": 0.09, "noise": 1.0, "loudness": 0.15 },
+    "v": { "formants": [300.0, 1400.0, 3800.0], "length": 0.06, "buzz": 0.7, "noise": 0.5, "loudness": 0.3 },
+    "h": { "formants": [700.0, 1300.0, 2500.0], "length": 0.06, "noise": 1.0, "loudness": 0.12 },
+    "p": { "formants": [700.0, 1000.0, 2400.0], "length": 0.06, "noise": 1.0, "loudness": 0.35, "stop": true },
+    "b": { "formants": [700.0, 1000.0, 2400.0], "length": 0.05, "buzz": 0.5, "noise": 0.8, "loudness": 0.3, "stop": true },
+    "t": { "formants": [1800.0, 3600.0, 4800.0], "length": 0.06, "noise": 1.0, "loudness": 0.4, "stop": true },
+    "d": { "formants": [1800.0, 3000.0, 4200.0], "length": 0.05, "buzz": 0.5, "noise": 0.8, "loudness": 0.35, "stop": true },
+    "k": { "formants": [1600.0, 2400.0, 3200.0], "length": 0.07, "noise": 1.0, "loudness": 0.4, "stop": true },
+    "g": { "formants": [1600.0, 2400.0, 3200.0], "length": 0.05, "buzz": 0.5, "noise": 0.8, "loudness": 0.35, "stop": true }
+  },
+  "voices": {
+    "default": {
+      "pitch": 110.0, "speed": 1.0, "size": 1.0, "lilt": 0.1, "fall": 0.2, "rise": 0.35,
+      "breath": 0.03, "volume": 0.75, "reach": 3.0
+    },
+    "Defendator": {
+      "pitch": 82.0, "speed": 0.9, "size": 0.9, "lilt": 0.05, "fall": 0.25, "rise": 0.3,
+      "breath": 0.02, "volume": 0.8, "reach": 3.0
+    },
+    "Explorator": {
+      "pitch": 135.0, "speed": 1.15, "size": 1.06, "lilt": 0.18, "fall": 0.15, "rise": 0.45,
+      "breath": 0.03, "volume": 0.75, "reach": 3.0
+    },
+    "Reparator": {
+      "pitch": 105.0, "speed": 1.0, "size": 1.0, "lilt": 0.1, "fall": 0.2, "rise": 0.35,
+      "breath": 0.12, "volume": 0.75, "reach": 3.0
+    }
+  }
+}

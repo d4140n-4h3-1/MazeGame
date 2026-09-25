@@ -16,7 +16,7 @@
 //! made from the formants in [`PISTOL_SOUNDS`] when the player is: see [`crate::formants`].
 
 use super::Player;
-use crate::formants::{synth, Sound, Sounds};
+use crate::formants::{self, Sounds};
 use fyrox::{
     core::{
         algebra::{Matrix4, UnitQuaternion, Vector3},
@@ -35,7 +35,7 @@ use fyrox::{
             MeshBuilder,
         },
         node::Node,
-        sound::{DataSource, Sound as SoundNode, SoundBuffer, SoundBufferResource, SoundBuilder, Status},
+        sound::{Sound as SoundNode, SoundBufferResource, SoundBuilder, Status},
         transform::TransformBuilder,
     },
 };
@@ -80,17 +80,6 @@ pub(super) struct Bolts {
     shot: Option<(SoundBufferResource, f32)>,
 }
 
-/// `sound`, made at `sample_rate` into something to play.
-fn sound_buffer(sound: &Sound, sample_rate: u32) -> Option<SoundBufferResource> {
-    let samples = synth::make(sound, sample_rate);
-    let data = DataSource::Raw {
-        sample_rate: sample_rate as usize,
-        channel_count: 1,
-        samples,
-    };
-    SoundBuffer::raw_generic(data).ok().map(SoundBufferResource::new_embedded)
-}
-
 /// The sound called `name` in `sounds`, made to play, with how far off it is heard at full
 /// volume; if it is there.
 fn made(sounds: Option<&Sounds>, name: &str) -> Option<(SoundBufferResource, f32)> {
@@ -99,7 +88,7 @@ fn made(sounds: Option<&Sounds>, name: &str) -> Option<(SoundBufferResource, f32
         fyrox::core::log::Log::warn(format!("Pistol: {PISTOL_SOUNDS} has no {name}"));
         None
     })?;
-    Some((sound_buffer(sound, sounds.sample_rate)?, sound.reach))
+    Some((formants::buffer(sound, sounds.sample_rate)?, sound.reach))
 }
 
 impl Bolts {
