@@ -1,0 +1,37 @@
+{
+  "about": "The pistol's sounds, made from formants when the game starts: see src/formants. Each sound is a source - a buzz at a pitch, and noise, each as loud as its curve says - shaped by formants: resonances, each at a frequency, as wide as `width` (in Hz), and as loud as `gain`. A curve is a list of [seconds, value] points, joined by straight lines and held flat before the first and after the last. `loudness` shapes the whole sound; `volume` is how loud its loudest moment is, from 0 to 1; `reach` is how far off, in meters, it is heard at full volume before it starts to fade. A `looped` sound plays over and over, its end blended into its start.",
+  "sample_rate": 44100,
+  "sounds": {
+    "shot": {
+      "about": "The bolt leaving the muzzle: a sharp crack of noise and a falling buzz, its formants sweeping down from a bright 'ee' to a dull 'oo' - 'pyew'.",
+      "length": 0.42,
+      "looped": false,
+      "pitch": [[0.0, 520.0], [0.06, 260.0], [0.42, 70.0]],
+      "buzz": [[0.0, 0.6], [0.03, 1.0], [0.42, 0.8]],
+      "noise": [[0.0, 1.0], [0.02, 0.35], [0.12, 0.1], [0.42, 0.0]],
+      "loudness": [[0.0, 0.0], [0.003, 1.0], [0.05, 0.75], [0.2, 0.35], [0.42, 0.0]],
+      "formants": [
+        { "frequency": [[0.0, 2900.0], [0.25, 900.0]], "width": 260.0, "gain": 1.0 },
+        { "frequency": [[0.0, 1700.0], [0.3, 500.0]], "width": 180.0, "gain": 0.8 },
+        { "frequency": [[0.0, 650.0], [0.42, 280.0]], "width": 120.0, "gain": 0.6 }
+      ],
+      "volume": 0.9,
+      "reach": 4.0
+    },
+    "hum": {
+      "about": "The bolt in flight: a low, steady buzz with two soft formants, an 'uh' on the edge of a hum, looped for as long as the bolt flies.",
+      "length": 1.0,
+      "looped": true,
+      "pitch": [[0.0, 110.0]],
+      "buzz": [[0.0, 1.0]],
+      "noise": [[0.0, 0.08]],
+      "loudness": [[0.0, 1.0]],
+      "formants": [
+        { "frequency": [[0.0, 620.0]], "width": 90.0, "gain": 1.0 },
+        { "frequency": [[0.0, 1150.0]], "width": 140.0, "gain": 0.5 }
+      ],
+      "volume": 0.45,
+      "reach": 1.5
+    }
+  }
+}

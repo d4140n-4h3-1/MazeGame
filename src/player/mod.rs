@@ -28,7 +28,9 @@
 //! The head is not carried perfectly level. It dips as the knees take a landing, and rolls into
 //! sideways movement and into turns.
 //!
-//! F switches the flashlight on and off.
+//! F switches the flashlight on and off; it starts off.
+//!
+//! What the player hears, they hear from where the camera is, facing the way it faces.
 //!
 //! In cover at the edge of the wall, holding the key that would go on past leans: the head moves
 //! out round the corner and tilts, to see past it without stepping out from behind it - see
@@ -71,6 +73,7 @@ use fyrox::{
         light::{spot::SpotLightBuilder, BaseLightBuilder},
         node::Node,
         rigidbody::{RigidBody, RigidBodyBuilder},
+        sound::listener::ListenerBuilder,
         transform::TransformBuilder,
     },
 };
@@ -156,7 +159,7 @@ impl Default for Player {
             collider: Default::default(),
             camera: Default::default(),
             flashlight: Default::default(),
-            flashlight_on: true,
+            flashlight_on: false,
             running: false,
             stamina: 1.0,
             winded: false,
@@ -212,6 +215,9 @@ impl Player {
         .build(graph)
         .to_base();
 
+        // The ears: what sounds in the scene is heard from the camera, facing its way.
+        let listener: Handle<Node> = ListenerBuilder::new(BaseBuilder::new()).build(graph).to_base();
+
         let camera = CameraBuilder::new(
             BaseBuilder::new()
                 .with_local_transform(
@@ -219,7 +225,8 @@ impl Player {
                         .with_local_position(Vector3::new(0.0, FEET + Posture::Standing.eyes(), 0.0))
                         .build(),
                 )
-                .with_child(flashlight),
+                .with_child(flashlight)
+                .with_child(listener),
         )
         .with_fov(DEFAULT_FOV.to_radians())
         .with_z_near(NEAR_PLANE)

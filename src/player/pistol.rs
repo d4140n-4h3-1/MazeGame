@@ -11,14 +11,19 @@
 //!
 //! The bolts are a handful of meshes made once, with the player, and shown while they fly:
 //! adding or taking away a mesh has the traced shadows gather every mesh in the scene again.
+//!
+//! A shot sounds at the muzzle, and each bolt hums as it flies, till it stops. The sounds are
+//! made from the formants in [`PISTOL_SOUNDS`] when the player is: see [`crate::formants`].
 
 use super::Player;
+use crate::formants::{synth, Sound, Sounds};
 use fyrox::{
     core::{
         algebra::{Matrix4, UnitQuaternion, Vector3},
         color::Color,
         pool::Handle,
     },
+    graph::SceneGraph,
     material::{Material, MaterialResource},
     resource::texture::{Texture, TextureKind, TexturePixelKind, TextureResource},
     scene::{
@@ -30,8 +35,13 @@ use fyrox::{
             MeshBuilder,
         },
         node::Node,
+        sound::{DataSource, Sound as SoundNode, SoundBuffer, SoundBufferResource, SoundBuilder, Status},
+        transform::TransformBuilder,
     },
 };
+
+/// The pistol's sounds, as formants: `shot` as a bolt leaves, and `hum` as it flies.
+pub const PISTOL_SOUNDS: &str = "data/sounds/pistol_formants.json";
 
 /// How many bolts can be in the air at once. Firing another takes the one that has flown
 /// longest.
@@ -64,6 +74,32 @@ struct Bolt {
 pub(super) struct Bolts {
     /// Every bolt's mesh, and the bolt if it is flying.
     bolts: Vec<(Handle<Node>, Option<Bolt>)>,
+    /// Every bolt's hum, as `bolts` has them, if there is one to hum.
+    hums: Vec<Handle<Node>>,
+    /// The sound of a shot, and how far off it is heard at full volume, if there is one.
+    shot: Option<(SoundBufferResource, f32)>,
+}
+
+/// `sound`, made at `sample_rate` into something to play.
+fn sound_buffer(sound: &Sound, sample_rate: u32) -> Option<SoundBufferResource> {
+    let samples = synth::make(sound, sample_rate);
+    let data = DataSource::Raw {
+        sample_rate: sample_rate as usize,
+        channel_count: 1,
+        samples,
+    };
+    SoundBuffer::raw_generic(data).ok().map(SoundBufferResource::new_embedded)
+}
+
+/// The sound called `name` in `sounds`, made to play, with how far off it is heard at full
+/// volume; if it is there.
+fn made(sounds: Option<&Sounds>, name: &str) -> Option<(SoundBufferResource, f32)> {
+    let sounds = sounds?;
+    let sound = sounds.sounds.get(name).or_else(|| {
+        fyrox::core::log::Log::warn(format!("Pistol: {PISTOL_SOUNDS} has no {name}"));
+        None
+    })?;
+    Some((sound_buffer(sound, sounds.sample_rate)?, sound.reach))
 }
 
 impl Bolts {
@@ -88,6 +124,11 @@ impl Bolts {
         );
         material.bind("emissionTexture", white);
         let material = MaterialResource::new_embedded(material);
+        let sounds = Sounds::load(PISTOL_SOUNDS)
+            .inspect_err(|error| fyrox::core::log::Log::err(format!("Pistol: silent, {error}")))
+            .ok();
+        let (shot, hum) = (made(sounds.as_ref(), "shot"), made(sounds.as_ref(), "hum"));
+        let mut hums = Vec::new();
         // Drawn out along +Z, the way it flies.
         let shape = SurfaceResource::new_embedded(SurfaceData::make_sphere(
             8,
@@ -109,12 +150,22 @@ impl Bolts {
                 .with_radius(FLASH_REACH)
                 .build(graph)
                 .to_base();
-                let mesh = MeshBuilder::new(
-                    BaseBuilder::new()
-                        .with_cast_shadows(false)
-                        .with_visibility(false)
-                        .with_child(flash),
-                )
+                let mut base = BaseBuilder::new()
+                    .with_cast_shadows(false)
+                    .with_visibility(false)
+                    .with_child(flash);
+                // Its hum rides with it too, started as it is fired and stopped as it stops.
+                if let Some((buffer, reach)) = &hum {
+                    let hum = SoundBuilder::new(BaseBuilder::new())
+                        .with_buffer(Some(buffer.clone()))
+                        .with_looping(true)
+                        .with_radius(*reach)
+                        .build(graph)
+                        .to_base();
+                    hums.push(hum);
+                    base = base.with_child(hum);
+                }
+                let mesh = MeshBuilder::new(base)
                 .with_surfaces(vec![SurfaceBuilder::new(shape.clone())
                     .with_material(material.clone())
                     .build()])
@@ -123,17 +174,33 @@ impl Bolts {
                 (mesh, None)
             })
             .collect();
-        Self { bolts }
+        Self { bolts, hums, shot }
+    }
+
+    /// Starts or stops the hum of the bolt that is `index` of `bolts`, if it has one.
+    fn hum(&self, graph: &mut Graph, index: usize, on: bool) {
+        let Some(&hum) = self.hums.get(index) else {
+            return;
+        };
+        if let Ok(hum) = graph.try_get_mut_of_type::<SoundNode>(hum) {
+            if on {
+                hum.stop();
+                hum.play();
+            } else {
+                hum.stop();
+            }
+        }
     }
 
     /// Fires a bolt from `from` along `direction`, one meter long.
     fn fire(&mut self, graph: &mut Graph, from: Vector3<f32>, direction: Vector3<f32>) {
         // A free one, or failing that the one that has flown furthest: the least range left.
         let left = |bolt: &Option<Bolt>| bolt.map_or(f32::NEG_INFINITY, |bolt| bolt.range);
-        let Some((mesh, bolt)) = self
+        let Some((index, (mesh, bolt))) = self
             .bolts
             .iter_mut()
-            .min_by(|a, b| left(&a.1).total_cmp(&left(&b.1)))
+            .enumerate()
+            .min_by(|a, b| left(&a.1 .1).total_cmp(&left(&b.1 .1)))
         else {
             return;
         };
@@ -147,13 +214,27 @@ impl Bolts {
             .set_position(from)
             .set_rotation(UnitQuaternion::face_towards(&direction, &Vector3::y()));
         node.set_visibility(true);
+        self.hum(graph, index, true);
+        // The shot sounds where it leaves, once, and is gone.
+        if let Some((buffer, reach)) = &self.shot {
+            SoundBuilder::new(BaseBuilder::new().with_local_transform(
+                TransformBuilder::new().with_local_position(from).build(),
+            ))
+            .with_buffer(Some(buffer.clone()))
+            .with_radius(*reach)
+            .with_play_once(true)
+            .with_status(Status::Playing)
+            .build(graph);
+        }
     }
 
     /// Puts every bolt out of sight, and out of the air.
     pub(super) fn clear(&mut self, graph: &mut Graph) {
-        for (mesh, bolt) in &mut self.bolts {
+        for index in 0..self.bolts.len() {
+            let (mesh, bolt) = &mut self.bolts[index];
             if bolt.take().is_some() {
                 graph[*mesh].set_visibility(false);
+                self.hum(graph, index, false);
             }
         }
     }
@@ -178,13 +259,15 @@ impl Player {
                 Some((reach, reach < step || step >= bolt.range))
             })
             .collect();
-        for ((mesh, bolt), flight) in self.bolts.bolts.iter_mut().zip(flights) {
+        for (index, flight) in flights.into_iter().enumerate() {
+            let (mesh, bolt) = &mut self.bolts.bolts[index];
             let (Some(flying), Some((reach, stopped))) = (bolt.as_mut(), flight) else {
                 continue;
             };
             if stopped {
                 *bolt = None;
                 graph[*mesh].set_visibility(false);
+                self.bolts.hum(graph, index, false);
                 continue;
             }
             flying.position += flying.direction * reach;

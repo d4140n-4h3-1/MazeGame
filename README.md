@@ -110,6 +110,11 @@ shadows (its `raytracing` feature).
 - **Square to the front.** Strafing, or with the pistol drawn, the droid's face and shoulders
   stay square to straight ahead, however its hips turn to the way it steps.
 - **N for a new maze**, since R is the pistol's now.
+- **The pistol sounds.** A shot cracks at the muzzle, and each bolt hums as it flies. The sounds
+  are made from formants when the game starts - a buzz and noise shaped by resonances, as a
+  voice is - described in `data/sounds/pistol_formants.json`, which can be retuned without a
+  rebuild; `src/formants` makes them. What sounds is heard from the camera.
+- **The flashlight starts off.** F switches it on.
 
 23 September 2026:
 
@@ -195,7 +200,7 @@ well.
 | Q (hold)         | Look behind you while still moving forward                    |
 | Tab              | Take cover against the wall ahead, or leave it                |
 | A / D in cover   | Slide along the wall; hold on past its edge to lean round it  |
-| F                | Flashlight on or off                                          |
+| F                | Flashlight on or off (it starts off)                          |
 | V                | Third person (behind the droid) or first person               |
 | Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
 | Right mouse (hold) | Strafe: keep facing ahead whichever way you go; Shift only runs |
@@ -276,6 +281,7 @@ and round planning, and the player's movement, breath, head motion, leaning and 
 | `hud.rs`        | The status line and the banner.                                            |
 | `menu.rs`       | The pause menu.                                                            |
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
+| `formants/`     | Sounds made from formants: the file format, and the synthesizer that makes the pistol's sounds from `data/sounds/`. |
 | `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`) and the camera behind it (`third_person`). |
 
 The tile models and the droid (`droid_full_deform.glb`) are in `data/`, along with where the

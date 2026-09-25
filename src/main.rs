@@ -18,6 +18,7 @@
 mod culling;
 mod diagnostics;
 mod fixtures;
+mod formants;
 mod game;
 mod generate;
 mod hud;

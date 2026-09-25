@@ -151,11 +151,11 @@ mod tests {
     #[test]
     fn f_switches_the_flashlight_off_and_on_once_per_press() {
         let mut player = Player::default();
-        assert!(player.flashlight_on, "on to start with");
-        press(&mut player, KeyCode::KeyF);
-        assert!(!player.flashlight_on);
+        assert!(!player.flashlight_on, "off to start with");
         press(&mut player, KeyCode::KeyF);
         assert!(player.flashlight_on);
+        press(&mut player, KeyCode::KeyF);
+        assert!(!player.flashlight_on);
     }
 
     #[test]
