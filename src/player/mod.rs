@@ -25,8 +25,9 @@
 //! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
 //!
-//! The head is not carried perfectly level. It dips as the knees take a landing, and rolls into
-//! sideways movement and into turns.
+//! The head is not carried perfectly level. Seen through the droid's eyes, it rises and falls in
+//! step with the stride; it dips as the knees take a landing, and rolls into sideways movement
+//! and into turns.
 //!
 //! F switches the flashlight on and off; it starts off.
 //!
@@ -111,6 +112,10 @@ pub struct Player {
     /// How long ago the body pushed off, in seconds, while Space is still held from it and it
     /// could yet be a tap.
     since_jump: Option<f32>,
+    /// Where the head is in its stride, from 0 to 1, and how far it is swinging: eased, so that
+    /// setting off, stopping and changing views do not switch the bob on and off.
+    stride: f32,
+    swing: f32,
     /// How far the knees are still bent under a landing, in meters.
     landing: f32,
     /// How far the head is rolled into its movement, in radians.
@@ -173,6 +178,8 @@ impl Default for Player {
             fall_speed: 0.0,
             jump_spent: false,
             since_jump: None,
+            stride: 0.0,
+            swing: 0.0,
             landing: 0.0,
             roll: 0.0,
             last_yaw: 0.0,
@@ -306,6 +313,8 @@ impl Player {
         self.fall_speed = 0.0;
         self.since_jump = None;
         self.landing = 0.0;
+        self.stride = 0.0;
+        self.swing = 0.0;
         self.roll = 0.0;
         self.boom = BOOM_LENGTH;
         // A new round puts the body somewhere else rather than moving it there.

@@ -116,6 +116,8 @@ shadows (its `raytracing` feature).
   the shoulder, and letting go takes it back out. Holding the middle mouse button to swing the
   camera round and look at the droid leaves the droid as it was: its pistol no longer follows
   the camera round.
+- **Head bob in first person.** Seen through the droid's eyes, the head rises and falls in step
+  with the stride again, and fades out on going over to the view from behind.
 - **The pistol sounds.** A shot cracks at the muzzle, and each bolt hums as it flies. The sounds
   are made from formants when the game starts - a buzz and noise shaped by resonances, as a
   voice is - described in `data/sounds/pistol_formants.json`, which can be retuned without a
@@ -164,7 +166,7 @@ shadows (its `raytracing` feature).
   or D on past the edge leans out round the corner; Ctrl no longer leans. Tab again, pushing away
   from the wall, or jumping leaves cover. Until there are cover animations (`droid_cover_idle`,
   `droid_cover_walk`, picked up once the model has them) it idles and walks as usual.
-- **No more head bob.** The camera is held steady; the droid's cycles show the stride.
+- **No more head bob** from behind. The camera is held steady; the droid's cycles show the stride.
 - The droid is not yet in the traced shadows, which are gathered once and would leave its shadow
   where it started.
 

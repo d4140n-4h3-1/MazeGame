@@ -1,6 +1,6 @@
-//! The head: how it is carried along with the body - dipping under a landing, rolling into
-//! movement and turns - and turned round to look behind. This is
-//! where everything that moves the camera comes together.
+//! The head: how it is carried along with the body - bobbing in step with the stride in first
+//! person, dipping under a landing, rolling into movement and turns - and turned round to look
+//! behind. This is where everything that moves the camera comes together.
 
 use super::{
     lean::{LEAN_DIP, LEAN_DISTANCE, LEAN_TILT},
@@ -11,6 +11,31 @@ use fyrox::{
     core::algebra::{UnitQuaternion, Vector3},
     scene::graph::Graph,
 };
+
+/// How far the body travels per stride - two steps - in meters.
+const STRIDE_LENGTH: f32 = 1.5;
+/// How far the head rises and falls over a step at a walking pace, in meters. Quicker gaits swing
+/// further, up to [`BOB_LIMIT`] times this; it is meant to be felt rather than seen.
+const BOB_HEIGHT: f32 = 0.022;
+/// How far the head sways side to side over a stride, against its rise and fall. Once per stride
+/// rather than once per step: the weight goes onto one foot, then onto the other.
+const BOB_SWAY: f32 = 0.6;
+const BOB_LIMIT: f32 = 1.6;
+/// How quickly the bob grows and dies away, like [`EYE_EASING`](super::posture::EYE_EASING), so
+/// that stopping, leaving the ground or going over to third person settles the head instead of
+/// stranding it mid-swing.
+const BOB_EASING: f32 = 6.0;
+
+/// Where the head sits in its stride, `up` and `sideways` from where it would be held still, in
+/// meters. `phase` runs from 0 to 1 over a stride and `swing` scales the whole thing with how
+/// fast the body is going. The rise and fall happens twice over, once per foot; the sway once.
+fn bob(phase: f32, swing: f32) -> (f32, f32) {
+    let turn = phase * std::f32::consts::TAU;
+    (
+        (turn * 2.0).sin() * BOB_HEIGHT * swing,
+        turn.sin() * BOB_HEIGHT * BOB_SWAY * swing,
+    )
+}
 
 /// How far the knees give on landing, in meters per meter per second of fall, and the most they
 /// can give however far the drop.
@@ -79,11 +104,25 @@ impl Player {
         self.landing = landing_dip(self.fall_speed).max(self.landing);
     }
 
-    /// Moves the head along with the body for this frame: the knees straightening after a
-    /// landing, and the roll into where it is going. `horizontal` is how fast the body is
-    /// travelling along the floor, and `right` is its right. The head does not bob in step with
-    /// the stride: the camera is held steady, and in third person the droid's own cycles show it.
+    /// Moves the head along with the body for this frame: the stride it is in the middle of, the
+    /// knees straightening after a landing, and the roll into where it is going. `horizontal` is
+    /// how fast the body is travelling along the floor, and `right` is its right. The head bobs
+    /// in step with the stride only seen through its own eyes: from behind, the camera is held
+    /// steady, and the droid's own cycles show the stride.
     pub(super) fn carry_head(&mut self, horizontal: Vector3<f32>, right: Vector3<f32>, dt: f32) {
+        let speed = horizontal.norm();
+        // The stride goes by ground covered, not by time, so the feet keep up with the floor at
+        // any speed and stop dead when the body does.
+        if self.grounded {
+            self.stride = (self.stride + speed * dt / STRIDE_LENGTH).fract();
+        }
+        // Nothing swings while there is no floor to push off, or seen from behind.
+        let wanted = if self.grounded && !self.seen_from_behind() {
+            (speed / self.top_speed(Gait::Walking)).min(BOB_LIMIT)
+        } else {
+            0.0
+        };
+        self.swing += (wanted - self.swing) * (1.0 - (-BOB_EASING * dt).exp());
         self.landing *= (-LANDING_EASING * dt).exp();
 
         let yaw_rate = if dt > 0.0 {
@@ -101,15 +140,17 @@ impl Player {
         self.roll += (wanted - self.roll) * (1.0 - (-ROLL_EASING * dt).exp());
     }
 
-    /// Puts the head where it is: at the eyes' height, moved by the landing and the lean, and turned by the look behind, the pitch, the lean and the roll. The camera goes
+    /// Puts the head where it is: at the eyes' height, moved by the stride, the landing and the
+    /// lean, and turned by the look behind, the pitch, the lean and the roll. The camera goes
     /// there, or behind it - see [`Player::place_camera`].
     pub(super) fn place_head(&mut self, graph: &mut Graph, dt: f32) {
         let leaning = self.lean / LEAN_DISTANCE;
+        let (up, sideways) = bob(self.stride, self.swing);
         // The head turns on the body; walking goes by the body, so it carries on ahead. A lean
         // moves it out to the side (the body's right is its -x) and tilts it the same way.
         let head = Vector3::new(
-            -self.lean,
-            FEET + self.eyes - LEAN_DIP * leaning.abs() - self.landing,
+            -self.lean - sideways,
+            FEET + self.eyes - LEAN_DIP * leaning.abs() + up - self.landing,
             0.0,
         );
         let tilt = UnitQuaternion::from_axis_angle(
@@ -135,6 +176,29 @@ impl Player {
 mod tests {
     use super::*;
     use fyrox::keyboard::KeyCode;
+
+    #[test]
+    fn the_head_rises_and_falls_twice_a_stride_and_sways_once() {
+        let up = |phase: f32| bob(phase, 1.0).0;
+        let sideways = |phase: f32| bob(phase, 1.0).1;
+        // Two rises per stride: the pattern repeats at the halfway point.
+        assert!((up(0.1) - up(0.6)).abs() < 1e-6);
+        // One sway: it is on the other side by then.
+        assert!((sideways(0.1) + sideways(0.6)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_still_head_does_not_bob() {
+        assert_eq!(bob(0.3, 0.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_bob_stays_small_enough_to_be_felt_rather_than_watched() {
+        let worst = (0..100)
+            .map(|step| bob(step as f32 / 100.0, BOB_LIMIT).0.abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 0.05, "{worst} m of bob at a sprint");
+    }
 
     #[test]
     fn the_knees_give_with_the_speed_of_the_fall_but_only_so_far() {

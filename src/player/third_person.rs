@@ -123,7 +123,7 @@ impl Player {
         aim: UnitQuaternion<f32>,
         dt: f32,
     ) {
-        let third_person = (self.third_person || self.orbit.is_active()) && self.avatar.is_some();
+        let third_person = self.seen_from_behind();
         let mut boom = Vector3::zeros();
         if third_person {
             self.aim_zoom = ease_aim(self.aim_zoom, self.keys.strafe, dt);
@@ -187,6 +187,12 @@ impl Player {
     /// camera round the droid.
     pub fn set_orbiting(&mut self, held: bool) {
         self.orbit.held = held;
+    }
+
+    /// Whether the camera is behind the droid - or swung round it - rather than seeing through its
+    /// eyes. Without the droid, it is always through the eyes.
+    pub(super) fn seen_from_behind(&self) -> bool {
+        (self.third_person || self.orbit.is_active()) && self.avatar.is_some()
     }
 
     /// Goes between seeing the droid from behind and seeing through its eyes.
