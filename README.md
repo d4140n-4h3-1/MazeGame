@@ -103,8 +103,7 @@ shadows (its `raytracing` feature).
   and a maintenance unit (Reparator), in turn. Talk the scout or the sentry round and it tells
   you how far off the exit is and which way, as the crow flies. What they say is in
   `data/dialogue/droids.json`, which can be rewritten without a rebuild. Every line parses with
-  the System Latin parser in `data/system_latin/`, once `build_lexicon.py system_latin.md` has
-  made its lexicon.
+  the System Latin parser in `data/system_latin/`.
 
 24 September 2026:
 
