@@ -1,0 +1,23 @@
+{
+  "pack": "patrol-chatter",
+  "version": "1.0.0",
+  "spec": "1.2",
+  "license": "CC-BY-SA-4.0",
+  "author": "example",
+  "verbs": [
+    {"stem": "salut", "gloss": "greet", "valency": "trans"},
+    {"stem": "salt", "gloss": "jump", "valency": "intrans"}
+  ],
+  "words": [
+    {"lemma": "umbra", "pos": "noun", "gloss": "shadow"},
+    {"lemma": "ignis", "pos": "noun", "gloss": "fire"},
+    {"lemma": "obscurum", "pos": "adj", "gloss": "dark"},
+    {"lemma": "clarum", "pos": "adj", "gloss": "bright"}
+  ],
+  "phrases": [
+    {"template": "Salutamus {noun}.", "tags": ["patrol", "greeting"], "weight": 3},
+    {"template": "Zona {adj}.", "tags": ["patrol", "status"], "weight": 5},
+    {"template": "Volator {code} detectum.", "tags": ["alert"], "weight": 2},
+    {"template": "Hostis umbra detectum. Salta.", "tags": ["alert"], "weight": 1}
+  ]
+}

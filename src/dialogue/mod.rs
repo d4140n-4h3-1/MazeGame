@@ -1,8 +1,8 @@
 //! Talking to the maze's inhabitants, as in Fallout 3: E to talk to a droid close by and in
 //! front of you, and the camera closes in on its face. What it says runs along the bottom of the
-//! screen, in its own System Latin (see `data/system_latin.md`) with what that means under it, and
-//! under that the replies to pick from - with the mouse, W and S or the arrows and E, or the
-//! number keys. Tab walks away.
+//! screen, in its own System Latin (see `data/system_latin/system_latin_systemized.md`) with
+//! what that means under it, and under that the replies to pick from - with the mouse, W and S or
+//! the arrows and E, or the number keys. Tab walks away.
 //!
 //! What each droid says is in `data/dialogue/droids.json`, whose `about` says what everything in
 //! it means, and which can be rewritten without a rebuild. Each kind of droid has a
@@ -206,7 +206,7 @@ impl Facts {
 }
 
 /// A number as System Latin reads out a code: digit by digit (see section XXX of
-/// `data/system_latin.md`).
+/// `data/system_latin/system_latin_systemized.md`).
 pub fn digits(number: u32) -> String {
     const DIGITS: [&str; 10] = [
         "zero", "unum", "duo", "tria", "quattuor", "quinque", "sex", "septem", "octo", "novem",

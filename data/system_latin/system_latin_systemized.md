@@ -525,7 +525,7 @@ System Latin is a machine-oriented constructed language based primarily on Latin
 | **Onus criticum.** | Critical load. |
 | **Consumptio** | Consumption. |
 | **Consumptio altum.** | High consumption. |
-| **Consumptio humile.** | Low consumption. |
+| **Consumptio humilum.** | Low consumption. |
 | **Refectio** | Replenishment / Refilling. |
 | **Reservatio** | Reservation / Reserved allocation. |
 
@@ -633,7 +633,7 @@ System Latin is a machine-oriented constructed language based primarily on Latin
 | **Frequentia** | Frequency. |
 | **Latentia** | Latency. |
 | **Latentia altum.** | High latency. |
-| **Latentia humile.** | Low latency. |
+| **Latentia humilum.** | Low latency. |
 | **Rete stabilum.** | Network stable. |
 | **Rete instabilum.** | Network unstable. |
 | **Nodus detectum.** | Node detected. |
@@ -665,7 +665,7 @@ System Latin is a machine-oriented constructed language based primarily on Latin
 | **Dum** | While. |
 | **Iterum** | Again. |
 | **Continuans** | Continuous. |
-| **Prius** | Previous / Prior. |
+| **Priusum** | Previous / Prior. |
 | **Proximum** | Next / Nearest. |
 | **Ultimum** | Last / Final. |
 | **Initium** | Beginning. |
@@ -683,7 +683,7 @@ System Latin is a machine-oriented constructed language based primarily on Latin
 |---|---|
 | **Prioritas** | Priority. |
 | **Prioritas altum.** | High priority. |
-| **Prioritas humile.** | Low priority. |
+| **Prioritas humilum.** | Low priority. |
 | **Prioritas maximum.** | Highest priority. |
 | **Prioritas minimum.** | Lowest priority. |
 | **Urgans.** | Urgent. |
@@ -763,6 +763,10 @@ System Latin is a machine-oriented constructed language based primarily on Latin
 | **Domina.** | Ruler / Matriarch (a female authority figure; a title, not the -a form of any verb). Real classical Latin. | Latin |
 | **Placa.** | Please / satisfy. Regular verb, stem from Latin **placere** (root of English "placate," "placid"); regular forms **Placo**, **Placat**, not the classical **placeo**, **placet**. | Latin |
 | **Praeda.** | Spoils / prize / plunder (a successful mission's yield); **sine praeda** is the standing idiom for a mission that returned empty-handed. | Latin |
+| **Hostilitas.** | Hostility (a measurable, reportable quantity — distinct from **Hostis**, the enemy itself, and **Hostilum**, the adjective describing something as hostile). Real classical Latin, the expected abstract noun for **hostilum** by Latin's own **-itas** pattern. | Latin |
+| **Comporta.** | Behave / conduct oneself (general comportment, distinct from any specific action verb). Regular verb, stem from Latin **comportare**; regular forms **Comporto**, **Comportat**, not the classical **comportor**. | Latin |
+| **Ut** | As / like (manner comparison; takes a noun phrase, like any preposition — **comportat ut agent**, "behaves like a program"). | Latin |
+| **Designa.** | Designate / mark as. Regular verb, recognizable via English "designate"; **Designatum** ("designated") is a status word like any other. | Latin |
 | **Sapiens** | Wise (used only in the fixed compound **Homo sapiens**). |
 | **Socius** | Ally / Associate. |
 | **Hostis** | Enemy. |
@@ -800,7 +804,7 @@ System Latin is a machine-oriented constructed language based primarily on Latin
 | **Zona tutum.** | Safe zone. |
 | **Zona periculosum.** | Dangerous zone. |
 | **Area restrictum.** | Restricted area. |
-| **Area hostile.** | Hostile area. |
+| **Area hostilum.** | Hostile area. |
 | **Area liberum.** | Clear area. |
 
 ---
@@ -1856,6 +1860,7 @@ They withdraw. We proceed.
 - With a quantity word, the demonstrative comes first: **hic tria hostis** (these three enemies).
 - A demonstrative can also come before a dependent noun: **forma ille volator autonomum** (the shape of that drone).
 - To point at one item among several of the same kind, add its code after the noun: **volator codex duo quattuor septem** (the flyer with code 247).
+- **Codex is reserved for this construction.** The word always opens a numeric-ID phrase and always demands digits after it, in any position, even though the same word is also listed as a plain noun meaning "code / coded text." **Instructio** (instructions) or **Legatio** (a reading) are the words to reach for when the intended meaning is code as *content* (a program's instructions) rather than an identifying number: **Instructio ego requirat terminare tu.**, not **Codex ego requirat...**, which fails to parse.
 
 ### Tense and aspect
 
@@ -2086,6 +2091,7 @@ Every verb follows the engine in XLII, so each row below is fully determined by 
 | **Clauda.** | claudo† | claudat† | claudans† | claudavat† | claudabsat† | claudatum | claudatio† |
 | **Codifica.** | codifico† | codificat† | codificans† | codificavat† | codificabsat† | codificatum | codificatio† |
 | **Communica.** | communico† | communicat† | communicans† | communicavat† | communicabsat† | communicatum† | communicatio |
+| **Comporta.** | comporto | comportat | comportans† | comportavat† | comportabsat† | comportatum† | comportatio† |
 | **Computa.** | computo† | computat† | computans† | computavat† | computabsat† | computatum† | computatio |
 | **Confirma.** | confirmo† | confirmat† | confirmans† | confirmavat† | confirmabsat† | confirmatum | confirmatio† |
 | **Confronta.** | confronto† | confrontat† | confrontans† | confrontavat† | confrontabsat† | confrontatum† | confrontatio† |
@@ -2102,6 +2108,7 @@ Every verb follows the engine in XLII, so each row below is fully determined by 
 | **Defenda.** | defendo† | defendat† | defendans† | defendavat† | defendabsat† | defendatum† | defendatio |
 | **Deleta.** | deleto† | deletat† | deletans† | deletavat† | deletabsat† | deletatum | deletatio† |
 | **Desactiva.** | desactivo† | desactivat† | desactivans† | desactivavat† | desactivabsat† | desactivatum† | desactivatio† |
+| **Designa.** | designo† | designat† | designans† | designavat† | designabsat† | designatum | designatio† |
 | **Destrua.** | destruo† | destruat† | destruans† | destruavat† | destruabsat† | destruatum | destruatio† |
 | **Detecta.** | detecto | detectat† | detectans† | detectavat† | detectabsat† | detectum | detectio† |
 | **Eliga.** | eligo† | eligat† | eligans† | eligavat† | eligabsat† | eligatum† | eligatio |
@@ -2190,7 +2197,7 @@ Every verb follows the engine in XLII, so each row below is fully determined by 
 | **Vola.** | volo† | volat† | volans† | volavat† | volabsat† | volatum† | volatio† |
 | **Zeta.** | zeto | zetat† | zetans† | zetavat† | zetabsat† | zetatum† | zetatio† |
 
-**Total:** 116 verbs, all regular.
+**Total:** 118 verbs, all regular.
 
 ### Full conjugation
 
@@ -2526,7 +2533,7 @@ A message between programs starts with an envelope sentence. The envelope names 
 | **Nuntius codex** | Message ID | Yes | A digit string: **nuntius codex unum duo tria** |
 | **ab** | Sender | Yes | Must carry a code: **ab agent codex quattuor** |
 | **ad** | Receiver | Yes | A code, or **omnia** for a broadcast: **ad agent codex quinque**, **ad omnia volator**, **ad omnia** |
-| **prioritas** | Priority | No | **minimum, humile, normale, altum, maximum** (**normale** if omitted) |
+| **prioritas** | Priority | No | **minimum, humilum, normale, altum, maximum** (**normale** if omitted) |
 | **responsum codex** | Reply to message | No | The ID of the message being answered |
 | **tempus** | Timestamp | No | A number, such as a game tick |
 
@@ -2580,7 +2587,7 @@ The host clamps a message's priority to the sender's ceiling. A message that ask
 | **usor** | A player | **altum** |
 | **agent** | A friendly program | **altum** |
 | **adversarius** | A hostile program | **normale** |
-| Unregistered | A peer that has not joined | **humile** |
+| Unregistered | A peer that has not joined | **humilum** |
 
 Each peer gets one code when it joins (**ab usor codex quattuor**). Role grants are tokens signed by the host, with an expiry.
 
@@ -2684,6 +2691,14 @@ Changes from the original file.
 - Added **Deba** (should/ought, a true obligation modal — distinct from **possibilum**, which marks mere possibility), stem from Latin **debere** (root of English "debt/due/duty" and of Interlingua's own **deber**); regularized to **Debo/Debat**, not classical **debeo/debet**; takes an infinitive complement (**Non debo provocare homo sapiens.**).
 - Added **Possa** (can/ability), stem from Latin **posse** — already the root of the existing adjective **possibilum**; regularized to **Posso/Possat**, not classical **possum/potest**. "Could" needs no separate word; it is **Possavat** (past tense) for free. "Would" (counterfactual mood) and dedicated words for "shall" and "will" were deliberately not added: the future tense (**-absat**) and **Deba** already cover those senses, and true counterfactual mood is left as an open design question rather than forced into the grammar.
 - Added **Domina** (Matriarch/ruler, a title), **Placa** (please/satisfy — regularized to **Placo/Placat**, not classical **placeo/placet**), and **Praeda** (spoils/prize; **sine praeda** is the standing idiom for a mission that returned empty-handed).
+- **Bug fix:** the adjective regularization pass (systemization pass 2) had missed three words left as stale two-hop mappings (**hostilis → hostile**, **humilis → humile**, **prior → prius** — each one hop short of the final **-um** form). Corrected to **hostilum**, **humilum**, **priusum** directly. This also fixed a real functional bug: the message-envelope priority levels (Section XLIX) and the reference parser's own `PRIORITY_LEVELS` constant were still using the stale **humile**, so a priority field of **humile** incorrectly validated; it now correctly requires **humilum**.
+- Added **Hostilitas** (hostility, an abstract noun), completing the trio with **Hostis** (the enemy) and **Hostilum** (the adjective) as three genuinely distinct words rather than one implying the others.
+- Added **Comporta** (behave/conduct oneself), filling a gap flagged earlier and worked around at the time with a narrower status line (**Non hostilum**). Regularized to **Comporto/Comportat**.
+- Added **Ut** (as/like, manner comparison), a preposition, filling the gap that surfaced immediately: **Comporta** needed a way to compare behavior to something (**comportat ut agent**, "behaves like a program").
+- Added **Designa** (designate/mark as, recognizable via English "designate").
+- **Documented a collision, not a bug:** **Codex** is reserved everywhere for the numeric-ID construction (**volator codex duo quattuor septem**) and can never parse as an ordinary noun, even though it is also listed as a plain noun meaning "code / coded text." **Instructio** or **Legatio** are the words for code-as-content; added a note to the Demonstratives section (XLII) so this doesn't have to be rediscovered by testing.
+- **Bug fix (consistency audit):** **Sed** and **Tamen** had never been registered as their intended parts of speech (conjunction and adverb) in the toolkit lexicon builder — both silently fell into the generic noun classifier. This meant a sentence like **Sed hostis detectum.** parsed *successfully* but with the wrong structure: **Sed** was absorbed into the subject as a bogus two-noun compound (**"Sed hostis"**) instead of standing outside the clause as a discourse connector. Fixed by registering both correctly and adding sentence-level support in the parser for one or more leading **sed/tamen** connectors, stripped before parsing the clause and reported separately (**connectors: ['sed', 'tamen']**) rather than folded into the subject noun phrase. A worked example from earlier in this document (**Sed tamen esant simia.**) had shipped relying on the old, incorrect parse; it now parses for the right reason.
+- **Noted, not changed:** **Connectio** (connection) exists both as a hardcoded plain-noun entry (predating **Connecte**'s full paradigm registration) and as that verb's auto-derived action noun. The two agree in meaning, so this is redundant rather than broken, but it means the word is defined twice by coincidence rather than derived once; a future cleanup pass could remove the now-unnecessary standalone entry.
 - Added **Crisis** (noun, distinct from adjective **criticum**), **Chaosum** (adjective, systemic disorder — also yields the derived adverb **chaositer**), **Schema** (structure/blueprint, distinct from **forma**), and **Symptoma** (diagnostic sign, distinct from **status**), all Greek and recognizable via English ("crisis," "chaos," "schema," "symptom").
 - Added the verb **Sirena** ("sound the alarm," Greek **seiren**) and its full paradigm, including the noun **Sirenatio** ("alarm") for **Sirenatio falsum** ("false alarm"), replacing the earlier workaround **Minatio falsum**.
 - Regularized all adjectives to a single invariant **-um** ending (**possibile → possibilum**, **stabile → stabilum**, **normale → normalum**, **forte → fortum**, **vetus → vetusum**, **prius → priusum**). Added a general adjective-to-adverb rule (**-um → -iter**), retiring **celeriter, tarde,** and **cito** as separate lexical entries; the temporal/frequency words (**nunc, iam, semper, numquam, statim, postea, iterum**) stay a closed class.

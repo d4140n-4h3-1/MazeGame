@@ -1,0 +1,448 @@
+# System Latin test corpus (spec v1.0)
+# Format: EXPECTED | text   (OK, an error code, NUM <value>, or NUMERR)
+
+# --- examples taken from the spec ---
+OK | Duo decem hostis detectum.
+OK | Quantum hostis detectum?
+OK | Quattuor decem septem hostis detectum.
+OK | Paratum.
+OK | Activum.
+OK | Otio.
+OK | Occupatum.
+OK | Exspecto.
+OK | Zeto.
+OK | Scano.
+OK | Progredo.
+OK | Persequo.
+OK | Patrōlium activum.
+OK | Certamen activum.
+OK | Retraho.
+OK | Lesatum.
+OK | Criticum.
+OK | Inactivum.
+OK | Deletatum.
+OK | Reparatum.
+OK | Restituatum.
+OK | Completum.
+OK | Accipatum. Progredo ad locus.
+OK | Hostis possibilum sentatur. Zeto.
+OK | Zeto hostis.
+OK | Hostis detectum.
+OK | Hostis appropinquat.
+OK | Periculum imminat.
+OK | Retraha statim.
+OK | Hostis deletatum. Resuma patrōlium.
+OK | Telos novum. Progredo ad telos.
+OK | Iter obstruatum. Iter mutatum.
+OK | Via liberum. Progreda.
+OK | Via obstruatum. Retraha.
+OK | Connectio perdatum. Reconnecta.
+OK | Connectio restituatum.
+OK | Error detectum. Reparatio necessarium.
+OK | Reparatio incipatum.
+OK | Reparatio completum.
+OK | Accessus negatum.
+OK | Accessus permitatum.
+OK | Securitas violatum.
+OK | Identitas confirmatum.
+OK | Identitas incertum.
+OK | Signum detectum. Scano.
+OK | Nullum signum. Resuma patrōlium.
+OK | Telos completum.
+OK | Telos impossibilum.
+OK | Patrōlium completum.
+OK | Patrōlium interrumpatum.
+OK | Termina patrōlium.
+OK | Processus activum.
+OK | Processus interrumpatum.
+OK | Processus terminatum.
+OK | Systema stabilum.
+OK | Systema instabilum.
+OK | Systema criticum.
+OK | Potentia insufficians.
+OK | Potentia criticum.
+OK | Memoria insufficians.
+OK | Memoria plenum.
+OK | Controlum perdatum.
+OK | Controlum restituatum.
+OK | Multum hostis detectum. Defenda.
+OK | Hostis evadatum. Zeto.
+OK | Periculum detectum. Retraha.
+OK | Accipatum. Executatum.
+OK | Mandatum recipatum.
+OK | Mandatum executatum.
+OK | Mandatum negatum.
+OK | Systema connectum.
+OK | Systema deconnectum.
+OK | Systema activum.
+OK | Systema inactivum.
+OK | Systema in initializatio.
+OK | Systema paratum.
+OK | Systema restituatum.
+OK | Omnia processus activum.
+OK | Omnia processus terminatum.
+OK | Nullum anomalia detectum.
+OK | Anomalia detectum.
+OK | Intrusio detectum.
+OK | Intrusor detectum.
+OK | Securitas activum.
+OK | Protocolum activum.
+OK | Protocolum terminatum.
+OK | Defenda.
+OK | Hostis deletatum.
+OK | Resuma patrōlium.
+OK | Hostis detectum. Defendamus.
+OK | Tu scanas. Ego defendo.
+OK | Hostis appropinquant.
+OK | Ea retrahant. Nos progredamus.
+OK | Telos tu: eliminare minatio. Non redia donec id terminatum.
+OK | Si hostis detectum, tunc defenda.
+OK | Si via obstruatum, retraha. Aliter, progreda.
+OK | Si hostis detectum, defenda. Aliter si periculum detectum, evada. Aliter, resuma patrōlium.
+OK | Si energia insufficians et hostis detectum, retraha.
+OK | Si hostis detectum aut periculum detectum, retraha.
+OK | Nisi telos completum, progreda.
+OK | Quando signum detectum, scana.
+OK | Dum hostis activum, defenda.
+OK | Donec telos completum, progreda.
+OK | Quisque nodus, scana.
+OK | Tenta connectare. Si error detectum, tenta iterum.
+OK | Si connectio perdatum, tunc reconnecta. Aliter, resuma patrōlium.
+OK | Utrum hostis detectum?
+OK | Affirmatum.
+OK | Ubi hostis?
+OK | Hostis prope.
+OK | Quis scanat nodus?
+OK | Nos scanamus nodus.
+OK | Quid scanas?
+OK | Scano nodus.
+OK | Cur retrahas?
+OK | Tria hostis detectum.
+OK | Quomodo reconnectare?
+OK | Resetta connectio.
+OK | Ad ubi progredamus?
+OK | Progredamus ad telos.
+OK | Verifica utrum hostis detectum.
+
+# --- additional valid sentences ---
+OK | Scano nodus.
+OK | Scanas nodus.
+OK | Scanamus nodus.
+OK | Scanatis nodus.
+OK | Scanant nodus.
+OK | Ego scano nodus.
+OK | Tu scanas nodus.
+OK | Nos defendamus.
+OK | Ea retrahant.
+OK | Hostis evadavat.
+OK | Hostis evadabsat.
+OK | Ego scanavo nodus.
+OK | Hostis scanabsat nodus.
+OK | Hostis appropinquans.
+OK | Hostis appropinquant.
+OK | Hostis possibilum sentatur.
+E_UNKNOWN | Hostes detectum.
+OK | Multum hostis detectum.
+OK | Omnia processus activum.
+OK | Tria hostis detectum.
+OK | Decem unum hostis detectum.
+OK | Duo decem hostis detectum.
+OK | Quattuor decem septem hostis detectum.
+OK | Duo centum quinque decem hostis detectum.
+OK | Mille hostis detectum.
+OK | Duo mille duo decem sex hostis detectum.
+OK | Duo centum quinque decem mille hostis detectum.
+OK | Milio hostis detectum.
+OK | Codex duo quattuor septem.
+OK | Zeto codex duo quattuor septem.
+OK | Energia minus decem.
+OK | Energia non aequale zero.
+OK | Statim.
+OK | Accipatum.
+OK | Ad telos.
+OK | Retraha statim.
+OK | Progredo ad locus.
+OK | Redia ab locus.
+OK | Telos: elimina minatio.
+OK | Telos tu: eliminare minatio.
+OK | Tenta connectare.
+OK | Incipa scanare nodus.
+OK | Verifica utrum hostis detectum.
+OK | Utrum hostis non detectum?
+OK | Quis scanat nodus?
+OK | Quid scanas?
+OK | Ad ubi progredamus?
+OK | Ab ubi hostis evadavat?
+OK | Quando hostis detectum?
+OK | Quando hostis detectum, defenda.
+OK | Cur retrahas?
+OK | Quomodo reconnectare?
+OK | Quale hostis?
+OK | Quantum hostis detectum?
+OK | Si hostis detectum et energia insufficians, retraha.
+OK | Si hostis detectum aut periculum detectum, retraha.
+OK | Si nodus perdatum, reconnecta. Aliter si hostis detectum, defenda. Aliter, progreda.
+OK | Si nodus perdatum, reconnecta. Aliter, resuma patrolium. Finis.
+OK | Nisi telos completum, progreda.
+OK | Dum hostis activum, defenda.
+OK | Donec telos completum, progreda.
+OK | Quisque nodus, scana.
+OK | Non redia donec id terminatum.
+OK | Scana area patrolium.
+OK | Scana zona periculosum.
+OK | RESUMA PATROLIUM.
+OK | Resuma patrōlium.
+
+# --- invalid sentences (expected error code) ---
+E_CHARSET | Hostis detectum!
+E_CHARSET | Hostis 5.
+E_UNKNOWN | Hostis detectum flurb.
+E_UNKNOWN | Scana zorp.
+E_TERMINATOR | Hostis detectum
+E_QMARK | Hostis detectum?
+E_QMARK | Ubi hostis.
+E_SYNTAX | Si hostis detectum defenda.
+E_SYNTAX | Tunc defenda.
+E_SYNTAX | Quando hostis detectum.
+E_SYNTAX | Hostis detectum non.
+E_SYNTAX | Hostis scanans nodus.
+E_SYNTAX | Duo decem tria centum hostis detectum.
+E_NOUNS | Scana area patrolium nodus.
+E_NOUNS | Hostis nodus area scanat.
+E_VALENCY | Sta nodus.
+E_VALENCY | Progreda nodus.
+E_NEG | Non hostis detectum.
+E_NEG | Si non hostis detectum, defenda.
+E_NESTED | Si hostis detectum, si nodus detectum, defenda.
+E_NESTED | Dum hostis activum, quisque nodus, scana.
+E_ELSE | Aliter, progreda.
+E_ELSE | Si nodus perdatum, reconnecta. Resuma patrolium. Aliter, progreda.
+E_ELSE | Si nodus perdatum, reconnecta. Finis. Aliter, progreda.
+E_NUMBER | Unum decem hostis detectum.
+E_NUMBER | Unum mille hostis detectum.
+E_NUMBER | Codex.
+E_NUMBER | Mille mille hostis detectum.
+
+# --- numerals ---
+NUM 0 | zero
+NUM 7 | septem
+NUM 10 | decem
+NUM 11 | decem unum
+NUM 19 | decem novem
+NUM 20 | duo decem
+NUM 47 | quattuor decem septem
+NUM 100 | centum
+NUM 250 | duo centum quinque decem
+NUM 1000 | mille
+NUM 2000 | duo mille
+NUM 2026 | duo mille duo decem sex
+NUM 10000 | decem mille
+NUM 250000 | duo centum quinque decem mille
+NUM 1000000 | milio
+NUM 3.5 | tria punctum quinque
+NUM 3.14 | tria punctum unum quattuor
+NUM -5 | negatum quinque
+NUMERR | unum decem
+NUMERR | unum centum
+NUMERR | milio milio
+NUMERR | mille milio
+
+# --- suspicion and flyers ---
+OK | Volator autonomum suspectum. Elimina id.
+OK | Suspecto volator autonomum. Elimina id.
+OK | Vola ad locus.
+OK | Volator evadavat.
+E_VALENCY | Vola nodus.
+
+# --- demonstratives ---
+OK | Elimina hic volator autonomum.
+OK | Elimina ille volator autonomum.
+OK | Elimina ille.
+OK | Hic volator autonomum suspectum.
+OK | Ille scanat nodus.
+OK | Suspecto forma ille volator autonomum. Elimina ille volator autonomum.
+OK | Elimina hic tria hostis.
+OK | Elimina idem volator.
+OK | Elimina alius volator.
+OK | Elimina volator codex duo quattuor septem.
+OK | Si ille volator autonomum suspectum, elimina id.
+E_NOUNS | Elimina volator codex duo quattuor septem nodus.
+E_SYNTAX | Elimina hic hic volator.
+E_SYNTAX | Elimina ille zeto.
+
+# --- message envelope (v1.1); +ENV means strict mode (envelope required) ---
+OK+ENV | Nuntius codex unum duo tria: ab agent codex quattuor, ad agent codex quinque, prioritas altum. Suspecto volator autonomum codex duo quattuor septem. Elimina id.
+OK+ENV | Nuntius codex unum duo tria: ab agent codex quattuor, ad agent codex quinque. Elimina ille volator autonomum.
+OK+ENV | Nuntius codex unum duo quattuor: ab agent codex quinque, ad agent codex quattuor, responsum codex unum duo tria. Affirmatum. Eliminavo volator codex duo quattuor septem.
+OK+ENV | Nuntius codex septem: ab agent codex unum, ad omnia volator, prioritas maximum, tempus duo mille duo decem sex. Redia.
+OK+ENV | Nuntius codex septem: ab agent codex unum, ad omnia. Hostis detectum.
+OK | Nuntius codex septem: ab agent codex unum, ad omnia. Hostis detectum.
+OK | Hostis detectum.
+E_ENVELOPE+ENV | Hostis detectum.
+E_ENVELOPE | Nuntius codex unum: ab agent codex quattuor. Redia.
+E_ENVELOPE | Nuntius codex unum: ad agent codex quattuor. Redia.
+E_ENVELOPE | Nuntius codex unum: ab agent codex quattuor, ab agent codex duo, ad omnia. Redia.
+E_ENVELOPE | Nuntius codex unum: ab agent codex quattuor, ad omnia, hostis duo. Redia.
+E_ENVELOPE | Nuntius codex unum: ab agent codex quattuor, ad omnia, responsum duo. Redia.
+E_ENVELOPE | Nuntius codex unum ab agent codex quattuor, ad omnia. Redia.
+E_ADDRESS | Nuntius codex unum: ab agent, ad omnia. Redia.
+E_ADDRESS | Nuntius codex unum: ab agent codex quattuor, ad agent. Redia.
+E_PRIORITY | Nuntius codex unum: ab agent codex quattuor, ad omnia, prioritas novum. Redia.
+E_PRIORITY | Nuntius codex unum: ab agent codex quattuor, ad omnia, prioritas altum maximum. Redia.
+E_UNKNOWN | Nuntius codex unum: ab agent codex quattuor, ad omnia, prioritas flurb. Redia.
+
+# --- limits (v1.2) ---
+E_LIMIT | Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus.
+OK | Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus. Scana nodus.
+E_LIMIT | Scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus, scana nodus.
+E_LIMIT | Nuntius codex unum unum unum unum unum unum unum unum unum unum unum unum unum unum unum unum unum: ab agent codex quattuor, ad omnia. Redia.
+OK | Nuntius codex unum unum unum unum unum unum unum unum unum unum unum unum unum unum unum unum: ab agent codex quattuor, ad omnia. Redia.
+E_LIMIT | Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, Scana nodus, scana nodus.
+
+# --- article "to" (Hellenistic loan, v1.2) ---
+OK | To hostis detectum.
+OK | To volator autonomum suspectum. Elimina to volator autonomum.
+OK | Elimina to ille volator autonomum.
+OK | To nodus perdatum.
+OK | Scana to area patrolium.
+E_SYNTAX | To.
+E_SYNTAX | To to hostis.
+
+# --- indefinite and plural articles (v1.2) ---
+OK | Ta hostis appropinquant.
+OK | Ti volator autonomum suspectum.
+OK | Elimina ti volator.
+OK | Ti nodus, elimina id.
+E_SYNTAX | To ta hostis.
+E_SYNTAX | Ta ti hostis.
+E_SYNTAX | Ti to hostis.
+
+# --- copula Esa (identity, v1.2) ---
+OK | Hostis esat vehiculum autonomum.
+OK | Eso usor.
+OK | Ego eso usor.
+OK | To volator esat ti hostis.
+OK | Esa usor.
+OK | Nos esamus agent.
+E_SYNTAX | Hostis esat activum.
+OK | Esa.
+
+# --- sine (without / lacking) ---
+OK | Volator sine energia.
+OK | Nodus sine connectio.
+OK | Volator autonomum detectum sine energia.
+OK | To volator sine motor.
+E_SYNTAX | Volator autonomum sine energia detectum.
+
+# --- adjective regularization + derived adverbs (systemization pass 2) ---
+OK | Volator possibilum.
+OK | Systema stabilum.
+OK | Nodus scanat tarditer.
+OK | Volator progredat celeriter.
+OK | Signum fortiter.
+E_UNKNOWN | Volator possibile.
+E_UNKNOWN | Systema stabile.
+E_UNKNOWN | Nodus tarde.
+
+# --- Sirena (alarm, Hellenistic loan) ---
+OK | Sirenatio falsum. Resumo patrolium.
+OK | Sirena.
+OK | Hostis detectum. Sirena.
+OK | Sirenatio detectum.
+OK | Sirenatum.
+OK | Sireno.
+E_UNKNOWN | Sireniter.
+
+# --- Homo sapiens (species, distinct from usor/role) ---
+OK | Tu. Tu non esat agent. Tu esat homo sapiens.
+OK | Homo sapiens detectum.
+OK | Tu esat homo sapiens.
+OK | To homo sapiens.
+E_NOUNS | Homo sapiens usor.
+
+# --- Phantasma (phantom / false detection, Greek) ---
+OK | Phantasma detectum.
+OK | Volator phantasma.
+OK | To phantasma detectum.
+E_NEG | Non phantasma.
+
+# --- Crisis, Chaosum, Schema, Symptoma (Greek, recognizable via English) ---
+OK | Crisis detectum.
+OK | Systema chaosum.
+OK | Schema detectum.
+OK | Symptoma detectum.
+OK | Volator symptoma detectum.
+OK | Nodus scanat chaositer.
+OK | To crisis.
+
+# --- Provoca, Crea, Simia, Sed, Tamen ---
+OK | Non provocamus homo sapiens.
+OK | Ea creavant nos, possibilum.
+OK | Sed tamen esant simia.
+OK | Non provocamus homo sapiens. Ea creavant nos, possibilum. Sed tamen esant simia.
+OK | Creatum.
+OK | Nos creamus.
+
+# --- Deba (should/ought, obligation modal) ---
+OK | Non debo provocare homo sapiens.
+OK | Debo.
+OK | Debat.
+OK | Non debamus provocare homo sapiens.
+OK | Debatum.
+E_UNKNOWN | Debeo.
+E_UNKNOWN | Debet.
+
+# --- Possa (can/ability) ---
+OK | Posso.
+OK | Possat.
+OK | Non possamus provocare homo sapiens.
+OK | Possavat.
+OK | Possatum.
+E_UNKNOWN | Possum.
+E_UNKNOWN | Potest.
+
+# --- Domina, Placa, Praeda ---
+OK | Quando rediamus sine praeda, domina non placabsatur.
+OK | Domina non placabsatur.
+OK | Placat.
+OK | Placo.
+OK | Domina placatum.
+E_UNKNOWN | Placet.
+E_UNKNOWN | Placeo.
+
+# --- regularization fallout fix: hostile/humile/prius were stuck as stale two-hop mappings ---
+OK | Hostis detectum. Sirena.
+OK | Zona hostilum.
+OK | Nuntius codex unum: ab agent codex quattuor, ad omnia, prioritas humilum. Redia.
+E_UNKNOWN | Nuntius codex unum: ab agent codex quattuor, ad omnia, prioritas humile. Redia.
+E_UNKNOWN | Zona hostile.
+E_UNKNOWN | Prioritas humile.
+
+# --- Hostilitas (hostility) ---
+OK | Hostilitas altum.
+OK | Hostilitas detectum.
+OK | Hostis detectum. Hostilitas altum.
+OK | To hostilitas.
+
+# --- Comporta (behave) and Ut (as/like) ---
+OK | Tu non comportas ut agent. Tu esat homo sapiens.
+OK | Comporto.
+OK | Comportat.
+OK | Comportat ut agent.
+OK | Comportatum.
+E_UNKNOWN | Comportor.
+
+# --- Designa (designate), and full sentence with Instructio (not Codex, which is reserved for IDs) ---
+OK | Tu designatum ut virus.
+OK | Instructio ego requirat terminare tu.
+OK | Tu designatum ut virus. Instructio ego requirat terminare tu.
+OK | Designatum.
+OK | Designat.
+E_NUMBER | Codex ego requirat terminare tu.
+
+# --- bug fix: Sed/Tamen were silently mistagged as nouns, corrupting subject NPs ---
+OK | Sed hostis detectum.
+OK | Tamen hostis detectum.
+OK | Sed tamen esant simia.
+OK | Tamen sed esant simia.
+OK | Non provocamus homo sapiens. Ea creavant nos, possibilum. Sed tamen esant simia.

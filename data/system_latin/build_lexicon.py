@@ -41,16 +41,16 @@ def forms(s):
 gen = set().union(*[forms(s) for s in stems])
 
 # ---------------- closed classes ----------------
-PREP = {'ad', 'ab', 'in', 'ex', 'sub', 'super', 'inter', 'intus', 'extra', 'circa', 'contra', 'trans', 'per', 'sine',
+PREP = {'ad', 'ab', 'in', 'ex', 'sub', 'super', 'inter', 'intus', 'extra', 'circa', 'contra', 'trans', 'per', 'sine', 'ut',
         'ante', 'post', 'infra', 'supra', 'prope', 'longe', 'retro'}
 PREP_ADV = {'ante', 'post', 'infra', 'supra', 'prope', 'longe', 'retro'}
-ADV = {'nunc', 'statim', 'semper', 'numquam', 'iam', 'postea', 'iterum'}  # closed-class temporal/frequency particles; manner adverbs are derived from adjectives (see sl_parser.add_word)
+ADV = {'nunc', 'statim', 'semper', 'numquam', 'iam', 'postea', 'iterum', 'tamen'}  # closed-class temporal/frequency particles; manner adverbs are derived from adjectives (see sl_parser.add_word)
 RETIRED = {'celeriter', 'cito', 'tarde', 'tarditer'}  # v2 systemization: these surface forms are derived at runtime from celerum/tardum, not listed statically
 PRON = {'ego', 'tu', 'id', 'nos', 'vos', 'ea'}
 QUANT = {'omnia', 'multum', 'nullum', 'aliquid'}
 QW = {'utrum', 'quis', 'quid', 'quale', 'ubi', 'cur', 'quomodo', 'quantum', 'quando'}
 RULE = {'si', 'nisi', 'tunc', 'aliter', 'quando', 'dum', 'donec', 'quisque'}
-CONJ = {'et', 'aut'}
+CONJ = {'et', 'aut', 'sed'}
 NEG = {'non'}
 ANS = {'affirmatum', 'negativum'}
 CMP = {'aequale', 'maius', 'minus'}
@@ -108,7 +108,7 @@ for w in ADJ: add(w, 'adj')
 for w in CMP: add(w, 'cmp', {'aequale': 'equal', 'maius': 'greater', 'minus': 'less'}[w])
 for w, g in {'si': 'if', 'nisi': 'unless', 'tunc': 'then', 'aliter': 'else', 'quando': 'when', 'dum': 'while',
              'donec': 'until', 'quisque': 'each'}.items(): add(w, 'rule', g)
-for w, g in {'et': 'and', 'aut': 'or'}.items(): add(w, 'conj', g)
+for w, g in {'et': 'and', 'aut': 'or', 'sed': 'but'}.items(): add(w, 'conj', g)
 add('non', 'neg', 'not')
 for w, g in {'utrum': 'whether', 'quis': 'who', 'quid': 'what', 'quale': 'which', 'ubi': 'where', 'cur': 'why',
              'quomodo': 'how', 'quantum': 'how much / many', 'quando': 'when'}.items(): add(w, 'qw', g)

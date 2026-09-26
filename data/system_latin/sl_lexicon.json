@@ -67,6 +67,11 @@
    "valency": "trans",
    "ct": false
   },
+  "comport": {
+   "gloss": "comport",
+   "valency": "trans",
+   "ct": false
+  },
   "comput": {
    "gloss": "compute",
    "valency": "trans",
@@ -144,6 +149,11 @@
   },
   "desactiv": {
    "gloss": "deactivate",
+   "valency": "trans",
+   "ct": false
+  },
+  "design": {
+   "gloss": "design",
    "valency": "trans",
    "ct": false
   },
@@ -1353,11 +1363,11 @@
    ],
    "gloss": "host"
   },
-  "hostile": {
+  "hostilitas": {
    "pos": [
     "noun"
    ],
-   "gloss": ""
+   "gloss": "hostility (a measurable, reportable quantity — distinct from **hostis**, the enemy itself, and **hostilum**, the adjective describing something as hostile). real classical latin, the expected abstract noun for **hostilum** by latin's own **-itas** pattern"
   },
   "hostilum": {
    "pos": [
@@ -1370,12 +1380,6 @@
     "noun"
    ],
    "gloss": "enemy / adversary"
-  },
-  "humile": {
-   "pos": [
-    "noun"
-   ],
-   "gloss": ""
   },
   "humilum": {
    "pos": [
@@ -2107,12 +2111,6 @@
    ],
    "gloss": "priority"
   },
-  "prius": {
-   "pos": [
-    "noun"
-   ],
-   "gloss": "previous / prior"
-  },
   "priusum": {
    "pos": [
     "adj"
@@ -2394,9 +2392,9 @@
   },
   "sed": {
    "pos": [
-    "noun"
+    "conj"
    ],
-   "gloss": "but (contrastive; distinct from **aliter**, which is a rule branch, not a connector)"
+   "gloss": "but"
   },
   "segmentum": {
    "pos": [
@@ -2581,7 +2579,7 @@
   },
   "tamen": {
    "pos": [
-    "noun"
+    "adv"
    ],
    "gloss": "still / nevertheless"
   },
@@ -2728,6 +2726,12 @@
     "noun"
    ],
    "gloss": "user"
+  },
+  "ut": {
+   "pos": [
+    "prep"
+   ],
+   "gloss": "as / like (manner comparison; takes a noun phrase, like any preposition — **comportat ut agent**, \"behaves like a program\")"
   },
   "utrum": {
    "pos": [

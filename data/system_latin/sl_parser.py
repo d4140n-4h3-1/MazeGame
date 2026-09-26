@@ -533,7 +533,7 @@ def parse_sentence(toks, term):
     return acts[0] if len(acts) == 1 else {'type': 'sequence', 'items': acts}
 
 # ------------------------------------------------------------------ envelope (v1.1)
-PRIORITY_LEVELS = ('minimum', 'humile', 'normale', 'altum', 'maximum')
+PRIORITY_LEVELS = ('minimum', 'humilum', 'normale', 'altum', 'maximum')
 
 def is_envelope(toks):
     return len(toks) >= 3 and toks[0] == 'nuntius' and toks[1] == 'codex'
@@ -609,7 +609,12 @@ def parse_message(text, strict=False):
             out.append(parse_envelope(toks_)); continue
         if k == 0 and strict:
             raise SLError('E_ENVELOPE', 'strict mode: message must start with an envelope')
+        connectors = []
+        while toks_ and toks_[0] in ('sed', 'tamen') and len(toks_) > 1:
+            connectors.append(toks_[0]); toks_ = toks_[1:]
         n = parse_sentence(toks_, term)
+        if connectors and isinstance(n, dict):
+            n['connectors'] = connectors
         kind = n['type'] if isinstance(n, dict) else 'x'
         if kind in ('else', 'else_if'):
             if not open_chain: raise SLError('E_ELSE', "'aliter' has no preceding 'si' or 'nisi' rule")
