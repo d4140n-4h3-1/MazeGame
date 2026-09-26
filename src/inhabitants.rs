@@ -40,6 +40,11 @@
 //! Out of Alert, it also listens (see [`Inhabitants::hear`]): a noise that carries as far as it
 //! is, along the corridors, has it run to where the noise was and search from there.
 //!
+//! A sentry that sees another sentry after the player goes after them too (see
+//! [`Inhabitants::join_chases`]), calm or not: the one it sees shows it where the player is. It
+//! sees the other as it would see the player standing, and a sentry that sees one that has joined
+//! in joins in as well, so a chase draws in every sentry that catches sight of it.
+//!
 //! Hostile, it cannot be talked to any more, but after [`HITS`] bolts it goes down, its eyes
 //! dark: it goes limp and falls, knocked back by the last bolt, and lies where it falls (see
 //! [`crate::ragdoll`]) - or, without a ragdoll, crouches. Lying there, a bolt still shoves it.
@@ -65,13 +70,18 @@ use crate::{
     survey,
 };
 use fyrox::{
-    core::{algebra::Vector3, color::Color, log::Log, pool::Handle},
+    core::{
+        algebra::{Point3, Vector3},
+        color::Color,
+        log::Log,
+        pool::Handle,
+    },
     graph::SceneGraph,
     resource::model::ModelResource,
     scene::{
         base::BaseBuilder,
         collider::{Collider, ColliderBuilder, ColliderShape},
-        graph::Graph,
+        graph::{physics::RayCastOptions, Graph},
         node::Node,
         rigidbody::{RigidBody, RigidBodyBuilder, RigidBodyType},
         transform::TransformBuilder,
@@ -443,6 +453,93 @@ fn could_see(
         };
     let across = flat(to).norm();
     across < reach && flat(to).dot(&forward(heading)) >= across * VIEW_CONE.cos()
+}
+
+/// Whether a droid at `feet`, facing `heading`, in `alert` - or calm, with none - could see
+/// another droid at `other`, if nothing were in the way: as it would see the player standing
+/// there. Calm, it looks about it as it does wary.
+fn could_see_droid(
+    alert: Option<Alert>,
+    feet: Vector3<f32>,
+    heading: f32,
+    other: Vector3<f32>,
+    in_the_dark: bool,
+) -> bool {
+    let alert = alert.unwrap_or(Alert::Caution);
+    could_see(alert, feet, heading, other, Posture::Standing, in_the_dark)
+}
+
+/// What deciding who joins a chase takes from a droid.
+struct Watch {
+    /// Whether its kind is a sentry.
+    sentry: bool,
+    alert: Option<Alert>,
+    sees_player: bool,
+    /// Down, or talking to the player.
+    busy: bool,
+    windup: f32,
+    feet: Vector3<f32>,
+    heading: f32,
+}
+
+/// Which of `droids` join a chase: each sentry, not busy nor after the player already, that
+/// could see a sentry after them - done standing, having just turned hostile - by
+/// [`could_see_droid`], `in_the_dark` or not, where `clear` says nothing is in the way from the
+/// one, as an index, to the other.
+fn joiners(
+    droids: &[Watch],
+    in_the_dark: bool,
+    clear: impl Fn(usize, usize) -> bool,
+) -> Vec<usize> {
+    let after_player =
+        |droid: &Watch| droid.alert == Some(Alert::Alert) && droid.sees_player && !droid.busy;
+    let chasing: Vec<usize> = (0..droids.len())
+        .filter(|&n| droids[n].sentry && after_player(&droids[n]) && droids[n].windup == 0.0)
+        .collect();
+    (0..droids.len())
+        .filter(|&m| {
+            let droid = &droids[m];
+            droid.sentry
+                && !droid.busy
+                && !after_player(droid)
+                && chasing.iter().any(|&n| {
+                    n != m
+                        && could_see_droid(
+                            droid.alert,
+                            droid.feet,
+                            droid.heading,
+                            droids[n].feet,
+                            in_the_dark,
+                        )
+                        && clear(m, n)
+                })
+        })
+        .collect()
+}
+
+/// Whether nothing is in the way of `watcher` seeing `seen`: a ray from its face to the other's
+/// chest meets the other before anything else - aside from its own body, which the ray starts in.
+fn in_sight_of(graph: &Graph, watcher: &Inhabitant, seen: &Inhabitant) -> bool {
+    let from = watcher.feet + Vector3::new(0.0, FACE_HEIGHT, 0.0);
+    let way = seen.feet + Vector3::new(0.0, CHEST, 0.0) - from;
+    let length = way.norm();
+    if length < 1.0e-3 {
+        return true;
+    }
+    let mut hits = Vec::new();
+    graph.physics.cast_ray(
+        RayCastOptions {
+            ray_origin: Point3::from(from),
+            ray_direction: way / length,
+            max_len: length,
+            groups: Default::default(),
+            sort_results: true,
+        },
+        &mut hits,
+    );
+    hits.iter()
+        .find(|hit| hit.collider != watcher.collider)
+        .is_none_or(|hit| hit.collider == seen.collider)
 }
 
 /// Whether the middle of a view from `eye`, looking `ahead` - one meter long - is on `target`:
@@ -1040,6 +1137,48 @@ impl Inhabitants {
         }
     }
 
+    /// Has each sentry - each droid whose kind, as an index into the conversations' characters,
+    /// `sentry` says is one - that sees another sentry after the player go after them too, as if
+    /// it saw them itself. It sees the other as [`could_see_droid`] has it, `in_the_dark` or not,
+    /// and as long as nothing is in the way. Calm, it stands a moment first, as one does that has
+    /// just turned hostile. Call it after [`Self::look_for_player`]: those after the player are the
+    /// ones that can see them, or see another that can.
+    pub fn join_chases(
+        &mut self,
+        graph: &Graph,
+        in_the_dark: bool,
+        sentry: impl Fn(usize) -> bool,
+    ) {
+        let watches: Vec<Watch> = self
+            .droids
+            .iter()
+            .map(|droid| Watch {
+                sentry: sentry(droid.character),
+                alert: droid.alert,
+                sees_player: droid.sees_player,
+                busy: droid.down || droid.talking,
+                windup: droid.windup,
+                feet: droid.feet,
+                heading: droid.heading,
+            })
+            .collect();
+        let droids = &self.droids;
+        let joining = joiners(&watches, in_the_dark, |m, n| {
+            in_sight_of(graph, &droids[m], &droids[n])
+        });
+        for m in joining {
+            let droid = &mut self.droids[m];
+            if droid.alert.is_none() {
+                droid.windup = WINDUP;
+                droid.stays = false;
+                droid.threat = 0.0;
+                droid.warned = 0;
+            }
+            droid.sees_player = true;
+            droid.enter(m, Some(Alert::Alert), &mut self.alerts);
+        }
+    }
+
     /// Has each droid that is not hostile feel the pistol pointed at it for another `dt`, or
     /// not: by the player looking from `eye` along `ahead` with it out, if they are, as long as
     /// `in_sight` says nothing is in the way from the player to the droid. `patience` says how
@@ -1469,6 +1608,56 @@ mod tests {
         // On Alert it keeps track of them wherever they go, as long as they are not too far off.
         assert!(sees(Alert::Alert, 0.0, -20.0, Posture::Crawling));
         assert!(!sees(Alert::Alert, 0.0, SIGHT + 1.0, standing));
+    }
+
+    #[test]
+    fn a_sentry_sees_another_as_it_would_the_player_standing() {
+        let sees = |alert, x: f32, z: f32, dark| {
+            could_see_droid(alert, Vector3::zeros(), 0.0, Vector3::new(x, 0.0, z), dark)
+        };
+        // Calm, it looks about it as it does wary: ahead, and not behind or off to the side.
+        assert!(sees(None, 0.0, 20.0, false), "ahead");
+        assert!(!sees(None, 0.0, -10.0, false), "behind");
+        assert!(!sees(None, 10.0, 1.0, false), "off to the side");
+        assert!(!sees(None, 0.0, 20.0, true), "far off, in the dark");
+        // Searching, the same; on Alert, all round.
+        assert!(!sees(Some(Alert::Evasion), 0.0, -10.0, false));
+        assert!(sees(Some(Alert::Alert), 0.0, -10.0, false));
+        assert!(!sees(Some(Alert::Alert), 0.0, SIGHT + 1.0, false));
+    }
+
+    #[test]
+    fn a_sentry_that_sees_another_after_the_player_joins_in() {
+        let droid = |sentry, alert, sees_player, z: f32| Watch {
+            sentry,
+            alert,
+            sees_player,
+            busy: false,
+            windup: 0.0,
+            feet: Vector3::new(0.0, 0.0, z),
+            heading: 0.0,
+        };
+        let chaser = || droid(true, Some(Alert::Alert), true, 10.0);
+        let open = |_, _| true;
+        // Calm and searching sentries facing the chase join in; the chaser does not.
+        let calm = droid(true, None, false, 0.0);
+        let searching = droid(true, Some(Alert::Evasion), false, 0.0);
+        assert_eq!(joiners(&[chaser(), calm], false, open), [1]);
+        assert_eq!(joiners(&[chaser(), searching], false, open), [1]);
+        // Not a sentry, facing away, with a wall between, or talking: it does not.
+        assert!(joiners(&[chaser(), droid(false, None, false, 0.0)], false, open).is_empty());
+        let facing_away = droid(true, None, false, 20.0);
+        assert!(joiners(&[chaser(), facing_away], false, open).is_empty());
+        let walled_off = joiners(&[chaser(), droid(true, None, false, 0.0)], false, |_, _| false);
+        assert!(walled_off.is_empty());
+        let talking = Watch { busy: true, ..droid(true, None, false, 0.0) };
+        assert!(joiners(&[chaser(), talking], false, open).is_empty());
+        // One still standing, having just turned hostile, is not yet after them; nor is one on
+        // Alert that has lost sight of them.
+        let winding_up = Watch { windup: 0.5, ..chaser() };
+        assert!(joiners(&[winding_up, droid(true, None, false, 0.0)], false, open).is_empty());
+        let lost = droid(true, Some(Alert::Alert), false, 10.0);
+        assert!(joiners(&[lost, droid(true, None, false, 0.0)], false, open).is_empty());
     }
 
     #[test]

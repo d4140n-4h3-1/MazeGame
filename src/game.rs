@@ -136,6 +136,16 @@ fn pitch(voices: &Voices, code: u32, mood: Mood) -> f32 {
     (1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0)) * voices.mood_pitch(mood)
 }
 
+/// Whether droids of the `character`th kind in `script` are sentries: the kind that goes after
+/// the player itself when provoked, rather than sounding the alarm.
+fn is_sentry(script: &Script, character: usize) -> bool {
+    script
+        .characters
+        .get(character)
+        .and_then(|character| character.threatened)
+        .is_some_and(|threatened| threatened.then == Provoked::Attacks)
+}
+
 #[derive(Default, Debug, PartialEq, Visit, Reflect)]
 #[reflect(non_cloneable, type_uuid = "0d3b1c55-7e0a-4f1e-9b53-2f6a8c1d4e90")]
 pub struct MazeGame {
@@ -646,6 +656,11 @@ impl MazeGame {
             .look_for_player(player, posture, in_the_dark, |there| {
                 self.player.can_see(graph, there)
             });
+        // A sentry's eyes are no flashlight: with the lights off, the others see it only near.
+        let script = self.script.as_ref();
+        self.inhabitants.join_chases(graph, self.lights_off, |character| {
+            script.is_some_and(|script| is_sentry(script, character))
+        });
         self.inhabitants
             .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt)
     }
@@ -739,13 +754,8 @@ impl MazeGame {
                 let Some(script) = self.script.as_ref() else {
                     return;
                 };
-                self.inhabitants.raise_alarm(n, player, |character| {
-                    script
-                        .characters
-                        .get(character)
-                        .and_then(|character| character.threatened)
-                        .is_some_and(|threatened| threatened.then == Provoked::Attacks)
-                });
+                self.inhabitants
+                    .raise_alarm(n, player, |character| is_sentry(script, character));
                 let name = self.name_of(n).unwrap_or_else(|| "A droid".into());
                 self.hud.show_note(format!("{name} sounded the alarm"));
             }

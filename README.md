@@ -21,7 +21,8 @@ browser with WebGL 2 is all it needs.
   middle mouse button swings the camera round it.
 - Other droids living in the maze, wandering its corridors on their own, that can be talked to
   as in Fallout 3. They speak System Latin. Fail to fool a sentry and it hunts you down, Metal
-  Gear style: break its line of sight and it searches for you; the pistol can stop it.
+  Gear style: break its line of sight and it searches for you; other sentries that see the
+  chase join in; the pistol can stop it.
 - Movement with walking, running and a breath-limited sprint, crouching, crawling,
   jumping, taking cover and leaning round corners, and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
@@ -163,6 +164,12 @@ shadows (its `raytracing` feature).
   Halt."), "Intrusor perdatum. Zeto intrusor." ("Intruder lost. Searching for the intruder.")
   and "Phantasma. Resumo patrolium." ("A sensor ghost. Resuming patrol."), with subtitles
   under the status line. These are the sentry's `barks` in `data/dialogue/droids.json`.
+- **Sentries join a chase.** A sentry that sees another sentry on ALERT, running after you, goes
+  after you too, calm or not: the one it sees shows it where you are. It sees the other as it
+  would see you standing there - in front of it out of ALERT, less far with the lights off -
+  and a calm one stands a second before it sets off, as one does that has just turned hostile.
+  A sentry that sees one that has joined in joins in as well. Once it sees neither you nor
+  anyone after you, it searches where you were, as usual.
 - **Noise.** Out of ALERT, a hostile droid listens as well. Walking, crouching and crawling are
   silent; running is heard 5 m off, sprinting 10 m, landing hard from a fall 6 m, a pistol shot
   12 m and a bolt hitting something 8 m - measured along the corridors, so a wall between you
