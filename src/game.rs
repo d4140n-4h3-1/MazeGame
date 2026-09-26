@@ -1,7 +1,7 @@
 //! The game itself: loading a level, playing rounds in it, and the player's input.
 
 use crate::{
-    computer::{Computer, Terminal, COMPUTER_MODEL},
+    computer::{Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
     diagnostics::{self, FrameStats},
     dialogue::{
         screen::{self, DialogueScreen, Pointer, Subtitles},
@@ -254,13 +254,21 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     computer: Option<Computer>,
-    /// Its terminal, shown over its screen while the player uses it.
+    /// Its terminal, on its screen while the player uses it - or, with MAZE_TERMINAL_OVERLAY=1,
+    /// over it.
     #[visit(skip)]
     #[reflect(hidden)]
     terminal: Terminal,
     #[visit(skip)]
     #[reflect(hidden)]
+    screen_terminal: ScreenTerminal,
+    #[visit(skip)]
+    #[reflect(hidden)]
     computer_placed: bool,
+    /// Whether MAZE_COMPUTER is to put the player at it, now that it has been placed.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    computer_test: bool,
     #[visit(skip)]
     #[reflect(hidden)]
     start_cell: Option<(usize, usize)>,
@@ -1251,8 +1259,15 @@ impl MazeGame {
                 }
                 // Tried once a round, found or not.
                 self.computer_placed = true;
-                // With MAZE_COMPUTER=1, to try it out: the player is put at it, using it; with
-                // MAZE_COMPUTER=breach, a breach under way too.
+                // MAZE_COMPUTER, next frame: where it is now is only worked out after this one.
+                self.computer_test = platform::var("MAZE_COMPUTER").is_some();
+                return;
+            }
+        }
+        // With MAZE_COMPUTER=1, to try it out: the player is put at it, using it; with
+        // MAZE_COMPUTER=breach, a breach under way too.
+        if std::mem::take(&mut self.computer_test) {
+            {
                 if let Some(test) = platform::var("MAZE_COMPUTER") {
                     let graph = &mut ctx.scenes[self.scene].graph;
                     let (middle, facing) = computer.screen(graph);
@@ -1262,8 +1277,11 @@ impl MazeGame {
                     if test == "breach" {
                         computer.enter();
                     }
-                    self.at_computer = Some(false);
-                    self.start_hacking(ctx);
+                    // With MAZE_COMPUTER=look, only put in front of it, to see it from there.
+                    if test != "look" {
+                        self.at_computer = Some(false);
+                        self.start_hacking(ctx);
+                    }
                     return;
                 }
             }
@@ -1288,7 +1306,8 @@ impl MazeGame {
         };
         // Anywhere but in the window, it goes in the middle too.
         let in_view = |c: &Vector2<f32>| c.x >= -1.0 && c.y >= -1.0 && c.x <= size.x + 1.0 && c.y <= size.y + 1.0;
-        let shown = self.hacking.then(|| {
+        let overlay = platform::var("MAZE_TERMINAL_OVERLAY").as_deref() == Some("1");
+        let shown = (self.hacking && overlay).then(|| {
             let (lines, stage, wrong) = computer.terminal();
             let corners = match corners {
                 [Some(a), Some(b), Some(c), Some(d)] if [a, b, c, d].iter().all(in_view) => [a, b, c, d],
@@ -1297,6 +1316,10 @@ impl MazeGame {
             (lines, corners, stage, wrong)
         });
         self.terminal.show(ui, shown, ctx.dt);
+        // Otherwise on the screen itself.
+        let on_screen = (self.hacking && !overlay).then(|| computer.terminal());
+        self.screen_terminal
+            .show(ctx.user_interfaces, computer, on_screen, ctx.dt);
     }
 
     /// Starts using the computer, if the player is at it: the view goes in to its screen, and the
@@ -1409,6 +1432,8 @@ impl Plugin for MazeGame {
             "New round"
         };
         self.menu = PauseMenu::build(ctx.user_interfaces.first_mut(), restart);
+        // An interface of its own, after the window's, which stays the first.
+        self.screen_terminal = ScreenTerminal::build(ctx.user_interfaces);
         Ok(())
     }
 

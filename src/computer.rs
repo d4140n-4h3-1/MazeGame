@@ -8,9 +8,13 @@
 //! The monitor's frame glows red while the computer is locked and blue once it is cleared. For
 //! now it only stands near where the player starts, to try the hacking out; it opens nothing.
 //!
-//! The terminal comes up over the screen while the player uses the computer: a panel of the
-//! game's own interface, in DejaVu Sans Mono, as big as the screen is in the close-up view.
-//! Otherwise the screen just glows a faint green.
+//! The terminal is on the screen itself while the player uses the computer: an interface of its
+//! own, in DejaVu Sans Mono, drawn into a texture the screen glows with. The engine leaves such a
+//! texture blank if the scene looks for it before the interface has first drawn into it, so each
+//! use gets a fresh texture, and the screen only takes it up once the interface has drawn into it
+//! ([`ScreenTerminal`]). Otherwise the screen just glows a faint green. With
+//! MAZE_TERMINAL_OVERLAY=1 the terminal comes up over the screen instead, as a panel of the
+//! game's own interface, as big as the screen is in the view.
 
 use crate::{
     dismember::SPILL,
@@ -34,10 +38,13 @@ use fyrox::{
         font::{Font, FontResource, FontStyles},
         text::{Text, TextBuilder, TextMessage},
         widget::{WidgetBuilder, WidgetMessage},
-        HorizontalAlignment, Thickness, UserInterface, VerticalAlignment,
+        HorizontalAlignment, Thickness, UiContainer, UserInterface, VerticalAlignment,
     },
     material::{Material, MaterialResource},
-    resource::model::{ModelResource, ModelResourceExtension},
+    resource::{
+        model::{ModelResource, ModelResourceExtension},
+        texture::{TextureResource, TextureResourceExtension},
+    },
     scene::{
         base::BaseBuilder,
         collider::{BitMask, Collider, ColliderBuilder, ColliderShape, InteractionGroups},
@@ -81,12 +88,22 @@ const GREEN: [u8; 3] = [60, 255, 110];
 const DIM: [u8; 3] = [29, 122, 58];
 const BRIGHT: [u8; 3] = [141, 255, 176];
 const WHITE: [u8; 3] = [255, 255, 255];
-const SCREEN_GLOW: Vector3<f32> = Vector3::new(0.0, 0.06, 0.025);
-/// How the frame glows, locked and cleared: red and blue, as bright each way round.
-const LOCKED_GLOW: Vector3<f32> = Vector3::new(3.0, 0.12, 0.12);
-const CLEARED_GLOW: Vector3<f32> = Vector3::new(0.15, 0.55, 3.0);
-const LOCKED_COLOUR: Color = Color::opaque(90, 10, 10);
-const CLEARED_COLOUR: Color = Color::opaque(10, 30, 90);
+///
+/// The engine lights what glows by its colour as well - a surface glows as brightly as its glow
+/// times its own colour - so a black surface cannot glow at all: the screen idles a faint green
+/// as its colour, and the terminal on it is its colour as well as its glow.
+const SCREEN_COLOUR: Color = Color::opaque(0, 44, 18);
+const SCREEN_GLOW: f32 = 1.0;
+/// The terminal on the screen itself: its picture, in pixels, as wide for its height as the
+/// screen; how brightly the screen glows with it; and how many frames the interface draws into a
+/// fresh picture before the screen takes it up.
+const PICTURE: (u32, u32) = (720, 468);
+const PICTURE_GLOW: f32 = 1.4;
+const DRAWN_BEFORE_SHOWN: u32 = 2;
+/// The frame's colour, locked and cleared - red and blue - and how brightly it glows with it.
+const LOCKED_COLOUR: Color = Color::opaque(255, 28, 28);
+const CLEARED_COLOUR: Color = Color::opaque(40, 110, 255);
+const FRAME_GLOW: f32 = 2.0;
 
 /// The room the monitor and keyboard take up against the wall, in meters: half as wide as they
 /// are, half as high, and half as far out from the wall; and how high the middle of that is.
@@ -591,6 +608,73 @@ fn typed_out(lines: &[Line], mut count: usize) -> Vec<Line> {
     out
 }
 
+/// The terminal on the computer's screen itself: an interface of its own, drawn into a picture the
+/// screen glows with, and how many frames it has drawn into the picture it has now.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ScreenTerminal {
+    ui: Handle<UserInterface>,
+    terminal: Terminal,
+    picture: Option<TextureResource>,
+    drawn: u32,
+}
+
+impl ScreenTerminal {
+    /// Builds its interface, with nothing on it, among `uis`.
+    pub fn build(uis: &mut UiContainer) -> Self {
+        let (width, height) = PICTURE;
+        let mut ui = UserInterface::new(Vector2::new(width as f32, height as f32));
+        // Always into a picture, never onto the window.
+        ui.render_target = Some(TextureResource::new_render_target(width, height));
+        let terminal = Terminal::build(&mut ui);
+        Self {
+            ui: uis.add(ui),
+            terminal,
+            picture: None,
+            drawn: 0,
+        }
+    }
+
+    /// Shows `shown` - the screen of a hack, its stage, and whether a key has just gone wrong - on
+    /// the screen of `computer`, or with none takes it off, for another `dt`.
+    pub fn show(&mut self, uis: &mut UiContainer, computer: &Computer, shown: Option<(Screen, Stage, bool)>, dt: f32) {
+        match (&shown, &self.picture) {
+            // A fresh picture each time, which the scene has never looked for.
+            (Some(_), None) => {
+                let (width, height) = PICTURE;
+                let picture = TextureResource::new_render_target(width, height);
+                if let Ok(ui) = uis.try_get_mut(self.ui) {
+                    ui.render_target = Some(picture.clone());
+                }
+                self.picture = Some(picture);
+                self.drawn = 0;
+            }
+            (None, Some(_)) => {
+                computer.show_on_screen(None);
+                self.picture = None;
+            }
+            _ => (),
+        }
+        let (width, height) = (PICTURE.0 as f32, PICTURE.1 as f32);
+        let corners = [
+            Vector2::new(0.0, 0.0),
+            Vector2::new(width, 0.0),
+            Vector2::new(0.0, height),
+            Vector2::new(width, height),
+        ];
+        if let Ok(ui) = uis.try_get(self.ui) {
+            let shown = shown.map(|(screen, stage, wrong)| (screen, corners, stage, wrong));
+            self.terminal.show(ui, shown, dt);
+        }
+        // The screen takes the picture up once the interface has drawn into it.
+        if self.picture.is_some() {
+            self.drawn += 1;
+            if self.drawn == DRAWN_BEFORE_SHOWN {
+                computer.show_on_screen(self.picture.clone());
+            }
+        }
+    }
+}
+
 /// How far in from the edges of a panel `width` by `height` pixels the text goes, and how big it
 /// is, so that [`PANEL_LINES`] lines of [`PANEL_COLUMNS`] characters fit in it.
 fn fitted(width: f32, height: f32) -> (f32, f32) {
@@ -625,6 +709,8 @@ pub struct Computer {
     body: Handle<Node>,
     collider: Handle<Collider>,
     frame: MaterialResource,
+    /// What its screen glows with.
+    glass: MaterialResource,
     screen: Handle<Node>,
     /// The middle of the screen, and its corners, in the screen's own terms.
     screen_middle: Vector3<f32>,
@@ -659,12 +745,12 @@ impl Computer {
             Some(material)
         };
         let mut glass = own(graph, screen).unwrap_or_else(Material::standard);
-        glass.set_property("diffuseColor", Color::BLACK);
-        glass.set_property("emissionStrength", SCREEN_GLOW);
+        glass.set_property("diffuseColor", SCREEN_COLOUR);
+        glass.set_property("emissionStrength", Vector3::repeat(SCREEN_GLOW));
         let glass = MaterialResource::new_embedded(glass);
         let mut glow = own(graph, frame_node).unwrap_or_else(Material::standard);
         glow.set_property("diffuseColor", LOCKED_COLOUR);
-        glow.set_property("emissionStrength", LOCKED_GLOW);
+        glow.set_property("emissionStrength", Vector3::repeat(FRAME_GLOW));
         let frame = MaterialResource::new_embedded(glow);
         let mut middle = Vector3::zeros();
         let (mut low, mut high) = (Vector3::repeat(f32::MAX), Vector3::repeat(f32::MIN));
@@ -723,6 +809,7 @@ impl Computer {
         Some(Self {
             body,
             collider,
+            glass: glass.clone(),
             frame,
             screen,
             screen_middle: middle,
@@ -779,6 +866,10 @@ impl Computer {
             .find(|hit| hit.collider != self.collider)
             .map_or(0.5 * CELL_SIZE, |hit| hit.toi);
         let at = from + back * (wall - WALL_CLEARANCE);
+        fyrox::core::log::Log::info(format!(
+            "Computer: in cell {cell:?} facing {facing:?}, the wall {wall:.2} m behind; at {at:?}, {} hits",
+            hits.len()
+        ));
         graph[self.body]
             .local_transform_mut()
             .set_position(Vector3::new(at.x, floor, at.z))
@@ -839,6 +930,26 @@ impl Computer {
         self.hack.type_char(c);
     }
 
+    /// Has its screen glow with `picture`, the terminal's, or with none its own faint green.
+    pub fn show_on_screen(&self, picture: Option<TextureResource>) {
+        let mut glass = self.glass.data_ref();
+        match picture {
+            // Its colour as well as its glow: black where the terminal is black.
+            Some(picture) => {
+                glass.bind("diffuseTexture", picture.clone());
+                glass.bind("emissionTexture", picture);
+                glass.set_property("diffuseColor", Color::WHITE);
+                glass.set_property("emissionStrength", Vector3::repeat(PICTURE_GLOW));
+            }
+            None => {
+                glass.unbind("diffuseTexture");
+                glass.unbind("emissionTexture");
+                glass.set_property("diffuseColor", SCREEN_COLOUR);
+                glass.set_property("emissionStrength", Vector3::repeat(SCREEN_GLOW));
+            }
+        }
+    }
+
     /// What its terminal shows now, at which stage of the hack, and whether a key has just gone
     /// wrong.
     pub fn terminal(&self) -> (Screen, Stage, bool) {
@@ -853,10 +964,6 @@ impl Computer {
         let cleared = stage == Stage::Cleared;
         if self.lit.map(|lit| lit == Stage::Cleared) != Some(cleared) {
             let mut frame = self.frame.data_ref();
-            frame.set_property(
-                "emissionStrength",
-                if cleared { CLEARED_GLOW } else { LOCKED_GLOW },
-            );
             let colour = if cleared { CLEARED_COLOUR } else { LOCKED_COLOUR };
             frame.set_property("diffuseColor", colour);
         }
