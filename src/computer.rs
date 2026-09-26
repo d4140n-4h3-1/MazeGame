@@ -129,10 +129,10 @@ const COMMANDS: &[&str] = &[
     "unlock --node=7F3A",
     "export PATH=/tmp/x",
 ];
-/// How many commands a breach takes; how long the trace gives each, in seconds, as a start and
-/// for each character of it; and how much a wrong key takes off it.
+/// How many commands a breach takes; how long the trace gives each, in seconds, however long it
+/// is; and how much a wrong key takes off it.
 const BREACH_LINES: usize = 6;
-const LINE_TIME: (f32, f32) = (1.6, 0.32);
+const LINE_TIME: f32 = 15.0;
 const WRONG_KEY: f32 = 0.5;
 /// How long a wrong key shows, and how often the cursor blinks, in seconds.
 const FLASH: f32 = 0.25;
@@ -224,11 +224,7 @@ impl Hack {
 
     fn next_line(&mut self) {
         self.typed = 0;
-        let length = self
-            .lines
-            .get(self.at)
-            .map_or(0, |line| line.chars().count());
-        self.limit = LINE_TIME.0 + LINE_TIME.1 * length as f32;
+        self.limit = LINE_TIME;
         self.left = self.limit;
     }
 

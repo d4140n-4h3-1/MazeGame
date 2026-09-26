@@ -104,8 +104,8 @@ shadows (its `raytracing` feature).
   it and in front of it, `Computer` and `E) Hack` show under the middle of the screen; E takes
   the view in close, square on to the screen, and a terminal in green text comes up over it,
   as big as the screen is in the view. Enter starts a breach: six commands, one at a time, each
-  to be typed exactly into the box under the output before its trace runs out - longer commands
-  get longer. A wrong key does not go in, costs half a second, flashes `ERR` and jolts the
+  to be typed exactly into the box under the output before its trace runs out, 15 seconds for
+  each. A wrong key does not go in, costs half a second, flashes `ERR` and jolts the
   terminal, and the trace bar flashes once it is nearly out. If the trace completes first,
   access is denied and Enter tries again at once; all six typed, access is granted and the
   frame glows blue. Tab walks away. The clock keeps running, and the droids keep going about
