@@ -4,10 +4,13 @@
 //!
 //! The flashlight stays in the droid's hands however far the camera goes, so it goes on lighting
 //! what the droid faces: the face being talked to.
+//!
+//! Using a computer, the camera goes in the same way to its screen, square on and closer, with the
+//! screen in the middle of the view.
 
 use super::{avatar::wrap, Player, FEET};
 use fyrox::{
-    core::algebra::{UnitQuaternion, Vector3},
+    core::algebra::{UnitQuaternion, Vector2, Vector3},
     graph::SceneGraph,
     scene::{
         camera::{Camera, Projection},
@@ -16,6 +19,9 @@ use fyrox::{
     },
 };
 
+/// How far in front of a computer's screen the camera is, in meters: near enough that the screen
+/// fills most of the view up and down.
+const SCREEN_CLOSE_UP: f32 = 0.6;
 /// How far in front of the face the camera is, in meters. It looks level and square on to the
 /// face, neither up nor down nor from one side, from low enough that the face is up above the
 /// conversation along the bottom of the screen.
@@ -36,6 +42,26 @@ const TURN_EASING: f32 = 6.0;
 const DROID_MIDDLE: f32 = 1.2;
 const DROID_DEPTH: f32 = 0.5;
 
+/// How a close-up frames what it looks at: from how far, how far up the view it puts it, and from
+/// which way - out from a screen, square on - or else from wherever the player is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Framing {
+    distance: f32,
+    up_view: f32,
+    out: Option<Vector3<f32>>,
+}
+
+impl Default for Framing {
+    /// A face's.
+    fn default() -> Self {
+        Self {
+            distance: CLOSE_UP,
+            up_view: FACE_UP_VIEW,
+            out: None,
+        }
+    }
+}
+
 /// Who the player is talking to, and how far the camera has gone in to them.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub(super) struct Talk {
@@ -47,6 +73,7 @@ pub(super) struct Talk {
     through: f32,
     /// Whether the view was last narrowed for the close-up, so it is widened again once.
     narrowed: bool,
+    framing: Framing,
 }
 
 impl Talk {
@@ -64,14 +91,21 @@ fn ease(through: f32) -> f32 {
 }
 
 /// Where the camera is for a close-up of a face at `face`, talked to from `from`, and how it
-/// is turned, across the world: level, and as far below the face as puts it [`FACE_UP_VIEW`]
-/// of the way up the view.
-fn close_up(face: Vector3<f32>, from: Vector3<f32>) -> (Vector3<f32>, UnitQuaternion<f32>) {
-    let out = Vector3::new(from.x - face.x, 0.0, from.z - face.z)
+/// is turned, across the world: level, and as far below the face as puts it as far up the view as
+/// `framing` says - for a face, [`FACE_UP_VIEW`] of the way up.
+fn close_up(
+    face: Vector3<f32>,
+    from: Vector3<f32>,
+    framing: Framing,
+) -> (Vector3<f32>, UnitQuaternion<f32>) {
+    let out = framing
+        .out
+        .map(|out| Vector3::new(out.x, 0.0, out.z))
+        .unwrap_or_else(|| Vector3::new(from.x - face.x, 0.0, from.z - face.z))
         .try_normalize(1.0e-4)
         .unwrap_or(Vector3::z());
-    let below = CLOSE_UP * (CLOSE_UP_FOV.to_radians() / 2.0).tan() * FACE_UP_VIEW;
-    let at = face + out * CLOSE_UP - Vector3::y() * below;
+    let below = framing.distance * (CLOSE_UP_FOV.to_radians() / 2.0).tan() * framing.up_view;
+    let at = face + out * framing.distance - Vector3::y() * below;
     (at, UnitQuaternion::face_towards(&-out, &Vector3::y()))
 }
 
@@ -79,12 +113,31 @@ impl Player {
     /// Talks to the droid whose face is at `face`, across the world, or with none stops talking.
     /// While talking, it is told again every frame, as the face moves.
     pub fn talk_to(&mut self, face: Option<Vector3<f32>>) {
+        self.close_up_on(face, Framing::default());
+    }
+
+    /// Uses the computer whose screen's middle is at `screen`, across the world, facing the way
+    /// that goes with it; or with none stops using it. The camera goes in square on to the screen,
+    /// with it in the middle of the view.
+    pub fn use_screen(&mut self, screen: Option<(Vector3<f32>, Vector3<f32>)>) {
+        let framing = Framing {
+            distance: SCREEN_CLOSE_UP,
+            up_view: 0.0,
+            out: screen.map(|(_, facing)| facing),
+        };
+        self.close_up_on(screen.map(|(middle, _)| middle), framing);
+    }
+
+    fn close_up_on(&mut self, face: Option<Vector3<f32>>, framing: Framing) {
         if let (Some(face), None) = (face, self.talk.face) {
             if self.talk.through == 0.0 {
                 self.talk.looking = face;
             }
         }
         self.talk.face = face;
+        if face.is_some() {
+            self.talk.framing = framing;
+        }
     }
 
     /// Turns the body to face whoever the player is talking to, if they are, and levels the
@@ -135,11 +188,42 @@ impl Player {
         // Across the world, then back into the body's own terms.
         let body = graph[self.body].global_position();
         let facing = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.yaw);
-        let (there, looking) = close_up(self.talk.looking, body + facing * head);
+        let (there, looking) = close_up(self.talk.looking, body + facing * head, self.talk.framing);
         let there = facing.inverse() * (there - body);
         let looking = facing.inverse() * looking;
         let turned = turn.try_slerp(&looking, t, 1.0e-6).unwrap_or(looking);
         (at.lerp(&there, t), turned, t)
+    }
+
+    /// Where `point`, across the world, is in a view `size` big, in pixels from its top left, as
+    /// the camera is now; none if it is not in front of the camera. Worked out from where the
+    /// camera is and how it is turned - it looks along its +Z, up its +Y, with the right of the
+    /// view along its -X - and how wide its view is, since the camera's own matrices are only
+    /// worked out as it is drawn.
+    pub fn on_screen(&self, graph: &Graph, point: Vector3<f32>, size: Vector2<f32>) -> Option<Vector2<f32>> {
+        let camera = graph
+            .try_get_of_type::<Camera>(self.camera.transmute::<Node>())
+            .ok()?;
+        let Projection::Perspective(perspective) = camera.projection() else {
+            return None;
+        };
+        let transform = camera.global_transform();
+        let axis = |i: usize| {
+            Vector3::new(transform[(0, i)], transform[(1, i)], transform[(2, i)])
+                .try_normalize(1.0e-6)
+                .unwrap_or_default()
+        };
+        let off = point - camera.global_position();
+        let (right, up, ahead) = (-off.dot(&axis(0)), off.dot(&axis(1)), off.dot(&axis(2)));
+        if ahead <= 1.0e-3 || size.y <= 0.0 {
+            return None;
+        }
+        let half_up = (perspective.fov / 2.0).tan() * ahead;
+        let half_across = half_up * size.x / size.y;
+        Some(Vector2::new(
+            (1.0 + right / half_across) * 0.5 * size.x,
+            (1.0 - up / half_up) * 0.5 * size.y,
+        ))
     }
 
     /// Which way the player looks, along the ground.
@@ -166,7 +250,7 @@ mod tests {
     fn the_close_up_looks_level_at_the_face_from_below_it() {
         let face = Vector3::new(0.0, 1.6, 0.0);
         let from = Vector3::new(0.0, 1.5, 2.0);
-        let (at, turn) = close_up(face, from);
+        let (at, turn) = close_up(face, from, Framing::default());
         assert!((at.z - CLOSE_UP).abs() < 1.0e-4, "out towards whoever is talking: {at:?}");
         let looking = turn * Vector3::z();
         assert!((looking + Vector3::z()).norm() < 1.0e-4, "level and square on: {looking:?}");

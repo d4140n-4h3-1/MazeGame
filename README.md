@@ -97,6 +97,34 @@ shadows (its `raytracing` feature).
 
 ### The game
 
+26 September 2026:
+
+- **A computer to hack, as in Welcome to the Game.** A monitor and keyboard float against a wall
+  a few steps from where you start, the monitor's frame glowing red while it is locked. Close to
+  it and in front of it, `Computer` and `E) Hack` show under the middle of the screen; E takes
+  the view in close, square on to the screen, and a terminal in green text comes up over it,
+  as big as the screen is in the view. Enter starts a breach: six commands, one at a time, each
+  to be typed exactly into the box under the output before its trace runs out - longer commands
+  get longer. A wrong key does not go in, costs half a second, flashes `ERR` and jolts the
+  terminal, and the trace bar flashes once it is nearly out. If the trace completes first,
+  access is denied and Enter tries again at once; all six typed, access is granted and the
+  frame glows blue. Tab walks away. The clock keeps running, and the droids keep going about
+  their business, while you type. For now it opens nothing: it is there to try the hacking out.
+  The model is `data/computer.glb`, made from `unlockables/computer.blend`; the terminal is in
+  DejaVu Sans Mono (`data/fonts/`).
+- **Shot down, droids fall limp**, as ragdolls: every part of the body falls as the physics has
+  it, knocked back by the bolt, and a bolt that hits one lying there shoves it. A few seconds
+  later the droid is gone.
+- **Bolts break droids apart - no blood, just broken geometry.** The bolt that brings a droid
+  down, or any bolt that hits one lying there, breaks off the part it hits: its head, an arm at
+  the shoulder or the elbow, a leg at the hip or the knee (a hand breaks at the elbow, a foot at
+  the knee). The part falls away by itself, both broken ends showing the torn shell and the
+  glowing green voxels inside, and a handful of loose voxels spill out of them and bounce across
+  the floor.
+- **Running at the ready.** With the pistol held low, the droid's left arm pumps as it runs,
+  its shoulders twist against its hips with each stride, and the pistol bobs, the muzzle dipping
+  as each landing drops the hips.
+
 25 September 2026:
 
 - **Talking to the droids, as in Fallout 3.** Close to a droid and facing it, its name shows under
@@ -351,10 +379,13 @@ Pages.
 | R                | Draw the pistol, or holster it                                |
 | Left mouse       | Draw the pistol; once it is drawn, fire                       |
 | Right mouse, drawn | Raise the pistol to aim, rather than hold it at the ready   |
-| E                | Talk to the droid close by and in front of you                 |
+| E                | Talk to the droid close by and in front of you, or use the computer in front of you |
 | Talking: mouse, W / S, arrows | Pick a reply; E, Enter, Space or a click says it  |
 | Talking: 1 to 9  | Say that reply                                                |
 | Talking: Tab     | Walk away                                                     |
+| Computer: Enter  | Start a breach, or try again once denied                      |
+| Computer: typing | Type the command shown, exactly                               |
+| Computer: Tab    | Walk away                                                     |
 | N                | New maze                                                      |
 | `[` `]`          | Turn slower or faster                                         |
 | `-` `=`          | Narrower or wider view                                        |
@@ -397,6 +428,9 @@ logs goes to the browser's console there.
 | `MAZE_SHADOW_BUDGET=0`   | With shadow maps, gives every lamp in range one, not just the nearest.  |
 | `MAZE_SSAO=0`            | Turns ambient occlusion off.                                            |
 | `MAZE_REFLECTIONS=0`     | Turns floor reflections off.                                            |
+| `MAZE_KNOCKDOWN=<s>`     | That many seconds into a round, shoots down the droid nearest you, to try the ragdolls out. |
+| `MAZE_DISMEMBER=<parts>` | With `MAZE_KNOCKDOWN`, breaks those parts off it too, such as `head,forearm.L,shin.R`. |
+| `MAZE_COMPUTER=1`        | Puts you at the computer, using it, as soon as it is placed; `breach` starts a breach too. |
 
 ### Fixed maze models
 
@@ -418,7 +452,8 @@ cargo test
 ```
 
 The tests cover maze generation and tile fitting, what can be seen from where, the walkable grid
-and round planning, and the player's movement, breath, head motion, leaning and keys.
+and round planning, the player's movement, breath, head motion, leaning and keys, the ragdoll and
+how a droid comes apart, and the computer's hack and where it goes.
 
 ## How it fits together
 
@@ -436,13 +471,18 @@ and round planning, and the player's movement, breath, head motion, leaning and 
 | `inward.rs`     | Makes the tiles' surfaces visible from inside and out.                     |
 | `hud.rs`        | The status line and the banner.                                            |
 | `menu.rs`       | The pause menu.                                                            |
+| `computer.rs`   | The computer to hack: where it goes, the hack, and its terminal.           |
+| `ragdoll.rs`    | A droid gone limp: its bodies and joints, from `data/droid_motion.json`.   |
+| `dismember.rs`  | Breaking a droid apart: its pieces and broken ends, and the voxels that spill. |
 | `dialogue/`     | Talking to the droids: their conversations from `data/dialogue/`, and the panel they are shown in. |
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
 | `formants/`     | Sounds made from formants: the file format, the synthesizer that makes the pistol's sounds from `data/sounds/`, and the droids' speech. |
 | `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`), the camera behind it (`third_person`) and its close-up when talking (`talk`). |
 
-The tile models and the droid (`droid_full_deform.glb`) are in `data/`, along with where the
-droid's skids take it (`droid_motion.json`).
+The tile models, the droid (`droid_full_deform.glb`) and the computer (`computer.glb`) are in
+`data/`, along with where the droid's skids take it, its ragdoll and how it comes apart
+(`droid_motion.json`), and the terminal's font (`fonts/`, DejaVu Sans Mono, under its own
+license in `fonts/DejaVuSansMono.LICENSE`).
 
 ## License
 

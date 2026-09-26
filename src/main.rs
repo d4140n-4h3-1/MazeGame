@@ -17,6 +17,7 @@
 //! fixed maze model instead, such as `data/maze_full.fbx`. In a browser these go in the page's
 //! address instead, as `?MAZE_SEED=7` (see [`platform::var`]).
 
+mod computer;
 mod culling;
 mod diagnostics;
 mod dialogue;

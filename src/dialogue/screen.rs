@@ -286,7 +286,15 @@ impl DialogueScreen {
 
     /// Puts the hint to talk to `who` on screen, or with none takes it off.
     pub fn set_prompt(&self, ui: &UserInterface, who: Option<&str>) {
-        let text = who.map_or(String::new(), |who| format!("{who}\nE) Talk"));
+        self.set_action_prompt(ui, who.map(|who| (who, "Talk")));
+    }
+
+    /// Shows the hint to do something with what is in front of the player - `(what, action)`,
+    /// such as the computer, to hack it - or with none hides it.
+    pub fn set_action_prompt(&self, ui: &UserInterface, what: Option<(&str, &str)>) {
+        let text = what.map_or(String::new(), |(what, action)| {
+            format!("{what}\nE) {action}")
+        });
         ui.send(self.prompt, TextMessage::Text(text));
     }
 

@@ -1,7 +1,9 @@
 {
     "03616ae3-cb93-46e6-a520-0a2cb8c34a85": "data/maze_pipe.glb",
     "149c30a3-71b0-4787-98c4-55223e3e5008": "data/maze_t.glb",
+    "16936b9a-9fbe-4ce6-baac-3b1b87c62cde": "data/fonts/DejaVuSansMono.ttf",
     "1b6e7f69-fb0a-494d-a0ec-a02d035f924d": "data/maze_plus.glb",
     "8dcb0ec4-859b-4ff2-b880-1d5bf191ae47": "data/droid_full_deform.glb",
     "be0991eb-6b12-44da-b353-b6c86a1c9256": "data/maze_l.glb",
+    "e4126f23-fcab-41ca-b1d3-f6e811aa351e": "data/computer.glb",
 }

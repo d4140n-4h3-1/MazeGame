@@ -1,6 +1,7 @@
 //! The game itself: loading a level, playing rounds in it, and the player's input.
 
 use crate::{
+    computer::{Computer, Terminal, COMPUTER_MODEL},
     diagnostics::{self, FrameStats},
     dialogue::{
         screen::{self, DialogueScreen, Pointer, Subtitles},
@@ -24,7 +25,7 @@ use crate::{
 };
 use fyrox::{
     core::{
-        algebra::{UnitQuaternion, Vector3},
+        algebra::{UnitQuaternion, Vector2, Vector3},
         color::Color,
         log::Log,
         pool::Handle,
@@ -244,6 +245,31 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     dialogue: DialogueScreen,
+    /// The computer to hack, as its model loads and once it is in the scene; whether it has been
+    /// put down in this round, near the cell the player started from; whether the player is
+    /// using it; and whether they are close enough to, as the hint on screen says.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    computer_model: Option<ModelResource>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    computer: Option<Computer>,
+    /// Its terminal, shown over its screen while the player uses it.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    terminal: Terminal,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    computer_placed: bool,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    start_cell: Option<(usize, usize)>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    hacking: bool,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    at_computer: Option<bool>,
     /// The sounds that were playing as the game was paused, to carry on with once it resumes.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -335,6 +361,7 @@ impl MazeGame {
         self.scene = ctx.scenes.add(scene);
         let resources = &ctx.resource_manager;
         self.droid = Some(resources.request::<Model>(DROID_MODEL));
+        self.computer_model = Some(resources.request::<Model>(COMPUTER_MODEL));
         match platform::var("MAZE_MODEL") {
             Some(path) => self.model = Some(resources.request::<Model>(path)),
             None => self.prefabs = Some(Prefabs::request(resources)),
@@ -395,6 +422,7 @@ impl MazeGame {
 
     fn start_round(&mut self, ctx: &mut PluginContext) {
         self.stop_talking(ctx);
+        self.stop_hacking(ctx);
         // The droids are put down afresh, and what they were about to say goes with them.
         self.barks.clear();
         // Made (and seeded) first: the grid below borrows the game.
@@ -426,6 +454,8 @@ impl MazeGame {
                 survey::draw_map(grid, start, exit)
             ));
         }
+        self.start_cell = Some(start);
+        self.computer_placed = false;
         let start_position = survey::cell_center(*origin, start.0, start.1);
         let exit_position = survey::cell_center(*origin, exit.0, exit.1);
 
@@ -555,6 +585,10 @@ impl MazeGame {
 
     fn on_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
         match code {
+            // At the computer every key but Escape is for it: minus and the rest are typed.
+            _ if self.hacking && !self.menu.is_open() && code != KeyCode::Escape => {
+                self.on_hacking_key(ctx, code)
+            }
             // The view settings are a matter of taste, so they are tuned here rather than
             // guessed: brackets for how fast the view turns, minus and equals for how wide it is.
             KeyCode::BracketLeft | KeyCode::BracketRight => {
@@ -577,7 +611,10 @@ impl MazeGame {
             }
             KeyCode::Escape => self.set_paused(ctx, !self.menu.is_open()),
             _ if self.talking.is_some() && !self.menu.is_open() => self.on_talking_key(ctx, code),
-            KeyCode::KeyE if !self.menu.is_open() => self.start_talking(ctx),
+            KeyCode::KeyE if !self.menu.is_open() && self.talkable.is_some() => {
+                self.start_talking(ctx)
+            }
+            KeyCode::KeyE if !self.menu.is_open() => self.start_hacking(ctx),
             KeyCode::KeyN => self.restart(ctx),
             _ => (),
         }
@@ -938,10 +975,8 @@ impl MazeGame {
     /// Finds the droid the player could talk to, if any, and puts the hint to talk to it on
     /// screen. Nobody, while the player cannot talk.
     fn look_for_someone(&mut self, ctx: &mut PluginContext) {
-        let can_talk = self.phase == Phase::Playing
-            && self.talking.is_none()
-            && !self.menu.is_open()
-            && self.script.is_some();
+        let can_use_computer = self.phase == Phase::Playing && !self.busy() && !self.menu.is_open();
+        let can_talk = can_use_computer && self.script.is_some();
         let found = if can_talk {
             let graph = &ctx.scenes[self.scene].graph;
             let (player, feet, ahead) = (&self.player, self.player.feet(graph), self.player.ahead());
@@ -951,11 +986,29 @@ impl MazeGame {
             None
         };
         let talkable = found.and_then(|n| Some((n, self.name_of(n)?)));
-        if talkable != self.talkable {
-            let who = talkable.as_ref().map(|(_, who)| who.as_str());
-            self.dialogue.set_prompt(ctx.user_interfaces.first(), who);
+        // With nobody to talk to, the computer, if the player is at it.
+        let at_computer = match (&self.computer, talkable.is_none() && can_use_computer) {
+            (Some(computer), true) if self.computer_placed => {
+                let graph = &ctx.scenes[self.scene].graph;
+                computer
+                    .within_reach(graph, self.player.feet(graph))
+                    .then(|| computer.cleared())
+            }
+            _ => None,
+        };
+        if talkable != self.talkable || (talkable.is_none() && at_computer != self.at_computer) {
+            let ui = ctx.user_interfaces.first();
+            match (&talkable, at_computer) {
+                (Some((_, who)), _) => self.dialogue.set_prompt(ui, Some(who)),
+                (None, Some(cleared)) => self.dialogue.set_action_prompt(
+                    ui,
+                    Some(("Computer", if cleared { "Use" } else { "Hack" })),
+                ),
+                (None, None) => self.dialogue.set_prompt(ui, None),
+            }
             self.talkable = talkable;
         }
+        self.at_computer = at_computer;
     }
 
     /// What the `n`th inhabitant is called on screen: what kind of droid it is, and its code.
@@ -1163,6 +1216,141 @@ impl MazeGame {
         self.say_when_made(ctx);
     }
 
+    /// Whether the player is talking or at the computer, and so held still, with the keys and
+    /// the mouse for that.
+    fn busy(&self) -> bool {
+        self.talking.is_some() || self.hacking
+    }
+
+    /// Puts the computer into the scene once its model has loaded, and near where the player
+    /// started once a round is under way; keeps its screen going.
+    fn set_up_computer(&mut self, ctx: &mut PluginContext) {
+        if let Some(model) = self.computer_model.take_if(|model| model.is_ok()) {
+            let seed = platform::nanos_now();
+            self.computer = Computer::spawn(&model, &mut ctx.scenes[self.scene], seed);
+        } else if self
+            .computer_model
+            .as_ref()
+            .is_some_and(|model| model.is_failed_to_load())
+        {
+            Log::err(format!(
+                "Could not load {COMPUTER_MODEL}; there is nothing to hack"
+            ));
+            self.computer_model = None;
+        }
+        let Some(computer) = self.computer.as_mut() else {
+            return;
+        };
+        if !self.computer_placed && self.phase == Phase::Playing {
+            if let (Some((grid, origin)), Some(start)) = (self.level.grid.as_mut(), self.start_cell)
+            {
+                self.computer_placed =
+                    computer.place(&mut ctx.scenes[self.scene].graph, grid, *origin, start);
+                if !self.computer_placed {
+                    Log::warn("Maze: found no wall near the start to put the computer against");
+                }
+                // Tried once a round, found or not.
+                self.computer_placed = true;
+                // With MAZE_COMPUTER=1, to try it out: the player is put at it, using it; with
+                // MAZE_COMPUTER=breach, a breach under way too.
+                if let Some(test) = platform::var("MAZE_COMPUTER") {
+                    let graph = &mut ctx.scenes[self.scene].graph;
+                    let (middle, facing) = computer.screen(graph);
+                    let mut feet = middle + facing * 1.1;
+                    feet.y = computer.floor(graph);
+                    self.player.teleport(graph, feet + Vector3::new(0.0, 1.2, 0.0), (-facing.x).atan2(-facing.z));
+                    if test == "breach" {
+                        computer.enter();
+                    }
+                    self.at_computer = Some(false);
+                    self.start_hacking(ctx);
+                    return;
+                }
+            }
+        }
+        if !self.menu.is_open() {
+            computer.update(ctx.dt);
+        }
+        // Over the screen, wherever the camera sees it, while the player is at it.
+        let ui = ctx.user_interfaces.first();
+        let size = ui.screen_size();
+        let graph = &ctx.scenes[self.scene].graph;
+        let corners = computer
+            .screen_corners(graph)
+            .map(|corner| self.player.on_screen(graph, corner, size));
+        // Should the camera not say where the screen is, the middle of the view, about as much of
+        // it as the screen takes up in the close-up.
+        let middle = || {
+            let (half_height, half_width) = (0.37 * size.y, 0.37 * size.y * 1.537);
+            let centre = size * 0.5;
+            [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)]
+                .map(|(x, y)| centre + Vector2::new(x * half_width, y * half_height))
+        };
+        // Anywhere but in the window, it goes in the middle too.
+        let in_view = |c: &Vector2<f32>| c.x >= -1.0 && c.y >= -1.0 && c.x <= size.x + 1.0 && c.y <= size.y + 1.0;
+        let shown = self.hacking.then(|| {
+            let (lines, stage, wrong) = computer.terminal();
+            let corners = match corners {
+                [Some(a), Some(b), Some(c), Some(d)] if [a, b, c, d].iter().all(in_view) => [a, b, c, d],
+                _ => middle(),
+            };
+            (lines, corners, stage, wrong)
+        });
+        self.terminal.show(ui, shown, ctx.dt);
+    }
+
+    /// Starts using the computer, if the player is at it: the view goes in to its screen, and the
+    /// keys are for typing.
+    fn start_hacking(&mut self, ctx: &mut PluginContext) {
+        if self.phase != Phase::Playing || self.busy() || self.at_computer.is_none() {
+            return;
+        }
+        let Some(computer) = &self.computer else {
+            return;
+        };
+        let screen = computer.screen(&ctx.scenes[self.scene].graph);
+        self.hacking = true;
+        self.player.release_keys();
+        self.player.use_screen(Some(screen));
+        self.dialogue.set_prompt(ctx.user_interfaces.first(), None);
+        self.at_computer = None;
+        self.want_mouse = false;
+        self.set_mouse_captured(ctx, false);
+    }
+
+    /// Walks away from the computer, if the player is at it.
+    fn stop_hacking(&mut self, ctx: &mut PluginContext) {
+        if !self.hacking {
+            return;
+        }
+        self.hacking = false;
+        self.player.use_screen(None);
+        self.want_mouse = !self.menu.is_open();
+        let _ = ctx;
+    }
+
+    /// Keeps the view on the computer's screen while the player uses it.
+    fn keep_hacking(&mut self, ctx: &mut PluginContext) {
+        if let (true, Some(computer)) = (self.hacking, &self.computer) {
+            let screen = computer.screen(&ctx.scenes[self.scene].graph);
+            self.player.use_screen(Some(screen));
+        }
+    }
+
+    /// A key pressed at the computer: Enter to breach it, or try again, and Tab to walk away.
+    /// What is typed goes to it in `on_os_event`.
+    fn on_hacking_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
+        match code {
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                if let Some(computer) = self.computer.as_mut() {
+                    computer.enter();
+                }
+            }
+            KeyCode::Tab => self.stop_hacking(ctx),
+            _ => (),
+        }
+    }
+
     /// A key pressed while talking: W and S or the arrows to go through the replies, E, Enter or
     /// Space to say the one picked, a number to say that one, and Tab to walk away.
     fn on_talking_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
@@ -1204,6 +1392,7 @@ impl Plugin for MazeGame {
         self.hud = Hud::build(&mut ctx);
         // Under the menu, which is built after it.
         self.dialogue = DialogueScreen::build(ctx.user_interfaces.first_mut());
+        self.terminal = Terminal::build(ctx.user_interfaces.first_mut());
         self.script = match Script::load(SCRIPT) {
             Ok(script) => Some(script),
             Err(error) => {
@@ -1246,6 +1435,8 @@ impl Plugin for MazeGame {
             Log::err(format!("Could not load {DROID_MODEL}; playing in first person"));
             self.droid = None;
         }
+
+        self.set_up_computer(ctx);
 
         match self.phase {
             // While the menu is open nothing happens: no loading, no clock, no player.
@@ -1293,15 +1484,20 @@ impl Plugin for MazeGame {
                 }
             }
             Phase::Playing => {
-                // Talking stops the clock, and holds the player where they are.
+                // Talking stops the clock, and holds the player where they are; so does using the
+                // computer, but the clock runs on.
                 let talking = self.talking.is_some();
                 if !talking {
                     self.round_time += ctx.dt;
                 }
                 self.keep_talking(ctx);
+                self.keep_hacking(ctx);
                 let scene = &mut ctx.scenes[self.scene];
-                self.player
-                    .update(&mut scene.graph, ctx.dt, self.focused && !talking);
+                self.player.update(
+                    &mut scene.graph,
+                    ctx.dt,
+                    self.focused && !talking && !self.hacking,
+                );
                 self.land_shots(ctx);
                 if !talking {
                     self.threaten(ctx);
@@ -1447,10 +1643,20 @@ impl Plugin for MazeGame {
                 WindowEvent::KeyboardInput { event: input, .. } => {
                     if let PhysicalKey::Code(code) = input.physical_key {
                         let pressed = input.state == ElementState::Pressed;
-                        // The menu and talking hold the player still; letting go of a key still
-                        // counts.
-                        if (!self.menu.is_open() && self.talking.is_none()) || !pressed {
+                        // The menu, talking and the computer hold the player still; letting go of a
+                        // key still counts.
+                        if (!self.menu.is_open() && !self.busy()) || !pressed {
                             self.player.on_key(code, pressed);
+                        }
+                        // At the computer, what is typed goes to it; Enter and Tab are keys.
+                        if pressed && !input.repeat && self.hacking && !self.menu.is_open() {
+                            if let (Some(text), Some(computer)) =
+                                (&input.text, self.computer.as_mut())
+                            {
+                                for c in text.chars().filter(|c| !c.is_control()) {
+                                    computer.type_char(c);
+                                }
+                            }
                         }
                         if pressed && !input.repeat {
                             self.on_key(&mut ctx, code);
@@ -1468,7 +1674,7 @@ impl Plugin for MazeGame {
                     if !held || (!self.menu.is_open() && self.mouse_captured) {
                         self.player.set_orbiting(held);
                     }
-                    if held && !self.menu.is_open() && self.talking.is_none() {
+                    if held && !self.menu.is_open() && !self.busy() {
                         self.want_mouse = true;
                     }
                 }
@@ -1479,7 +1685,7 @@ impl Plugin for MazeGame {
                 } => {
                     // The click that takes the mouse is only for that; after it, the left button
                     // is the pistol's. Talking, it picks what to say instead.
-                    if !self.menu.is_open() && self.talking.is_none() {
+                    if !self.menu.is_open() && !self.busy() {
                         if self.mouse_captured {
                             self.player.pull_trigger();
                         }
@@ -1497,7 +1703,7 @@ impl Plugin for MazeGame {
                     if !held || (!self.menu.is_open() && self.mouse_captured) {
                         self.player.set_strafing(held);
                     }
-                    if held && !self.menu.is_open() && self.talking.is_none() {
+                    if held && !self.menu.is_open() && !self.busy() {
                         self.want_mouse = true;
                     }
                 }
@@ -1506,7 +1712,7 @@ impl Plugin for MazeGame {
                     ..
                 } => {
                     // With the menu open, or talking, a click is for that.
-                    if !self.menu.is_open() && self.talking.is_none() {
+                    if !self.menu.is_open() && !self.busy() {
                         self.want_mouse = true;
                     }
                 }
