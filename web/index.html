@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maze</title>
+  <meta name="description" content="A first-person maze game in Rust, played in the browser.">
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --fg: #e6e8eb;
+      --dim: #8b929a;
+      --accent: #7fd6c2;
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    /* winit sizes the canvas inline; the game fills the page instead. */
+    canvas {
+      display: block;
+      position: fixed;
+      inset: 0;
+      width: 100vw !important;
+      height: 100vh !important;
+      outline: none;
+    }
+    #title {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.25rem;
+      padding: 0 16px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(2.5rem, 8vw, 4.5rem);
+      font-weight: 300;
+      letter-spacing: 0.3em;
+      margin-right: -0.3em;
+    }
+    p { margin: 0; color: var(--dim); max-width: 34rem; }
+    button {
+      font: inherit;
+      font-size: 1.1rem;
+      letter-spacing: 0.1em;
+      padding: 0.7em 2.4em;
+      color: var(--bg);
+      background: var(--accent);
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: progress; }
+    .keys { font-size: 0.85rem; }
+    kbd {
+      font: inherit;
+      padding: 0 0.35em;
+      border: 1px solid #3a4048;
+      border-radius: 4px;
+      color: var(--fg);
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div id="title">
+    <h1>MAZE</h1>
+    <p>Find the glowing exit. Every maze is new, and the droids living in it speak System Latin.</p>
+    <button id="start" type="button">Play</button>
+    <p class="keys">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · mouse to look · click to take the mouse
+      · <kbd>E</kbd> talk · <kbd>R</kbd> pistol · <kbd>F</kbd> flashlight · <kbd>V</kbd> view
+      · <kbd>Esc</kbd> pause
+    </p>
+    <p class="keys">Needs a desktop browser with WebGL 2. The first load is large.
+      <a href="https://github.com/d4140n-4h3-1/MazeGame">Source on GitHub</a></p>
+    <noscript><p>The game needs JavaScript and WebAssembly.</p></noscript>
+  </div>
+  <script type="module">
+    const start = document.getElementById('start');
+    start.addEventListener('click', async () => {
+      start.disabled = true;
+      start.textContent = 'Loading…';
+      // Browsers only let sound play after a click on the page.
+      const audio = new AudioContext();
+      if (audio.state !== 'running') await audio.resume();
+      try {
+        const { default: init } = await import('./pkg/maze.js');
+        // Instantiating runs the game's main, which adds its canvas to the page.
+        await init();
+      } catch (error) {
+        // winit leaves its event loop by throwing; that is not a failure.
+        if (!String(error).includes('Using exceptions for control flow')) {
+          start.textContent = 'Could not start';
+          console.error(error);
+          return;
+        }
+      }
+      document.getElementById('title').remove();
+      document.querySelector('canvas')?.focus();
+    }, { once: true });
+  </script>
+</body>
+</html>

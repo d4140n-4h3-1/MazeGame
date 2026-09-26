@@ -1537,7 +1537,7 @@ dependencies = [
 [[package]]
 name = "fyrox"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fyrox-impl",
 ]
@@ -1545,7 +1545,7 @@ dependencies = [
 [[package]]
 name = "fyrox-animation"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1558,7 +1558,7 @@ dependencies = [
 [[package]]
 name = "fyrox-autotile"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fxhash",
  "nalgebra 0.35.0",
@@ -1568,7 +1568,7 @@ dependencies = [
 [[package]]
 name = "fyrox-core"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "android-activity",
  "arrayvec",
@@ -1603,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "fyrox-core-derive"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "convert_case",
  "darling",
@@ -1625,7 +1625,7 @@ dependencies = [
 [[package]]
 name = "fyrox-graph"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1635,7 +1635,7 @@ dependencies = [
 [[package]]
 name = "fyrox-graphics"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "bytemuck",
  "fyrox-core",
@@ -1647,7 +1647,7 @@ dependencies = [
 [[package]]
 name = "fyrox-graphics-wgpu"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "bytemuck",
  "fyrox-core",
@@ -1660,7 +1660,7 @@ dependencies = [
 [[package]]
 name = "fyrox-impl"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "approx",
  "base64",
@@ -1713,7 +1713,7 @@ dependencies = [
 [[package]]
 name = "fyrox-material"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1731,7 +1731,7 @@ dependencies = [
 [[package]]
 name = "fyrox-math"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "arrayvec",
  "bytemuck",
@@ -1744,7 +1744,7 @@ dependencies = [
 [[package]]
 name = "fyrox-resource"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1757,7 +1757,7 @@ dependencies = [
 [[package]]
 name = "fyrox-sound"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "fyrox-core",
  "fyrox-resource",
@@ -1773,7 +1773,7 @@ dependencies = [
 [[package]]
 name = "fyrox-texture"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "ddsfile",
  "fast_image_resize",
@@ -1790,7 +1790,7 @@ dependencies = [
 [[package]]
 name = "fyrox-ui"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#9955c270f81789401b5d3e1193f6be730a366054"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#77b1eb43dfc36576fa6062aab0ee61815e99b723"
 dependencies = [
  "bytemuck",
  "copypasta",
@@ -2663,6 +2663,7 @@ dependencies = [
  "fyrox-graphics-wgpu",
  "serde",
  "serde_json",
+ "web-sys",
  "wgpu",
 ]
 
@@ -5572,6 +5573,7 @@ dependencies = [
  "thiserror 2.0.20",
  "wgpu-core-deps-apple",
  "wgpu-core-deps-emscripten",
+ "wgpu-core-deps-wasm",
  "wgpu-core-deps-windows-linux-android",
  "wgpu-hal",
  "wgpu-naga-bridge",
@@ -5592,6 +5594,15 @@ name = "wgpu-core-deps-emscripten"
 version = "30.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98b86cf4abf524a902dd35f18ca6a3f08fc2ae9847c8f10b48e30491b1f0b86"
+dependencies = [
+ "wgpu-hal",
+]
+
+[[package]]
+name = "wgpu-core-deps-wasm"
+version = "30.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d260ca2ca8adc654f513a869bf3cac0b47f5b8d3f87803d6942015f8de597aae"
 dependencies = [
  "wgpu-hal",
 ]

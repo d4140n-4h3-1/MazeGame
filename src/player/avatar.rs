@@ -874,7 +874,7 @@ fn motions() -> Option<&'static Motions> {
     static MOTIONS: std::sync::OnceLock<Option<Motions>> = std::sync::OnceLock::new();
     MOTIONS
         .get_or_init(|| {
-            let read = std::fs::read_to_string(MOTION).map_err(|e| e.to_string());
+            let read = crate::platform::read_to_string(MOTION);
             match read.and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string())) {
                 Ok(motions) => Some(motions),
                 Err(error) => {

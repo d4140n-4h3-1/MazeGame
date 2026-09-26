@@ -29,6 +29,7 @@ mod inward;
 mod layout;
 mod level;
 mod menu;
+mod platform;
 mod ragdoll;
 mod player;
 mod survey;
@@ -67,11 +68,18 @@ fn main() {
 }
 
 /// The game fills the screen it starts on, borderless, so the monitor keeps its own resolution.
-/// MAZE_WINDOWED=1 opens it in an ordinary window instead.
+/// MAZE_WINDOWED=1 opens it in an ordinary window instead. In a browser it fills the page, which
+/// the page's own style sees to.
 fn window_attributes() -> WindowAttributes {
     let mut attributes = WindowAttributes::default().with_title("Maze").with_resizable(true);
-    if std::env::var("MAZE_WINDOWED").as_deref() != Ok("1") {
+    if std::env::var("MAZE_WINDOWED").as_deref() != Ok("1") && cfg!(not(target_arch = "wasm32")) {
         attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+    }
+    // The renderer is made before the page lays out the canvas, which it cannot draw into while
+    // it has no size.
+    #[cfg(target_arch = "wasm32")]
+    if let Some(size) = platform::page_size() {
+        attributes = attributes.with_inner_size(size);
     }
     attributes
 }

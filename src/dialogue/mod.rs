@@ -152,7 +152,7 @@ pub struct Script {
 impl Script {
     /// The conversations in the file at `path`, as long as every reply leads somewhere there is.
     pub fn load(path: &str) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
+        let text = crate::platform::read_to_string(path)?;
         let script: Self =
             serde_json::from_str(&text).map_err(|error| format!("{path}: {error}"))?;
         match script.problems().first() {

@@ -7,20 +7,28 @@ use fyrox::{
 };
 use fyrox_graphics_wgpu::server::WgpuGraphicsServer;
 
-/// Whether the renderer is running on Vulkan. Logs which it is, or why not.
-pub fn is_vulkan(graphics_context: &InitializedGraphicsContext) -> bool {
+/// The graphics API the game is built for: Vulkan on the desktop, and in a browser WebGL 2, the
+/// only one wgpu has there that every browser runs.
+const EXPECTED: wgpu::Backend = if cfg!(target_arch = "wasm32") {
+    wgpu::Backend::Gl
+} else {
+    wgpu::Backend::Vulkan
+};
+
+/// Whether the renderer is running on [`EXPECTED`]. Logs which it is, or why not.
+pub fn has_expected_backend(graphics_context: &InitializedGraphicsContext) -> bool {
     let server = graphics_context.renderer.server.clone();
     match server.as_any().downcast_ref::<WgpuGraphicsServer>() {
         Some(server) => {
             let info = server.state.adapter.get_info();
-            if info.backend != wgpu::Backend::Vulkan {
+            if info.backend != EXPECTED {
                 Log::err(format!(
-                    "Expected Vulkan, but wgpu picked {:?} on {}. Exiting.",
+                    "Expected {EXPECTED:?}, but wgpu picked {:?} on {}. Exiting.",
                     info.backend, info.name
                 ));
                 return false;
             }
-            Log::info(format!("Rendering with Vulkan on {}", info.name));
+            Log::info(format!("Rendering with {EXPECTED:?} on {}", info.name));
             true
         }
         None => {

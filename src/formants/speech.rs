@@ -216,7 +216,7 @@ struct Key {
 impl Voices {
     /// The voices in the file at `path`.
     pub fn load(path: &str) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
+        let text = crate::platform::read_to_string(path)?;
         serde_json::from_str(&text).map_err(|error| format!("{path}: {error}"))
     }
 

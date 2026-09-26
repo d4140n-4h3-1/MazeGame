@@ -17,6 +17,7 @@ use crate::{
     layout::Rng,
     level::Level,
     menu::{Choice, PauseMenu},
+    platform,
     player::{Player, DROID_MODEL},
     survey,
     tiles::{self, Measured, Prefabs},
@@ -241,6 +242,8 @@ pub struct MazeGame {
     #[reflect(hidden)]
     stats: FrameStats,
     mouse_captured: bool,
+    /// Whether the browser had the mouse locked, the last time it was asked. Unused on the desktop.
+    browser_locked: bool,
     /// Whether the mouse should be captured. Capturing can fail while the window is still
     /// appearing, so it is retried until it works.
     want_mouse: bool,
@@ -335,12 +338,7 @@ impl MazeGame {
             if let Some(seed) = std::env::var("MAZE_SEED").ok().and_then(|s| s.parse().ok()) {
                 return Rng::new(seed);
             }
-            Rng::new(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos() as u64)
-                    .unwrap_or(1),
-            )
+            Rng::new(platform::nanos_now())
         })
     }
 
@@ -494,6 +492,17 @@ impl MazeGame {
             return;
         };
         let window = &graphics_context.window;
+        // In a browser the lock hides the cursor, and comes later if the browser grants it:
+        // `update` sees it arrive.
+        if cfg!(target_arch = "wasm32") {
+            if captured {
+                let _ = window.set_cursor_grab(CursorGrabMode::Locked);
+            } else {
+                let _ = window.set_cursor_grab(CursorGrabMode::None);
+                self.mouse_captured = false;
+            }
+            return;
+        }
         if captured {
             // Locked is right for mouse look; X11 cannot lock, so fall back to confining.
             if window.set_cursor_grab(CursorGrabMode::Locked).is_err()
@@ -506,6 +515,33 @@ impl MazeGame {
         }
         window.set_cursor_visible(!captured);
         self.mouse_captured = captured;
+    }
+
+    /// Takes in the browser locking the mouse, or letting it go. The lock arrives some time after
+    /// it is asked for, if the browser grants it. Let go while the game still has it, it is
+    /// because the player pressed Escape, which the page never hears: that pauses, as Escape does
+    /// on the desktop.
+    #[cfg(target_arch = "wasm32")]
+    fn follow_browser_mouse_lock(&mut self, ctx: &mut PluginContext) {
+        let locked = platform::mouse_locked();
+        if locked == self.browser_locked {
+            return;
+        }
+        self.browser_locked = locked;
+        if locked {
+            self.mouse_captured = true;
+            // The game may have stopped wanting it in the meantime.
+            if !self.want_mouse {
+                self.set_mouse_captured(ctx, false);
+            }
+        } else if self.mouse_captured {
+            self.mouse_captured = false;
+            self.player.release_keys();
+            self.want_mouse = false;
+            if self.phase == Phase::Playing {
+                self.set_paused(ctx, true);
+            }
+        }
     }
 
     fn on_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
@@ -788,9 +824,8 @@ impl MazeGame {
             return;
         };
         let sound = voices.speak(&bark.says, voice, pitch(voices, code, mood));
-        let (sender, receiver) = std::sync::mpsc::channel();
         let (rate, reach) = (voices.sample_rate, sound.reach);
-        std::thread::spawn(move || sender.send(synth::make(&sound, rate)));
+        let receiver = platform::in_background(move || synth::make(&sound, rate));
         // A new one from the same droid cuts off whatever it had yet to say.
         self.barks.retain(|barking| barking.droid != n);
         self.barks.push(Barking {
@@ -1015,9 +1050,8 @@ impl MazeGame {
         };
         let view = talking.conversation.view(script, &talking.facts);
         let sound = voices.speak(&view.says, voice, pitch(voices, code, view.mood));
-        let (sender, receiver) = std::sync::mpsc::channel();
         let (rate, reach) = (voices.sample_rate, sound.reach);
-        std::thread::spawn(move || sender.send(synth::make(&sound, rate)));
+        let receiver = platform::in_background(move || synth::make(&sound, rate));
         talking.making = Some(Making(receiver, reach));
     }
 
@@ -1185,7 +1219,7 @@ impl Plugin for MazeGame {
             return Ok(());
         };
         graphics_context.window.set_title("Maze");
-        if !diagnostics::is_vulkan(graphics_context) {
+        if !diagnostics::has_expected_backend(graphics_context) {
             ctx.loop_controller.exit();
             return Ok(());
         }
@@ -1336,7 +1370,12 @@ impl Plugin for MazeGame {
         };
         self.moving.set(moving);
 
-        if self.want_mouse && !self.mouse_captured && self.focused {
+        #[cfg(target_arch = "wasm32")]
+        self.follow_browser_mouse_lock(ctx);
+        // A browser only locks the mouse for a click or a key, so there it is asked for in
+        // `on_os_event`.
+        if self.want_mouse && !self.mouse_captured && self.focused && cfg!(not(target_arch = "wasm32"))
+        {
             self.set_mouse_captured(ctx, true);
         }
 
@@ -1379,7 +1418,7 @@ impl Plugin for MazeGame {
                 self.apply_subtitles(ctx);
             }
             Some(Choice::Restart) => self.restart(ctx),
-            Some(Choice::Quit) => ctx.loop_controller.exit(),
+            Some(Choice::Quit) => platform::quit(ctx),
             None => (),
         }
         Ok(())
@@ -1478,6 +1517,21 @@ impl Plugin for MazeGame {
                 _ => (),
             },
             _ => (),
+        }
+        // A browser only locks the mouse in answer to a click or a key.
+        if cfg!(target_arch = "wasm32") && self.want_mouse && !self.mouse_captured {
+            if let Event::WindowEvent {
+                event:
+                    WindowEvent::MouseInput {
+                        state: ElementState::Pressed,
+                        ..
+                    }
+                    | WindowEvent::KeyboardInput { .. },
+                ..
+            } = event
+            {
+                self.set_mouse_captured(&mut ctx, true);
+            }
         }
         Ok(())
     }

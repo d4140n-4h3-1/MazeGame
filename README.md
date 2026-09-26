@@ -11,6 +11,9 @@ glowing exit waits at the other end. The clock runs until you reach it.
 
 *Talking to one of the droids. Click the picture to watch the video.*
 
+**[Play it in the browser](https://d4140n-4h3-1.github.io/MazeGame-web/)** - no install, a desktop
+browser with WebGL 2 is all it needs.
+
 - Random mazes of any size, with loops, built from tiles whose shapes are measured from the models
   themselves.
 - A droid to play as, seen from behind over its shoulder, that walks, runs, sprints and crouches
@@ -303,6 +306,22 @@ It can be started from anywhere; it finds its models in `data/` next to `Cargo.t
 is compiled with optimizations even in a debug build, and the game itself is not, so `cargo run`
 is quick enough to play while still easy to debug. `cargo run --release` optimizes the game as
 well.
+
+### In a browser
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version <the wasm-bindgen version in Cargo.lock>
+./web/build.sh
+python3 -m http.server -d site
+```
+
+`web/build.sh` builds the game to WebAssembly and puts it in `site/` with the page and `data/`,
+ready to serve as it is; open http://localhost:8000 and press Play. In a browser the game draws
+with WebGL 2, the one graphics API every browser has, and so shadows come from shadow maps: no
+browser offers ray tracing. The published copy lives in
+[MazeGame-web](https://github.com/d4140n-4h3-1/MazeGame-web), which serves `site/` on GitHub
+Pages.
 
 ## Controls
 

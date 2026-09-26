@@ -28,3 +28,9 @@ fyrox-gfx = { git = "https://github.com/d4140n-4h3-1/fyrox-gfx.git", branch = "m
 opt-level = 3
 debug-assertions = false
 overflow-checks = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# In a browser wgpu draws with WebGL 2, which it leaves out unless asked.
+wgpu = { version = "30", features = ["webgl"] }
+# Asking whether the browser has locked the mouse to the page, and reloading it to quit.
+web-sys = { version = "0.3", features = ["Document", "Element", "Location", "Window"] }

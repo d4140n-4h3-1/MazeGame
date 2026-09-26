@@ -203,7 +203,7 @@ impl Pose {
 fn spec() -> Option<&'static Spec> {
     static SPEC: std::sync::OnceLock<Option<Spec>> = std::sync::OnceLock::new();
     SPEC.get_or_init(|| {
-        let read = std::fs::read_to_string(MOTION).map_err(|e| e.to_string());
+        let read = crate::platform::read_to_string(MOTION);
         match read.and_then(|text| serde_json::from_str::<Motion>(&text).map_err(|e| e.to_string())) {
             Ok(Motion { ragdoll: Some(spec) }) => Some(spec),
             Ok(_) => {
