@@ -20,6 +20,7 @@
 mod culling;
 mod diagnostics;
 mod dialogue;
+mod dismember;
 mod fixtures;
 mod formants;
 mod game;

@@ -48,6 +48,9 @@ const BIND_FRAMES: u32 = 3;
 /// in newton seconds.
 pub const STOPPING_BLOW: f32 = 15.0;
 pub const SHOVE: f32 = 6.0;
+/// How far wide of every body a bolt can go and still be counted as striking the nearest, in
+/// meters.
+const NEAR_MISS: f32 = 0.05;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 struct Motion {
@@ -132,6 +135,21 @@ struct Limits {
 
 fn vector(v: [f32; 3]) -> Vector3<f32> {
     Vector3::new(v[0], v[1], v[2])
+}
+
+/// How far along the segment from `a` to `b`, from 0 to 1, it comes closest to the one from `c` to
+/// `d`, and how close.
+fn closest(a: Vector3<f32>, b: Vector3<f32>, c: Vector3<f32>, d: Vector3<f32>) -> (f32, f32) {
+    let (u, v, w) = (b - a, d - c, a - c);
+    let (uu, uv, vv, uw, vw) = (u.dot(&u), u.dot(&v), v.dot(&v), u.dot(&w), v.dot(&w));
+    let denominator = uu * vv - uv * uv;
+    let mut s = if denominator > 1.0e-9 { ((uv * vw - vv * uw) / denominator).clamp(0.0, 1.0) } else { 0.0 };
+    let mut t = if vv > 1.0e-9 { ((uv * s + vw) / vv).clamp(0.0, 1.0) } else { 0.0 };
+    if uu > 1.0e-9 {
+        s = ((uv * t - uw) / uu).clamp(0.0, 1.0);
+        t = if vv > 1.0e-9 { ((uv * s + vw) / vv).clamp(0.0, 1.0) } else { 0.0 };
+    }
+    (s, ((a + u * s) - (c + v * t)).norm())
 }
 
 fn quaternion(q: [f32; 4]) -> UnitQuaternion<f32> {
@@ -235,12 +253,15 @@ pub fn character_groups() -> InteractionGroups {
     InteractionGroups::new(BitMask(CHARACTERS), BitMask(u32::MAX))
 }
 
-/// One of the bodies: the bone it drives, and its colliders.
+/// One of the bodies: its name, the bone it drives, its colliders, and the joint that holds it to
+/// the body it hangs off, unless it has none or has been let loose.
 #[derive(Debug, Clone, PartialEq)]
 struct Limb {
+    name: &'static str,
     bone: Handle<Node>,
     body: Handle<RigidBody>,
     colliders: Vec<Handle<Collider>>,
+    joint: Option<Handle<Joint>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -263,7 +284,6 @@ pub struct Ragdoll {
     root: Handle<Node>,
     /// Its bodies, each after the one it hangs off; the pelvis first.
     limbs: Vec<Limb>,
-    joints: Vec<Handle<Joint>>,
     state: State,
     /// Frames since it was let go; and whether to log how it falls (MAZE_KNOCKDOWN).
     frames: u32,
@@ -297,7 +317,6 @@ impl Ragdoll {
         // Laid out in the rest pose, from where the pelvis is now.
         let mut poses: Vec<Pose> = Vec::with_capacity(bones.len());
         let mut limbs: Vec<Limb> = Vec::with_capacity(bones.len());
-        let mut joints = Vec::new();
         for (i, body) in spec.bodies.iter().enumerate() {
             let parent = body.parent.as_deref().and_then(index);
             let pose = match (parent, &body.joint) {
@@ -361,6 +380,7 @@ impl Ragdoll {
             .with_ccd_enabled(physics.ccd.contains(&body.name))
             .build(graph);
 
+            let mut held = None;
             if let (Some(parent), Some(joint)) = (parent, &body.joint) {
                 let at = pose.then(Pose::of(&joint.frame_in_body));
                 let range = |[low, high]: [f32; 2]| low.to_radians()..high.to_radians();
@@ -394,18 +414,19 @@ impl Ragdoll {
                         physics.joint_damping,
                     );
                 }
-                joints.push(handle);
+                held = Some(handle);
             }
             limbs.push(Limb {
+                name: body.name.as_str(),
                 bone: bones[i],
                 body: rigid_body,
                 colliders,
+                joint: held,
             });
         }
         Some(Self {
             root,
             limbs,
-            joints,
             frames: 0,
             report: crate::platform::var("MAZE_KNOCKDOWN").is_some(),
             state: State::Joining {
@@ -435,6 +456,61 @@ impl Ragdoll {
     /// Whether `collider` is one of its bodies'.
     pub fn owns(&self, collider: Handle<Collider>) -> bool {
         self.limbs.iter().any(|limb| limb.colliders.contains(&collider))
+    }
+
+    /// The name of the body `collider` belongs to, if one of its bodies'.
+    pub fn body_of(&self, collider: Handle<Collider>) -> Option<&'static str> {
+        self.limbs.iter().find(|limb| limb.colliders.contains(&collider)).map(|limb| limb.name)
+    }
+
+    /// The body a bolt going `way` that struck the droid at `at` went into: the first it goes
+    /// through, within a meter on from where it struck - it may have struck the droid's capsule,
+    /// round the outside of it - or failing that the one it passes nearest, if within
+    /// [`NEAR_MISS`]. The bodies are measured where the bones are, whether it has been let go yet
+    /// or not.
+    pub fn body_struck(&self, graph: &Graph, at: Vector3<f32>, way: Vector3<f32>) -> Option<&'static str> {
+        let spec = spec()?;
+        let (from, to) = (at - way * 0.3, at + way * 1.0);
+        let mut through: Option<(f32, &'static str)> = None;
+        let mut nearest: Option<(f32, &'static str)> = None;
+        for (limb, body) in self.limbs.iter().zip(&spec.bodies) {
+            let pose = Pose::of_transform(&graph[limb.bone].global_transform());
+            let place = |v: [f32; 3]| pose.position + pose.rotation * (vector(v) * SCALE);
+            for shape in &body.colliders {
+                let (begin, end, radius) = match *shape {
+                    Shape::Capsule { begin, end, radius } => (place(begin), place(end), radius * SCALE),
+                    Shape::Cuboid { position, half_extents, .. } => {
+                        let middle = place(position);
+                        let [x, y, z] = half_extents;
+                        (middle, middle, (x + y + z) / 3.0 * SCALE)
+                    }
+                };
+                let (along, gap) = closest(from, to, begin, end);
+                let gap = gap - radius;
+                if gap <= 0.0 && through.is_none_or(|(t, _)| along < t) {
+                    through = Some((along, limb.name));
+                }
+                if nearest.is_none_or(|(g, _)| gap < g) {
+                    nearest = Some((gap, limb.name));
+                }
+            }
+        }
+        through
+            .or(nearest.filter(|&(gap, _)| gap <= NEAR_MISS))
+            .map(|(_, name)| name)
+    }
+
+    /// Lets the body called `name` loose of the one it hangs off, to fall on its own. Whether it
+    /// was held.
+    pub fn let_loose(&mut self, graph: &mut Graph, name: &str) -> bool {
+        let Some(joint) = self.limbs.iter_mut().find(|limb| limb.name == name).and_then(|limb| limb.joint.take())
+        else {
+            return false;
+        };
+        if graph.is_valid_handle(joint) {
+            graph.remove_node(joint);
+        }
+        true
     }
 
     /// Shoves the body that `collider` belongs to with `impulse` at `point`.
@@ -580,7 +656,7 @@ impl Ragdoll {
 
     /// Takes its bodies and joints out of the scene.
     pub fn remove(&self, graph: &mut Graph) {
-        for &joint in &self.joints {
+        for joint in self.limbs.iter().filter_map(|limb| limb.joint) {
             if graph.is_valid_handle(joint) {
                 graph.remove_node(joint);
             }
@@ -596,6 +672,24 @@ impl Ragdoll {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn segments_come_closest_where_they_cross_or_at_their_ends() {
+        let (along, gap) = closest(
+            Vector3::new(-1.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.5, -1.0, 0.2),
+            Vector3::new(0.5, 1.0, 0.2),
+        );
+        assert!((along - 0.75).abs() < 1.0e-5 && (gap - 0.2).abs() < 1.0e-5, "{along} {gap}");
+        let (along, gap) = closest(
+            Vector3::zeros(),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(3.0, 1.0, 0.0),
+            Vector3::new(3.0, 1.0, 0.0),
+        );
+        assert!((along - 1.0).abs() < 1.0e-5 && (gap - 5.0f32.sqrt()).abs() < 1.0e-5);
+    }
 
     #[test]
     fn a_pose_undone_is_where_it_started() {

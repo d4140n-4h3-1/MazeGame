@@ -6243,5 +6243,223 @@
     }
    }
   }
+ },
+ "dismember": {
+  "about": "The intact body is mesh_node. On the first break the game hides it and shows every piece instead; each break then shows its stump and end. Breaking at a break's bone: every piece and broken end is on the part that comes off if its bone is that bone or below it, otherwise on the body side. Each side's skin is tied to its own half: on the body side the bones from the break's bone down are swapped for stand-ins fixed to the break's bone's parent where they are at that moment; on the part that comes off, every other bone is swapped for stand-ins fixed to the break's bone. The ragdoll joint of the break's body is let go. A hit on a ragdoll body not in the breaks goes to the break in hit_body, if any. On breaking, `spill` loose glowing voxels, `voxel` model meters across, tumble out of both ends at the break's bone.",
+  "intact": "mesh_node",
+  "pieces": {
+   "torso": {
+    "node": "droid_piece_torso",
+    "bone": "DEF-spine.003"
+   },
+   "head": {
+    "node": "droid_piece_head",
+    "bone": "DEF-spine.004"
+   },
+   "upper_arm.L": {
+    "node": "droid_piece_upper_arm.L",
+    "bone": "DEF-upper_arm.L"
+   },
+   "upper_arm.R": {
+    "node": "droid_piece_upper_arm.R",
+    "bone": "DEF-upper_arm.R"
+   },
+   "forearm.L": {
+    "node": "droid_piece_forearm.L",
+    "bone": "DEF-forearm.L"
+   },
+   "forearm.R": {
+    "node": "droid_piece_forearm.R",
+    "bone": "DEF-forearm.R"
+   },
+   "thigh.L": {
+    "node": "droid_piece_thigh.L",
+    "bone": "DEF-thigh.L"
+   },
+   "thigh.R": {
+    "node": "droid_piece_thigh.R",
+    "bone": "DEF-thigh.R"
+   },
+   "shin.L": {
+    "node": "droid_piece_shin.L",
+    "bone": "DEF-shin.L"
+   },
+   "shin.R": {
+    "node": "droid_piece_shin.R",
+    "bone": "DEF-shin.R"
+   }
+  },
+  "breaks": [
+   {
+    "name": "head",
+    "bone": "DEF-spine.004",
+    "body": "head",
+    "parent": "torso",
+    "stump": "droid_break_head_stump",
+    "end": "droid_break_head_end",
+    "voxel": 0.013,
+    "spill": 12
+   },
+   {
+    "name": "upper_arm.L",
+    "bone": "DEF-upper_arm.L",
+    "body": "upper_arm.L",
+    "parent": "torso",
+    "stump": "droid_break_upper_arm.L_stump",
+    "end": "droid_break_upper_arm.L_end",
+    "voxel": 0.013,
+    "spill": 11
+   },
+   {
+    "name": "upper_arm.R",
+    "bone": "DEF-upper_arm.R",
+    "body": "upper_arm.R",
+    "parent": "torso",
+    "stump": "droid_break_upper_arm.R_stump",
+    "end": "droid_break_upper_arm.R_end",
+    "voxel": 0.013,
+    "spill": 12
+   },
+   {
+    "name": "forearm.L",
+    "bone": "DEF-forearm.L",
+    "body": "forearm.L",
+    "parent": "upper_arm.L",
+    "stump": "droid_break_forearm.L_stump",
+    "end": "droid_break_forearm.L_end",
+    "voxel": 0.0089,
+    "spill": 11
+   },
+   {
+    "name": "forearm.R",
+    "bone": "DEF-forearm.R",
+    "body": "forearm.R",
+    "parent": "upper_arm.R",
+    "stump": "droid_break_forearm.R_stump",
+    "end": "droid_break_forearm.R_end",
+    "voxel": 0.0089,
+    "spill": 10
+   },
+   {
+    "name": "thigh.L",
+    "bone": "DEF-thigh.L",
+    "body": "thigh.L",
+    "parent": "torso",
+    "stump": "droid_break_thigh.L_stump",
+    "end": "droid_break_thigh.L_end",
+    "voxel": 0.013,
+    "spill": 24
+   },
+   {
+    "name": "thigh.R",
+    "bone": "DEF-thigh.R",
+    "body": "thigh.R",
+    "parent": "torso",
+    "stump": "droid_break_thigh.R_stump",
+    "end": "droid_break_thigh.R_end",
+    "voxel": 0.013,
+    "spill": 24
+   },
+   {
+    "name": "shin.L",
+    "bone": "DEF-shin.L",
+    "body": "shin.L",
+    "parent": "thigh.L",
+    "stump": "droid_break_shin.L_stump",
+    "end": "droid_break_shin.L_end",
+    "voxel": 0.0124,
+    "spill": 8
+   },
+   {
+    "name": "shin.R",
+    "bone": "DEF-shin.R",
+    "body": "shin.R",
+    "parent": "thigh.R",
+    "stump": "droid_break_shin.R_stump",
+    "end": "droid_break_shin.R_end",
+    "voxel": 0.0124,
+    "spill": 8
+   }
+  ],
+  "hit_body": {
+   "hand.L": "forearm.L",
+   "hand.R": "forearm.R",
+   "foot.L": "shin.L",
+   "foot.R": "shin.R"
+  },
+  "ends": {
+   "droid_break_head_stump": {
+    "node": "droid_break_head_stump",
+    "bone": "DEF-spine.003"
+   },
+   "droid_break_head_end": {
+    "node": "droid_break_head_end",
+    "bone": "DEF-spine.004"
+   },
+   "droid_break_upper_arm.L_stump": {
+    "node": "droid_break_upper_arm.L_stump",
+    "bone": "DEF-spine.003"
+   },
+   "droid_break_upper_arm.L_end": {
+    "node": "droid_break_upper_arm.L_end",
+    "bone": "DEF-upper_arm.L"
+   },
+   "droid_break_upper_arm.R_stump": {
+    "node": "droid_break_upper_arm.R_stump",
+    "bone": "DEF-spine.003"
+   },
+   "droid_break_upper_arm.R_end": {
+    "node": "droid_break_upper_arm.R_end",
+    "bone": "DEF-upper_arm.R"
+   },
+   "droid_break_forearm.L_stump": {
+    "node": "droid_break_forearm.L_stump",
+    "bone": "DEF-upper_arm.L"
+   },
+   "droid_break_forearm.L_end": {
+    "node": "droid_break_forearm.L_end",
+    "bone": "DEF-forearm.L"
+   },
+   "droid_break_forearm.R_stump": {
+    "node": "droid_break_forearm.R_stump",
+    "bone": "DEF-upper_arm.R"
+   },
+   "droid_break_forearm.R_end": {
+    "node": "droid_break_forearm.R_end",
+    "bone": "DEF-forearm.R"
+   },
+   "droid_break_thigh.L_stump": {
+    "node": "droid_break_thigh.L_stump",
+    "bone": "DEF-spine.003"
+   },
+   "droid_break_thigh.L_end": {
+    "node": "droid_break_thigh.L_end",
+    "bone": "DEF-thigh.L"
+   },
+   "droid_break_thigh.R_stump": {
+    "node": "droid_break_thigh.R_stump",
+    "bone": "DEF-spine.003"
+   },
+   "droid_break_thigh.R_end": {
+    "node": "droid_break_thigh.R_end",
+    "bone": "DEF-thigh.R"
+   },
+   "droid_break_shin.L_stump": {
+    "node": "droid_break_shin.L_stump",
+    "bone": "DEF-thigh.L"
+   },
+   "droid_break_shin.L_end": {
+    "node": "droid_break_shin.L_end",
+    "bone": "DEF-shin.L"
+   },
+   "droid_break_shin.R_stump": {
+    "node": "droid_break_shin.R_stump",
+    "bone": "DEF-thigh.R"
+   },
+   "droid_break_shin.R_end": {
+    "node": "droid_break_shin.R_end",
+    "bone": "DEF-shin.R"
+   }
+  }
  }
 }

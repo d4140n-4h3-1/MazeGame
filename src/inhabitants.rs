@@ -66,6 +66,7 @@ use crate::{
         posture::{Gait, Posture},
         Strike,
     },
+    dismember,
     ragdoll::{self, Ragdoll},
     survey,
 };
@@ -306,12 +307,25 @@ struct Inhabitant {
 }
 
 impl Inhabitant {
+    /// Breaks off the part of it lying there that a bolt struck the ragdoll body `body` of, if
+    /// a hit there breaks anything off: its head, an arm at the shoulder or the elbow, a leg at
+    /// the hip or the knee - a hand at the elbow, a foot at the knee.
+    fn break_off(&mut self, graph: &mut Graph, body: &str) {
+        let (Some(ragdoll), Some(part)) = (self.ragdoll.as_mut(), dismember::break_for(body)) else {
+            return;
+        };
+        if self.avatar.break_off(graph, part) {
+            ragdoll.let_loose(graph, part);
+        }
+    }
+
     /// Takes it away for good, [`VANISH_AFTER`] seconds after it went down: out of sight, its
     /// limp bodies out of the physics, and its capsule too if it still has one. Its place among
     /// the droids stays, since they are known by where they are in the list.
     fn vanish(&mut self, graph: &mut Graph) {
         self.gone = true;
         self.avatar.set_visible(graph, false);
+        self.avatar.sweep_up(graph);
         if let Some(ragdoll) = self.ragdoll.take() {
             ragdoll.remove(graph);
         }
@@ -700,7 +714,8 @@ impl Inhabitants {
 
     /// Takes everyone out of the scene, to be put into the next round afresh.
     pub fn clear(&mut self, graph: &mut Graph) {
-        for droid in self.droids.drain(..) {
+        for mut droid in self.droids.drain(..) {
+            droid.avatar.sweep_up(graph);
             if graph.is_valid_handle(droid.body) {
                 graph.remove_node(droid.body);
             }
@@ -1349,7 +1364,9 @@ impl Inhabitants {
     }
 
     /// Shoots down the droid nearest the `player`'s feet, as bolts from them would, [`HITS`]
-    /// times over, for MAZE_KNOCKDOWN. Which one, if any is standing.
+    /// times over, for MAZE_KNOCKDOWN; and with MAZE_DISMEMBER=<bodies>, a comma-separated list
+    /// of ragdoll bodies such as head,forearm.L,shin.R, breaks those off it too. Which one, if any
+    /// is standing.
     pub fn knock_down(&mut self, graph: &mut Graph, player: Vector3<f32>) -> Option<usize> {
         let n = (0..self.droids.len())
             .filter(|&n| !self.droids[n].down)
@@ -1366,7 +1383,14 @@ impl Inhabitants {
             at,
             way: (at - from).try_normalize(1.0e-6).unwrap_or_else(Vector3::z),
         };
-        (0..HITS).find_map(|_| self.shot(graph, strike, player))
+        let n = (0..HITS).find_map(|_| self.shot(graph, strike, player))?;
+        if let Some(bodies) = crate::platform::var("MAZE_DISMEMBER") {
+            for body in bodies.split(',').map(str::trim).filter(|body| !body.is_empty()) {
+                self.droids[n].break_off(graph, body);
+                Log::info(format!("MAZE_DISMEMBER: {body} broken off droid {n}"));
+            }
+        }
+        Some(n)
     }
 
     /// A bolt from the pistol of the player at `player` has struck something. If it is a hostile
@@ -1377,13 +1401,16 @@ impl Inhabitants {
     /// did.
     pub fn shot(&mut self, graph: &mut Graph, strike: Strike, player: Vector3<f32>) -> Option<usize> {
         let collider = strike.collider;
-        if let Some(ragdoll) = self
+        if let Some(droid) = self
             .droids
-            .iter()
-            .filter_map(|droid| droid.ragdoll.as_ref())
-            .find(|ragdoll| ragdoll.owns(collider))
+            .iter_mut()
+            .find(|droid| droid.ragdoll.as_ref().is_some_and(|ragdoll| ragdoll.owns(collider)))
         {
+            let ragdoll = droid.ragdoll.as_ref()?;
             ragdoll.shove(graph, collider, strike.way * ragdoll::SHOVE, strike.at);
+            if let Some(body) = ragdoll.body_of(collider) {
+                droid.break_off(graph, body);
+            }
             return None;
         }
         let (n, droid) = self
@@ -1416,7 +1443,10 @@ impl Inhabitants {
             forward(droid.heading) * droid.speed,
             Some((strike.way * ragdoll::STOPPING_BLOW, strike.at)),
         );
-        if droid.ragdoll.is_some() {
+        if let Some(ragdoll) = &droid.ragdoll {
+            if let Some(body) = ragdoll.body_struck(graph, strike.at, strike.way) {
+                droid.break_off(graph, body);
+            }
             return Some(n);
         }
         if let Ok(shape) = graph.try_get_mut(droid.collider) {

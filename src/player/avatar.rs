@@ -54,6 +54,11 @@
 //! It draws a pistol, holds it at the ready, raises it to aim and fires it, lowers it again a
 //! moment after the last shot unless it is held raised, and holsters it, with its upper body - from the
 //! middle of its back up - while its legs go on walking, running, strafing or standing as ever.
+//! At the ready, with the pistol held low in the right hand alone, the left arm is let go to
+//! swing as the legs have it, pumping in step with a run, and takes hold again as the pistol
+//! comes up. Running at the ready, its shoulders twist against its hips with each stride, the
+//! pistol swaying only a little with them, and the pistol bobs, the muzzle dipping as each
+//! landing drops the hips.
 //! The pistol shows partway through the draw and goes again partway through the holster, as
 //! [`MOTION`] says, and until then is out of sight in its right hand. Out, it follows the
 //! camera: its upper body leans the pistol up, down and round towards wherever the camera looks,
@@ -71,6 +76,7 @@
 //! removed, so a droid in them would leave its shadow behind where it was first put down.
 
 use super::posture::{Gait, Posture};
+use crate::dismember::Dismember;
 use crate::fixtures::{glow_strength, property, DIFFUSE_COLOR, EMISSION_STRENGTH};
 use fyrox::{
     core::{
@@ -79,7 +85,7 @@ use fyrox::{
         log::Log,
         pool::Handle,
     },
-    fxhash::FxHashMap,
+    fxhash::{FxHashMap, FxHashSet},
     generic_animation::value::{TrackValue, ValueBinding},
     graph::SceneGraph,
     material::{MaterialProperty, MaterialResource},
@@ -218,6 +224,10 @@ const PISTOL: &str = "pistol";
 /// The bone its upper body hangs off, which the pistol has from the moment it is drawn: the
 /// middle of its back, with the chest, the arms and the head above it.
 const UPPER_BODY: &str = "DEF-spine.002";
+/// The top of its left arm, which swings free at the ready - everything from the collarbone down
+/// to the fingertips goes on as the legs below have it, pumping in a run - while the right hand
+/// holds the pistol.
+const LEFT_ARM: &str = "DEF-shoulder.L";
 /// Its head, and the tops of its arms, which its face and its shoulders go by.
 const HEAD: &str = "DEF-spine.006";
 const SHOULDERS: [&str; 2] = ["DEF-upper_arm.L", "DEF-upper_arm.R"];
@@ -363,6 +373,23 @@ const READY_AFTER: f32 = 1.0;
 const ARMS_BLEND: f32 = 0.12;
 /// How long the upper body takes to go over to the pistol, or back, in seconds.
 const ARMS_FADE: f32 = 0.15;
+/// How long the left arm takes to let go of the pistol's pose and swing with the legs at the
+/// ready, or to go back to it as the pistol comes up, in seconds.
+const LEFT_ARM_FADE: f32 = 0.2;
+/// Its right forearm, which tips the pistol at the elbow as the stride bobs it at the ready.
+const RIGHT_FOREARM: &str = "DEF-forearm.R";
+/// At the ready, how much of the twist the legs give the shoulders the upper body takes - its
+/// shoulders turning against its hips in a run - and how much of that the right arm turns back
+/// again at the shoulder, to keep the pistol pointed down-range, swaying only a little.
+const READY_TWIST: f32 = 0.7;
+const PISTOL_STEADY: f32 = 0.75;
+/// At the ready, how far the pistol tips down at the elbow for each of the model's meters the
+/// hips drop below where they ride on average - landing each stride, the muzzle dips - in
+/// radians.
+const PISTOL_BOB: f32 = 1.75;
+/// How long the average the twist and the bob go by takes to follow what the legs are doing, in
+/// seconds: long next to a stride, so that only the swing of each stride is left over it.
+const STRIDE_MEAN: f32 = 1.0;
 /// The rate the droid's animations were made at, in frames a second.
 const FRAME_RATE: f32 = 24.0;
 /// How near the floor, in the model's own meters, a foot has to be to be planted on it: as low as
@@ -1119,6 +1146,15 @@ pub(crate) struct Avatar {
     since_shot: f32,
     /// Where the pistol has every bone of the upper body, as of this frame.
     arms_pose: FxHashMap<Handle<Node>, Bone>,
+    /// The left arm, which swings with the legs at the ready rather than as the pistol has it;
+    /// and how far it has, from 0 to 1.
+    left_arm: FxHashSet<Handle<Node>>,
+    left_free: f32,
+    /// Down to the right forearm, which tips the pistol with the bob; and, on average, how far
+    /// the legs turn the shoulders and how high they carry the hips, which the stride's twist
+    /// and bob swing about.
+    right_forearm: Vec<Handle<Node>>,
+    stride_mean: (f32, f32),
     /// Which way the barrel pointed, across the world, as the trigger was last pulled.
     barrel: Vector3<f32>,
     /// Where the muzzle was as a shot left it this frame, and which way it went, if one did.
@@ -1152,6 +1188,8 @@ pub(crate) struct Avatar {
     /// this frame; and how far it has, from 0 to 1.
     squaring: bool,
     square_weight: f32,
+    /// Its parts, which come apart when it is shot down, if the model has them.
+    dismember: Option<Dismember>,
 }
 
 /// Which way the droid faces relative to the body, in radians from -PI to PI, left positive, for
@@ -1345,6 +1383,10 @@ impl Avatar {
             .find_by_name(root, UPPER_BODY)
             .map(|(upper, _)| graph.traverse_handle_iter(upper).collect())
             .unwrap_or_default();
+        let left_arm: FxHashSet<Handle<Node>> = graph
+            .find_by_name(root, LEFT_ARM)
+            .map(|(shoulder, _)| graph.traverse_handle_iter(shoulder).collect())
+            .unwrap_or_default();
 
         // Everything is measured in the model's own terms: those of its root, which the droid
         // turns and scales as a whole, whatever the rig puts between that and the bones.
@@ -1374,9 +1416,12 @@ impl Avatar {
             })
         })();
         let barrel_chain = muzzle.map_or_else(Vec::new, |muzzle| chain(parent_of, root, muzzle));
+        let right_forearm =
+            find(RIGHT_FOREARM).map_or_else(Vec::new, |forearm| chain(parent_of, root, forearm));
         let parents: FxHashMap<Handle<Node>, Handle<Node>> =
             rest.keys().map(|&bone| (bone, graph[bone].parent())).collect();
         let eyes = find(EYES).and_then(|eyes| claim_eyes(graph, eyes));
+        let dismember = Dismember::new(graph, root);
         // The screen and the shell as see-through green glass - the model's own see-through
         // shell comes in solid, and would hide the core. Only the screen itself: the crosshair on
         // it keeps its own solid glow, which flashes with it.
@@ -1741,6 +1786,10 @@ impl Avatar {
             queued: false,
             since_shot: READY_AFTER,
             arms_pose,
+            left_arm,
+            left_free: 0.0,
+            right_forearm,
+            stride_mean: (0.0, 0.0),
             barrel: Vector3::z(),
             shot: None,
             flash,
@@ -1755,6 +1804,7 @@ impl Avatar {
             blended: Default::default(),
             squaring: false,
             square_weight: 0.0,
+            dismember,
         })
     }
 
@@ -1786,6 +1836,19 @@ impl Avatar {
     /// The model's root, which every bone hangs off.
     pub(crate) fn root(&self) -> Handle<Node> {
         self.root
+    }
+
+    /// Breaks off the part the ragdoll body `body` carries, as [`Dismember::break_off`] does.
+    /// Whether it came off.
+    pub(crate) fn break_off(&mut self, graph: &mut Graph, body: &str) -> bool {
+        self.dismember.as_mut().is_some_and(|parts| parts.break_off(graph, body))
+    }
+
+    /// Takes the loose voxels its breaks have spilt out of the scene.
+    pub(crate) fn sweep_up(&mut self, graph: &mut Graph) {
+        if let Some(parts) = self.dismember.as_mut() {
+            parts.sweep_up(graph);
+        }
     }
 
     /// Which way the droid faces from the way the body faces, in radians, left positive.
@@ -1967,6 +2030,9 @@ impl Avatar {
         let out = if self.arms == Arms::Holstered { 0.0 } else { 1.0 };
         let step = dt / ARMS_FADE;
         self.arms_weight += (out - self.arms_weight).clamp(-step, step);
+        let free = if self.arms == Arms::Ready { 1.0 } else { 0.0 };
+        let step = dt / LEFT_ARM_FADE;
+        self.left_free += (free - self.left_free).clamp(-step, step);
     }
 
     /// Shows the pistol's screen, crosshair and all, while the pistol is `out`, and lets the
@@ -2048,11 +2114,38 @@ impl Avatar {
     /// as far through the change to it as the fade has got after another `dt` - and strafing,
     /// with the face and shoulders squared to straight ahead.
     fn put(&mut self, graph: &mut Graph, mut target: FxHashMap<Handle<Node>, Bone>, dt: f32) {
+        // At the ready the left arm swings with the legs - pumping in a run, in step with it - as
+        // far as it has let go of the pistol's pose.
+        let held = 1.0 - self.left_free * self.left_free * (3.0 - 2.0 * self.left_free);
+        let smooth = |x: f32| x * x * (3.0 - 2.0 * x);
+        let at_ready = smooth(self.arms_weight) * (1.0 - held);
+        // How the legs twist the shoulders and carry the hips, off how they do on average: the
+        // swing of the stride, which the upper body takes at the ready.
+        let stride = self.square.as_ref().map(|square| {
+            let [left, right] = square
+                .shoulders
+                .each_ref()
+                .map(|chain| place(chain, |bone| target[&bone]).position);
+            let twist = shoulders_yaw(left, right);
+            let height = place(&self.skeleton.hips, |bone| target[&bone]).position.y;
+            let follow = 1.0 - (-dt / STRIDE_MEAN).exp();
+            let (mean_twist, mean_height) = &mut self.stride_mean;
+            *mean_twist += wrap(twist - *mean_twist) * follow;
+            *mean_height += (height - *mean_height) * follow;
+            (wrap(twist - *mean_twist), height - *mean_height)
+        });
+        let arm_weight = |bone: &Handle<Node>, w: f32| {
+            if self.left_arm.contains(bone) {
+                w * held
+            } else {
+                w
+            }
+        };
         if self.arms_weight > 0.0 {
             let w = self.arms_weight * self.arms_weight * (3.0 - 2.0 * self.arms_weight);
             for (bone, pose) in &self.arms_pose {
                 if let Some(target) = target.get_mut(bone) {
-                    *target = target.towards(*pose, w);
+                    *target = target.towards(*pose, arm_weight(bone, w));
                 }
             }
         }
@@ -2100,7 +2193,7 @@ impl Avatar {
             let (pitch, yaw) = (self.look.0, wrap(self.look.1 - facing));
             for (bone, offset) in aims.offset(pitch, yaw) {
                 if let Some(pose) = target.get_mut(&bone) {
-                    let offset = Bone::identity().towards(offset, w);
+                    let offset = Bone::identity().towards(offset, arm_weight(&bone, w));
                     pose.position += offset.position;
                     pose.rotation *= offset.rotation;
                 }
@@ -2124,6 +2217,22 @@ impl Avatar {
                 }
                 let turn = UnitQuaternion::identity().slerp(&self.aim_fix, w);
                 rotate_bone(&mut target, &square.upper, turn);
+            }
+        }
+        // At the ready, running, the shoulders twist against the hips with each stride, the right
+        // arm holding the pistol pointed down-range all but a little, and the pistol bobs, the
+        // muzzle dipping as each landing drops the hips. After the barrel is brought round, so
+        // that the stride sways it rather than being taken back out.
+        if let (Some(square), Some((twist, drop))) = (self.square.as_ref(), stride) {
+            if at_ready > 0.0 {
+                let twist = at_ready * READY_TWIST * twist;
+                turn_bone(&mut target, &square.upper, twist);
+                turn_bone(&mut target, &square.shoulders[1], -PISTOL_STEADY * twist);
+                let dip = UnitQuaternion::from_axis_angle(
+                    &Vector3::x_axis(),
+                    -at_ready * PISTOL_BOB * drop,
+                );
+                rotate_bone(&mut target, &self.right_forearm, dip);
             }
         }
         for (bone, pose) in target {
