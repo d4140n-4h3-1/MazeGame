@@ -28,6 +28,20 @@ const CARRIED: &[(&str, &str)] = &[
     ("data/sounds/voice_formants.json", include_str!("../data/sounds/voice_formants.json")),
 ];
 
+/// The setting called `name`, if it is set. On the desktop settings are environment variables; a
+/// page has none, so there they come from the query in its address instead:
+/// `index.html?MAZE_SEED=7&MAZE_SSAO=0`.
+pub fn var(name: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    return std::env::var(name).ok();
+
+    #[cfg(target_arch = "wasm32")]
+    return web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .and_then(|query| web_sys::UrlSearchParams::new_with_str(&query).ok())
+        .and_then(|params| params.get(name));
+}
+
 /// Does `work` on a thread of its own, and hands back where its result will arrive. A web page
 /// has no threads, so there it is done before this returns.
 pub fn in_background<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Receiver<T> {

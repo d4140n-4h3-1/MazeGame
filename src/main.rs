@@ -14,7 +14,8 @@
 //! `MAZE_SIZE=<w>x<d>` sets how many junctions wide and deep the maze is, `MAZE_DEBUG=1` also prints
 //! the walkable map the game made of the level, `MAZE_SEED=<n>` makes every maze identical,
 //! `MAZE_WINDOWED=1` opens a window instead of filling the screen, and `MAZE_MODEL=<path>` plays a
-//! fixed maze model instead, such as `data/maze_full.fbx`.
+//! fixed maze model instead, such as `data/maze_full.fbx`. In a browser these go in the page's
+//! address instead, as `?MAZE_SEED=7` (see [`platform::var`]).
 
 mod culling;
 mod diagnostics;
@@ -52,7 +53,7 @@ fn main() {
         GraphicsContextParams {
             window_attributes: window_attributes(),
             // MAZE_VSYNC=0 uncaps the frame rate, which is how the cost of a frame is measured.
-            vsync: std::env::var("MAZE_VSYNC").as_deref() != Ok("0"),
+            vsync: platform::var("MAZE_VSYNC").as_deref() != Some("0"),
             msaa_sample_count: None,
             // With OpenGL compiled out, the default constructor is the wgpu one.
             graphics_server_constructor: Default::default(),
@@ -72,7 +73,7 @@ fn main() {
 /// the page's own style sees to.
 fn window_attributes() -> WindowAttributes {
     let mut attributes = WindowAttributes::default().with_title("Maze").with_resizable(true);
-    if std::env::var("MAZE_WINDOWED").as_deref() != Ok("1") && cfg!(not(target_arch = "wasm32")) {
+    if platform::var("MAZE_WINDOWED").as_deref() != Some("1") && cfg!(not(target_arch = "wasm32")) {
         attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
     }
     // The renderer is made before the page lays out the canvas, which it cannot draw into while
@@ -94,12 +95,12 @@ fn graphics_effects() -> GraphicsEffects {
     // MAZE_SHADOW_BUDGET=0 lets every lamp in range draw shadow maps, which stops their shadows
     // switching on and off as the nearest four change, at the cost of a shadow map per lamp. It
     // only matters when shadows are not traced.
-    if std::env::var("MAZE_SHADOW_BUDGET").as_deref() == Ok("0") {
+    if platform::var("MAZE_SHADOW_BUDGET").as_deref() == Some("0") {
         effects = effects.without_shadow_budget();
     }
     // MAZE_SSAO=0 turns ambient occlusion off. It is computed from what is on screen, so the
     // darkening it adds in corners changes with where the camera looks.
-    if std::env::var("MAZE_SSAO").as_deref() == Ok("0") {
+    if platform::var("MAZE_SSAO").as_deref() == Some("0") {
         effects = effects.with_ambient_occlusion(fyrox_gfx::AmbientOcclusion::off());
     }
     // Every light's shadows traced against the geometry, in place of shadow maps: every lamp
@@ -107,8 +108,8 @@ fn graphics_effects() -> GraphicsEffects {
     // to shadow maps, as does a graphics card without ray tracing. The edges are soft, from a few
     // rays per pixel spread over each light; MAZE_HARD_SHADOWS=1 traces one ray and keeps them
     // sharp.
-    if std::env::var("MAZE_RT").as_deref() != Ok("0") {
-        let shadows = if std::env::var("MAZE_HARD_SHADOWS").as_deref() == Ok("1") {
+    if platform::var("MAZE_RT").as_deref() != Some("0") {
+        let shadows = if platform::var("MAZE_HARD_SHADOWS").as_deref() == Some("1") {
             fyrox_gfx::RayTracedShadows::hard()
         } else {
             fyrox_gfx::RayTracedShadows::default()
@@ -116,7 +117,7 @@ fn graphics_effects() -> GraphicsEffects {
         effects = effects.with_ray_traced_shadows(shadows);
     }
     // MAZE_REFLECTIONS=0 turns the floor reflections off.
-    if std::env::var("MAZE_REFLECTIONS").as_deref() != Ok("0") {
+    if platform::var("MAZE_REFLECTIONS").as_deref() != Some("0") {
         effects = effects.with_reflections(fyrox_gfx::Reflections {
             // A corridor floor is not a mirror: enough to catch the lamps overhead.
             strength: 0.25,

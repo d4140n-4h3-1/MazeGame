@@ -138,7 +138,7 @@ fn outline(model: &ModelResource, scene: &mut Scene) -> Result<Outline, String> 
             continue;
         };
         let size = bounds.max - bounds.min;
-        if std::env::var_os("MAZE_DEBUG").is_some() {
+        if crate::platform::var("MAZE_DEBUG").is_some() {
             fyrox::core::log::Log::info(format!(
                 "Tile mesh {:?}: {:.2?} to {:.2?}",
                 scene.graph[handle].name(),

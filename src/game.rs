@@ -335,9 +335,9 @@ impl MazeGame {
         self.scene = ctx.scenes.add(scene);
         let resources = &ctx.resource_manager;
         self.droid = Some(resources.request::<Model>(DROID_MODEL));
-        match std::env::var("MAZE_MODEL") {
-            Ok(path) => self.model = Some(resources.request::<Model>(path)),
-            Err(_) => self.prefabs = Some(Prefabs::request(resources)),
+        match platform::var("MAZE_MODEL") {
+            Some(path) => self.model = Some(resources.request::<Model>(path)),
+            None => self.prefabs = Some(Prefabs::request(resources)),
         }
     }
 
@@ -345,7 +345,7 @@ impl MazeGame {
         self.rng.get_or_insert_with(|| {
             // MAZE_SEED makes every maze and round the same, which is what comparing two runs
             // needs.
-            if let Some(seed) = std::env::var("MAZE_SEED").ok().and_then(|s| s.parse().ok()) {
+            if let Some(seed) = platform::var("MAZE_SEED").and_then(|s| s.parse().ok()) {
                 return Rng::new(seed);
             }
             Rng::new(platform::nanos_now())
@@ -356,8 +356,8 @@ impl MazeGame {
     /// random maze.
     fn place_level(&mut self, scene: &mut Scene) -> Result<(), String> {
         if let Some(model) = &self.model {
-            let fbx = std::env::var("MAZE_MODEL")
-                .is_ok_and(|path| path.to_ascii_lowercase().ends_with(".fbx"));
+            let fbx = platform::var("MAZE_MODEL")
+                .is_some_and(|path| path.to_ascii_lowercase().ends_with(".fbx"));
             self.level = Level::from_model(model, fbx, scene, &mut self.doubled);
             return Ok(());
         }
@@ -372,8 +372,7 @@ impl MazeGame {
             ));
             self.measured = Some(measured);
         }
-        let (width, depth) = std::env::var("MAZE_SIZE")
-            .ok()
+        let (width, depth) = platform::var("MAZE_SIZE")
             .and_then(|s| {
                 let (w, d) = s.split_once('x')?;
                 Some((w.trim().parse().ok()?, d.trim().parse().ok()?))
@@ -421,7 +420,7 @@ impl MazeGame {
             self.phase = Phase::Broken;
             return;
         };
-        if std::env::var_os("MAZE_DEBUG").is_some() {
+        if platform::var("MAZE_DEBUG").is_some() {
             Log::info(format!(
                 "Maze grid (x right, z down, origin {origin:?}):\n{}",
                 survey::draw_map(grid, start, exit)
@@ -671,7 +670,7 @@ impl MazeGame {
         let player = self.player.feet(graph);
         // With MAZE_KNOCKDOWN=<seconds>, to try the droids' fall out: that far into the round,
         // the droid nearest the player is shot down, as if by the player where they stand.
-        let knockdown = std::env::var("MAZE_KNOCKDOWN").ok().and_then(|s| s.trim().parse::<f32>().ok());
+        let knockdown = platform::var("MAZE_KNOCKDOWN").and_then(|s| s.trim().parse::<f32>().ok());
         if knockdown.is_some_and(|at| self.round_time >= at) && !self.knocked_down {
             self.knocked_down = true;
             if let Some(n) = self.inhabitants.knock_down(graph, player) {
@@ -1254,7 +1253,7 @@ impl Plugin for MazeGame {
             Phase::Loading => {
                 let models: Vec<(String, ModelResource)> = match (&self.model, &self.prefabs) {
                     (Some(model), _) => vec![(
-                        std::env::var("MAZE_MODEL").unwrap_or_default(),
+                        platform::var("MAZE_MODEL").unwrap_or_default(),
                         model.clone(),
                     )],
                     (None, Some(prefabs)) => prefabs

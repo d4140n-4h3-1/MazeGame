@@ -407,7 +407,7 @@ impl Ragdoll {
             limbs,
             joints,
             frames: 0,
-            report: std::env::var("MAZE_KNOCKDOWN").is_ok(),
+            report: crate::platform::var("MAZE_KNOCKDOWN").is_some(),
             state: State::Joining {
                 frames: BIND_FRAMES,
                 velocity,

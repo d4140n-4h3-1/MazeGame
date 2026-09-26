@@ -48,7 +48,7 @@ pub struct FrameStats {
 impl FrameStats {
     /// Takes in the frame just drawn, and logs the second's statistics when it is up.
     pub fn update(&mut self, ctx: &PluginContext) {
-        if std::env::var_os("MAZE_DEBUG").is_none() {
+        if crate::platform::var("MAZE_DEBUG").is_none() {
             return;
         }
         if let GraphicsContext::Initialized(graphics_context) = &*ctx.graphics_context {

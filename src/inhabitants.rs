@@ -730,8 +730,7 @@ impl Inhabitants {
         self.clear(&mut scene.graph);
         self.populated = true;
         ragdoll::prepare(&mut scene.graph);
-        let count = std::env::var("MAZE_INHABITANTS")
-            .ok()
+        let count = crate::platform::var("MAZE_INHABITANTS")
             .and_then(|n| n.trim().parse().ok())
             .unwrap_or(COUNT);
         let Some(start) = survey::cell_at(grid, origin, player)

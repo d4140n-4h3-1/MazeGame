@@ -378,7 +378,10 @@ window in the middle of a round pauses it too. The menu has:
 
 ## Options
 
-Options are set with environment variables, for example `MAZE_SIZE=10x10 cargo run`.
+Options are set with environment variables, for example `MAZE_SIZE=10x10 cargo run`. In the
+browser, add them to the page's address instead:
+`https://d4140n-4h3-1.github.io/MazeGame-web/?MAZE_SIZE=10x10&MAZE_SEED=7`. What `MAZE_DEBUG`
+logs goes to the browser's console there.
 
 | Variable                 | Effect                                                                  |
 | ------------------------ | ----------------------------------------------------------------------- |

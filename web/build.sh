@@ -6,10 +6,12 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-cargo build --release --target wasm32-unknown-unknown "$@"
+cargo build --profile web --target wasm32-unknown-unknown "$@"
 rm -rf site
-wasm-bindgen --target web --no-typescript --out-dir site/pkg \
-    target/wasm32-unknown-unknown/release/maze.wasm
+# Without the function names: they are a fifth of the file, and only name functions in a panic's
+# stack trace.
+wasm-bindgen --target web --no-typescript --remove-name-section --out-dir site/pkg \
+    target/wasm32-unknown-unknown/web/maze.wasm
 cp web/index.html site/
 # Only what is checked in, so a build here is the build GitHub makes.
 git ls-files data | while read -r file; do
