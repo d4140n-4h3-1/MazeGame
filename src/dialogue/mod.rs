@@ -141,6 +141,9 @@ pub struct Character {
     /// How it takes having the pistol pointed at it; not at all, without.
     #[serde(default)]
     pub threatened: Option<Threatened>,
+    /// The model it is made from; the player's droid's, without.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Everyone's conversations, as the file has them.
@@ -168,16 +171,25 @@ impl Script {
             let name = &character.name;
             let lines = &character.lines;
             if !lines.contains_key(&character.start) {
-                problems.push(format!("{name} starts with {}, which it does not have", character.start));
+                problems.push(format!(
+                    "{name} starts with {}, which it does not have",
+                    character.start
+                ));
             }
             for (key, line) in lines {
                 for reply in &line.replies {
                     let leads = reply.to.iter().chain(&reply.fail);
                     for to in leads.filter(|to| !lines.contains_key(*to)) {
-                        problems.push(format!("{name}'s {key}: \"{}\" leads to {to}, which it does not have", reply.say));
+                        problems.push(format!(
+                            "{name}'s {key}: \"{}\" leads to {to}, which it does not have",
+                            reply.say
+                        ));
                     }
                     if reply.check.is_some() && reply.fail.is_none() {
-                        problems.push(format!("{name}'s {key}: \"{}\" is a check with no fail", reply.say));
+                        problems.push(format!(
+                            "{name}'s {key}: \"{}\" is a check with no fail",
+                            reply.say
+                        ));
                     }
                 }
             }
@@ -192,7 +204,12 @@ impl Script {
 pub struct Facts(Vec<(&'static str, String, String)>);
 
 impl Facts {
-    pub fn with(mut self, key: &'static str, latin: impl Into<String>, english: impl Into<String>) -> Self {
+    pub fn with(
+        mut self,
+        key: &'static str,
+        latin: impl Into<String>,
+        english: impl Into<String>,
+    ) -> Self {
         self.0.push((key, latin.into(), english.into()));
         self
     }
@@ -407,26 +424,40 @@ mod tests {
     }
 
     fn facts() -> Facts {
-        Facts::default()
-            .with("code", "quattuor septem", "47")
-            .with("exit_way", "ad sinistrum", "to your left")
+        Facts::default().with("code", "quattuor septem", "47").with(
+            "exit_way",
+            "ad sinistrum",
+            "to your left",
+        )
     }
 
     #[test]
     fn it_opens_with_the_first_line_and_fills_in_what_is_known() {
         let script = script();
-        let view = Conversation::new(&script, 0).unwrap().view(&script, &facts());
+        let view = Conversation::new(&script, 0)
+            .unwrap()
+            .view(&script, &facts());
         assert_eq!(view.says, "Explorator codex quattuor septem.");
         assert_eq!(view.means, "Scout 47.");
         let labels: Vec<_> = view.choices.iter().map(|c| c.label.as_str()).collect();
-        assert_eq!(labels, ["[Speech 50%] Where is the exit?", "Tell me again.", "Goodbye."]);
+        assert_eq!(
+            labels,
+            [
+                "[Speech 50%] Where is the exit?",
+                "Tell me again.",
+                "Goodbye."
+            ]
+        );
     }
 
     #[test]
     fn a_check_goes_one_way_or_the_other_and_is_tried_only_once() {
         let script = script();
         let mut talk = Conversation::new(&script, 0).unwrap();
-        assert!(talk.choose(&script, 0, 50), "a roll of 50 fails a 50% check");
+        assert!(
+            talk.choose(&script, 0, 50),
+            "a roll of 50 fails a 50% check"
+        );
         let view = talk.view(&script, &facts());
         assert_eq!(view.says, "Negativum.");
         assert_eq!(view.note.as_deref(), Some("[Speech 50%] Failed"));
@@ -448,10 +479,18 @@ mod tests {
         talk.choose(&script, 0, 99);
         assert_eq!(talk.view(&script, &facts()).mood, Mood::Agitated, "failed");
         talk.choose(&script, 0, 0);
-        assert_eq!(talk.view(&script, &facts()).mood, Mood::Normal, "no check this time");
+        assert_eq!(
+            talk.view(&script, &facts()).mood,
+            Mood::Normal,
+            "no check this time"
+        );
         let mut talk = Conversation::new(&script, 0).unwrap();
         talk.choose(&script, 0, 0);
-        assert_eq!(talk.view(&script, &facts()).mood, Mood::Success, "succeeded");
+        assert_eq!(
+            talk.view(&script, &facts()).mood,
+            Mood::Success,
+            "succeeded"
+        );
         talk.line = "cross".into();
         assert_eq!(talk.view(&script, &facts()).mood, Mood::Hostile, "its own");
     }

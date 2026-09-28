@@ -172,6 +172,7 @@ impl Player {
         };
         if let Some(avatar) = &self.avatar {
             avatar.set_visible(graph, shown);
+            avatar.set_casts_shadows(graph, shown);
         }
         self.in_own_eyes = !third_person && close <= 0.0;
 
@@ -281,7 +282,10 @@ mod tests {
         assert!(boom_for(turn, 0.0).dot(&(turn * -Vector3::x())) > 0.5);
         // In to aim: closer, and still over the right shoulder.
         let aimed = boom_for(UnitQuaternion::identity(), 1.0);
-        assert!(aimed.norm() < 0.7 * boom.norm() && aimed.dot(&right) > 0.3, "{aimed:?}");
+        assert!(
+            aimed.norm() < 0.7 * boom.norm() && aimed.dot(&right) > 0.3,
+            "{aimed:?}"
+        );
     }
 
     #[test]

@@ -143,17 +143,31 @@ fn closest(a: Vector3<f32>, b: Vector3<f32>, c: Vector3<f32>, d: Vector3<f32>) -
     let (u, v, w) = (b - a, d - c, a - c);
     let (uu, uv, vv, uw, vw) = (u.dot(&u), u.dot(&v), v.dot(&v), u.dot(&w), v.dot(&w));
     let denominator = uu * vv - uv * uv;
-    let mut s = if denominator > 1.0e-9 { ((uv * vw - vv * uw) / denominator).clamp(0.0, 1.0) } else { 0.0 };
-    let mut t = if vv > 1.0e-9 { ((uv * s + vw) / vv).clamp(0.0, 1.0) } else { 0.0 };
+    let mut s = if denominator > 1.0e-9 {
+        ((uv * vw - vv * uw) / denominator).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let mut t = if vv > 1.0e-9 {
+        ((uv * s + vw) / vv).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     if uu > 1.0e-9 {
         s = ((uv * t - uw) / uu).clamp(0.0, 1.0);
-        t = if vv > 1.0e-9 { ((uv * s + vw) / vv).clamp(0.0, 1.0) } else { 0.0 };
+        t = if vv > 1.0e-9 {
+            ((uv * s + vw) / vv).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
     }
     (s, ((a + u * s) - (c + v * t)).norm())
 }
 
 fn quaternion(q: [f32; 4]) -> UnitQuaternion<f32> {
-    UnitQuaternion::from_quaternion(fyrox::core::algebra::Quaternion::new(q[3], q[0], q[1], q[2]))
+    UnitQuaternion::from_quaternion(fyrox::core::algebra::Quaternion::new(
+        q[3], q[0], q[1], q[2],
+    ))
 }
 
 /// A pose without scale: where, and which way round.
@@ -222,10 +236,15 @@ fn spec() -> Option<&'static Spec> {
     static SPEC: std::sync::OnceLock<Option<Spec>> = std::sync::OnceLock::new();
     SPEC.get_or_init(|| {
         let read = crate::platform::read_to_string(MOTION);
-        match read.and_then(|text| serde_json::from_str::<Motion>(&text).map_err(|e| e.to_string())) {
-            Ok(Motion { ragdoll: Some(spec) }) => Some(spec),
+        match read.and_then(|text| serde_json::from_str::<Motion>(&text).map_err(|e| e.to_string()))
+        {
+            Ok(Motion {
+                ragdoll: Some(spec),
+            }) => Some(spec),
             Ok(_) => {
-                Log::warn(format!("Ragdoll: {MOTION} has none; stopped droids just crouch"));
+                Log::warn(format!(
+                    "Ragdoll: {MOTION} has none; stopped droids just crouch"
+                ));
                 None
             }
             Err(error) => {
@@ -327,7 +346,10 @@ impl Ragdoll {
             };
             poses.push(pose);
 
-            let filter = body.ignores.iter().fold(!CHARACTERS, |filter, other| filter & !bit(other));
+            let filter = body
+                .ignores
+                .iter()
+                .fold(!CHARACTERS, |filter, other| filter & !bit(other));
             let groups = InteractionGroups::new(BitMask(1 << body.collision_bit), BitMask(filter));
             let colliders: Vec<Handle<Collider>> = body
                 .colliders
@@ -335,10 +357,18 @@ impl Ragdoll {
                 .map(|shape| {
                     let (shape, place) = match *shape {
                         Shape::Capsule { begin, end, radius } => (
-                            ColliderShape::capsule(vector(begin) * SCALE, vector(end) * SCALE, radius * SCALE),
+                            ColliderShape::capsule(
+                                vector(begin) * SCALE,
+                                vector(end) * SCALE,
+                                radius * SCALE,
+                            ),
                             TransformBuilder::new().build(),
                         ),
-                        Shape::Cuboid { position, rotation, half_extents } => {
+                        Shape::Cuboid {
+                            position,
+                            rotation,
+                            half_extents,
+                        } => {
                             let h = vector(half_extents) * SCALE;
                             (
                                 ColliderShape::cuboid(h.x, h.y, h.z),
@@ -363,7 +393,9 @@ impl Ragdoll {
             let rigid_body = RigidBodyBuilder::new(
                 colliders
                     .iter()
-                    .fold(BaseBuilder::new(), |base, &collider| base.with_child(collider))
+                    .fold(BaseBuilder::new(), |base, &collider| {
+                        base.with_child(collider)
+                    })
                     .with_name(format!("ragdoll {}", body.name))
                     .with_local_transform(
                         TransformBuilder::new()
@@ -455,12 +487,17 @@ impl Ragdoll {
 
     /// Whether `collider` is one of its bodies'.
     pub fn owns(&self, collider: Handle<Collider>) -> bool {
-        self.limbs.iter().any(|limb| limb.colliders.contains(&collider))
+        self.limbs
+            .iter()
+            .any(|limb| limb.colliders.contains(&collider))
     }
 
     /// The name of the body `collider` belongs to, if one of its bodies'.
     pub fn body_of(&self, collider: Handle<Collider>) -> Option<&'static str> {
-        self.limbs.iter().find(|limb| limb.colliders.contains(&collider)).map(|limb| limb.name)
+        self.limbs
+            .iter()
+            .find(|limb| limb.colliders.contains(&collider))
+            .map(|limb| limb.name)
     }
 
     /// The body a bolt going `way` that struck the droid at `at` went into: the first it goes
@@ -468,7 +505,12 @@ impl Ragdoll {
     /// round the outside of it - or failing that the one it passes nearest, if within
     /// [`NEAR_MISS`]. The bodies are measured where the bones are, whether it has been let go yet
     /// or not.
-    pub fn body_struck(&self, graph: &Graph, at: Vector3<f32>, way: Vector3<f32>) -> Option<&'static str> {
+    pub fn body_struck(
+        &self,
+        graph: &Graph,
+        at: Vector3<f32>,
+        way: Vector3<f32>,
+    ) -> Option<&'static str> {
         let spec = spec()?;
         let (from, to) = (at - way * 0.3, at + way * 1.0);
         let mut through: Option<(f32, &'static str)> = None;
@@ -478,8 +520,14 @@ impl Ragdoll {
             let place = |v: [f32; 3]| pose.position + pose.rotation * (vector(v) * SCALE);
             for shape in &body.colliders {
                 let (begin, end, radius) = match *shape {
-                    Shape::Capsule { begin, end, radius } => (place(begin), place(end), radius * SCALE),
-                    Shape::Cuboid { position, half_extents, .. } => {
+                    Shape::Capsule { begin, end, radius } => {
+                        (place(begin), place(end), radius * SCALE)
+                    }
+                    Shape::Cuboid {
+                        position,
+                        half_extents,
+                        ..
+                    } => {
                         let middle = place(position);
                         let [x, y, z] = half_extents;
                         (middle, middle, (x + y + z) / 3.0 * SCALE)
@@ -503,7 +551,11 @@ impl Ragdoll {
     /// Lets the body called `name` loose of the one it hangs off, to fall on its own. Whether it
     /// was held.
     pub fn let_loose(&mut self, graph: &mut Graph, name: &str) -> bool {
-        let Some(joint) = self.limbs.iter_mut().find(|limb| limb.name == name).and_then(|limb| limb.joint.take())
+        let Some(joint) = self
+            .limbs
+            .iter_mut()
+            .find(|limb| limb.name == name)
+            .and_then(|limb| limb.joint.take())
         else {
             return false;
         };
@@ -514,8 +566,18 @@ impl Ragdoll {
     }
 
     /// Shoves the body that `collider` belongs to with `impulse` at `point`.
-    pub fn shove(&self, graph: &mut Graph, collider: Handle<Collider>, impulse: Vector3<f32>, point: Vector3<f32>) {
-        let Some(limb) = self.limbs.iter().find(|limb| limb.colliders.contains(&collider)) else {
+    pub fn shove(
+        &self,
+        graph: &mut Graph,
+        collider: Handle<Collider>,
+        impulse: Vector3<f32>,
+        point: Vector3<f32>,
+    ) {
+        let Some(limb) = self
+            .limbs
+            .iter()
+            .find(|limb| limb.colliders.contains(&collider))
+        else {
             return;
         };
         if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(limb.body.to_base()) {
@@ -528,7 +590,11 @@ impl Ragdoll {
     /// go; or, gone limp, puts the droid's bones where its bodies are.
     pub fn update(&mut self, graph: &mut Graph) {
         match self.state {
-            State::Joining { frames, velocity, blow } if frames > 0 => {
+            State::Joining {
+                frames,
+                velocity,
+                blow,
+            } if frames > 0 => {
                 self.state = State::Joining {
                     frames: frames - 1,
                     velocity,
@@ -595,7 +661,10 @@ impl Ragdoll {
             let target = Pose::of_transform(&body.global_transform()).transform();
             let parent = graph[limb.bone].parent();
             let parent_transform = self.global(graph, parent, &placed);
-            let local = parent_transform.try_inverse().unwrap_or_else(Matrix4::identity) * target;
+            let local = parent_transform
+                .try_inverse()
+                .unwrap_or_else(Matrix4::identity)
+                * target;
             let local_pose = Pose::of_transform(&local);
             graph[limb.bone]
                 .local_transform_mut()
@@ -621,9 +690,15 @@ impl Ragdoll {
         };
         let mut widest = (0.0f32, "");
         for (i, body) in spec.bodies.iter().enumerate() {
-            let (Some(parent), Some(joint)) = (body.parent.as_deref(), &body.joint) else { continue };
-            let Some(p) = spec.bodies.iter().position(|b| b.name == parent) else { continue };
-            let (Some(a), Some(b)) = (pose(p), pose(i)) else { continue };
+            let (Some(parent), Some(joint)) = (body.parent.as_deref(), &body.joint) else {
+                continue;
+            };
+            let Some(p) = spec.bodies.iter().position(|b| b.name == parent) else {
+                continue;
+            };
+            let (Some(a), Some(b)) = (pose(p), pose(i)) else {
+                continue;
+            };
             let gap = (a.then(Pose::of(&joint.frame_in_parent)).position
                 - b.then(Pose::of(&joint.frame_in_body)).position)
                 .norm();
@@ -643,12 +718,19 @@ impl Ragdoll {
 
     /// Where `node` is across the world, going by the bones `placed` this frame, and otherwise
     /// by each bone's own transform on top of its parent's, up to the model's root.
-    fn global(&self, graph: &Graph, node: Handle<Node>, placed: &[(Handle<Node>, Matrix4<f32>)]) -> Matrix4<f32> {
+    fn global(
+        &self,
+        graph: &Graph,
+        node: Handle<Node>,
+        placed: &[(Handle<Node>, Matrix4<f32>)],
+    ) -> Matrix4<f32> {
         if let Some((_, transform)) = placed.iter().find(|(bone, _)| *bone == node) {
             return *transform;
         }
         if node == self.root || node.is_none() {
-            return graph.try_get(node).map_or_else(|_| Matrix4::identity(), |n| n.global_transform());
+            return graph
+                .try_get(node)
+                .map_or_else(|_| Matrix4::identity(), |n| n.global_transform());
         }
         let parent = graph[node].parent();
         self.global(graph, parent, placed) * graph[node].local_transform().matrix()
@@ -681,7 +763,10 @@ mod tests {
             Vector3::new(0.5, -1.0, 0.2),
             Vector3::new(0.5, 1.0, 0.2),
         );
-        assert!((along - 0.75).abs() < 1.0e-5 && (gap - 0.2).abs() < 1.0e-5, "{along} {gap}");
+        assert!(
+            (along - 0.75).abs() < 1.0e-5 && (gap - 0.2).abs() < 1.0e-5,
+            "{along} {gap}"
+        );
         let (along, gap) = closest(
             Vector3::zeros(),
             Vector3::new(1.0, 0.0, 0.0),
@@ -719,7 +804,11 @@ mod tests {
         assert_eq!(spec.bodies.len(), 18);
         for (i, body) in spec.bodies.iter().enumerate() {
             if let Some(parent) = &body.parent {
-                let p = spec.bodies.iter().position(|b| &b.name == parent).expect("its parent");
+                let p = spec
+                    .bodies
+                    .iter()
+                    .position(|b| &b.name == parent)
+                    .expect("its parent");
                 assert!(p < i, "{} comes before {}", parent, body.name);
                 assert!(body.joint.is_some());
             }

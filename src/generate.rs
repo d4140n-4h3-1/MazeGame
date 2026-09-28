@@ -87,7 +87,9 @@ impl Maze {
                     continue;
                 }
                 let closed: Vec<usize> = (0..4)
-                    .filter(|&d| !maze.links[maze.index(here)][d] && maze.neighbour(here, d).is_some())
+                    .filter(|&d| {
+                        !maze.links[maze.index(here)][d] && maze.neighbour(here, d).is_some()
+                    })
                     .collect();
                 if !closed.is_empty() {
                     let d = closed[rng.below(closed.len())];
@@ -111,7 +113,9 @@ impl Maze {
     }
 
     fn join(&mut self, here: (usize, usize), d: usize) {
-        let there = self.neighbour(here, d).expect("joined to a neighbour off the grid");
+        let there = self
+            .neighbour(here, d)
+            .expect("joined to a neighbour off the grid");
         let (i, j) = (self.index(here), self.index(there));
         self.links[i][d] = true;
         self.links[j][(d + 2) % 4] = true;
@@ -215,7 +219,8 @@ impl TileSet {
             }),
             TileShape::Pipe { axis } => (0..4).find(|&turns| {
                 let along = rotate(*axis, turns);
-                dirs.iter().all(|&d| d == along || d == (-along.0, -along.1))
+                dirs.iter()
+                    .all(|&d| d == along || d == (-along.0, -along.1))
             }),
         }
     }
@@ -290,7 +295,9 @@ pub struct CellMap {
 }
 
 fn dir_index(d: Dir) -> usize {
-    DIRS.iter().position(|&x| x == d).expect("not a grid direction")
+    DIRS.iter()
+        .position(|&x| x == d)
+        .expect("not a grid direction")
 }
 
 impl CellMap {
@@ -325,7 +332,11 @@ impl CellMap {
     /// closed side they meet. The result does not depend on where in the cell the viewer stands,
     /// so it only changes when they step into another cell. `reach` limits how many cells away a
     /// ray goes.
-    pub fn visible_from(&self, from: (i32, i32), reach: f32) -> std::collections::HashSet<(i32, i32)> {
+    pub fn visible_from(
+        &self,
+        from: (i32, i32),
+        reach: f32,
+    ) -> std::collections::HashSet<(i32, i32)> {
         const RAYS: usize = 360;
         const INSET: f32 = 0.45;
         let mut seen = std::collections::HashSet::from([from]);
@@ -367,8 +378,16 @@ impl CellMap {
         };
         let mut t_x = next_side(cell.0, origin.0, dir.0, step.0);
         let mut t_z = next_side(cell.1, origin.1, dir.1, step.1);
-        let dt_x = if step.0 == 0 { f32::INFINITY } else { 1.0 / dir.0.abs() };
-        let dt_z = if step.1 == 0 { f32::INFINITY } else { 1.0 / dir.1.abs() };
+        let dt_x = if step.0 == 0 {
+            f32::INFINITY
+        } else {
+            1.0 / dir.0.abs()
+        };
+        let dt_z = if step.1 == 0 {
+            f32::INFINITY
+        } else {
+            1.0 / dir.1.abs()
+        };
         loop {
             let (t, d) = if t_x < t_z {
                 (t_x, (step.0, 0))
@@ -433,7 +452,6 @@ pub fn piece_cells(tiles: &TileSet, piece: &Piece) -> Vec<((i32, i32), Vec<Dir>)
         Piece::Wall { cell, .. } => vec![(cell, Vec::new())],
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -533,10 +551,13 @@ mod tests {
                     let next = (cell.0 + d.0, cell.1 + d.1);
                     let meets = open.get(&next).is_some_and(|s| s.contains(&(-d.0, -d.1)));
                     // A dead end's open side towards its own wall is closed by that wall.
-                    let walled = pieces.iter().any(|p| {
-                        matches!(p, Piece::Wall { cell: c, dir } if c == cell && dir == d)
-                    });
-                    assert!(meets || walled, "seed {seed}: cell {cell:?} opens {d:?} onto nothing");
+                    let walled = pieces.iter().any(
+                        |p| matches!(p, Piece::Wall { cell: c, dir } if c == cell && dir == d),
+                    );
+                    assert!(
+                        meets || walled,
+                        "seed {seed}: cell {cell:?} opens {d:?} onto nothing"
+                    );
                 }
             }
             let dead_ends = (0..5)
@@ -568,13 +589,35 @@ mod tests {
         // A corridor of three pipes along x, closed at both ends.
         let tiles = tiles();
         let pieces = vec![
-            Piece::Tile { kind: TileKind::Pipe, cell: (0, 0), turns: 0 },
-            Piece::Tile { kind: TileKind::Pipe, cell: (1, 0), turns: 0 },
-            Piece::Tile { kind: TileKind::Pipe, cell: (2, 0), turns: 0 },
-            Piece::Wall { cell: (0, 0), dir: (-1, 0) },
-            Piece::Wall { cell: (2, 0), dir: (1, 0) },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (0, 0),
+                turns: 0,
+            },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (1, 0),
+                turns: 0,
+            },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (2, 0),
+                turns: 0,
+            },
+            Piece::Wall {
+                cell: (0, 0),
+                dir: (-1, 0),
+            },
+            Piece::Wall {
+                cell: (2, 0),
+                dir: (1, 0),
+            },
             // Another corridor alongside, behind the wall.
-            Piece::Tile { kind: TileKind::Pipe, cell: (1, 1), turns: 0 },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (1, 1),
+                turns: 0,
+            },
         ];
         let map = CellMap::new(&tiles, &pieces);
         let seen = map.visible_from((0, 0), 50.0);
@@ -589,7 +632,11 @@ mod tests {
             .find_map(|seed| {
                 let (tiles, pieces) = built(seed);
                 let corner = pieces.iter().find_map(|p| match p {
-                    Piece::Tile { kind: TileKind::Corner, cell, turns } => Some((*cell, *turns)),
+                    Piece::Tile {
+                        kind: TileKind::Corner,
+                        cell,
+                        turns,
+                    } => Some((*cell, *turns)),
                     _ => None,
                 })?;
                 Some((tiles, pieces, corner.0, corner.1))
@@ -615,7 +662,10 @@ mod tests {
         let map = CellMap::new(&tiles, &pieces);
         for (x, z) in [(0, 0), (3, 3), (6, 9)] {
             for cell in map.visible_from((x, z), 50.0) {
-                assert!(map.open.contains_key(&cell), "saw {cell:?}, which has no floor");
+                assert!(
+                    map.open.contains_key(&cell),
+                    "saw {cell:?}, which has no floor"
+                );
             }
         }
     }
@@ -624,10 +674,26 @@ mod tests {
     fn lamps_around_a_corner_still_count() {
         let tiles = tiles();
         let pieces = vec![
-            Piece::Tile { kind: TileKind::Pipe, cell: (0, 0), turns: 0 },
-            Piece::Tile { kind: TileKind::Pipe, cell: (1, 0), turns: 0 },
-            Piece::Tile { kind: TileKind::Pipe, cell: (2, 0), turns: 0 },
-            Piece::Tile { kind: TileKind::Pipe, cell: (3, 0), turns: 0 },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (0, 0),
+                turns: 0,
+            },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (1, 0),
+                turns: 0,
+            },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (2, 0),
+                turns: 0,
+            },
+            Piece::Tile {
+                kind: TileKind::Pipe,
+                cell: (3, 0),
+                turns: 0,
+            },
         ];
         let map = CellMap::new(&tiles, &pieces);
         let seen = std::collections::HashSet::from([(0, 0)]);

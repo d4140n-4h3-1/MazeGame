@@ -312,9 +312,11 @@ pub fn assemble(
                     .clone()
                     .unwrap_or_else(|| MaterialResource::new_embedded(Material::standard()));
                 MeshBuilder::new(
-                    BaseBuilder::new().with_name("DeadEnd").with_local_transform(
-                        TransformBuilder::new().with_local_position(middle).build(),
-                    ),
+                    BaseBuilder::new()
+                        .with_name("DeadEnd")
+                        .with_local_transform(
+                            TransformBuilder::new().with_local_position(middle).build(),
+                        ),
                 )
                 .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
                     SurfaceData::make_cube(Matrix4::new_nonuniform_scaling(&size)),

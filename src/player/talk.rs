@@ -200,7 +200,12 @@ impl Player {
     /// camera is and how it is turned - it looks along its +Z, up its +Y, with the right of the
     /// view along its -X - and how wide its view is, since the camera's own matrices are only
     /// worked out as it is drawn.
-    pub fn on_screen(&self, graph: &Graph, point: Vector3<f32>, size: Vector2<f32>) -> Option<Vector2<f32>> {
+    pub fn on_screen(
+        &self,
+        graph: &Graph,
+        point: Vector3<f32>,
+        size: Vector2<f32>,
+    ) -> Option<Vector2<f32>> {
         let camera = graph
             .try_get_of_type::<Camera>(self.camera.transmute::<Node>())
             .ok()?;
@@ -251,9 +256,15 @@ mod tests {
         let face = Vector3::new(0.0, 1.6, 0.0);
         let from = Vector3::new(0.0, 1.5, 2.0);
         let (at, turn) = close_up(face, from, Framing::default());
-        assert!((at.z - CLOSE_UP).abs() < 1.0e-4, "out towards whoever is talking: {at:?}");
+        assert!(
+            (at.z - CLOSE_UP).abs() < 1.0e-4,
+            "out towards whoever is talking: {at:?}"
+        );
         let looking = turn * Vector3::z();
-        assert!((looking + Vector3::z()).norm() < 1.0e-4, "level and square on: {looking:?}");
+        assert!(
+            (looking + Vector3::z()).norm() < 1.0e-4,
+            "level and square on: {looking:?}"
+        );
         // Where the face is up the view: how far above the camera, over how far half the view
         // reaches up at that distance.
         let up = (face.y - at.y) / (CLOSE_UP * (CLOSE_UP_FOV.to_radians() / 2.0).tan());

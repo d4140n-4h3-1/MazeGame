@@ -127,7 +127,8 @@ impl Bolts {
         material.set_property("diffuseColor", BOLT_COLOR);
         material.set_property(
             "emissionStrength",
-            Vector3::new(BOLT_COLOR.r, BOLT_COLOR.g, BOLT_COLOR.b).cast::<f32>() / 255.0 * BOLT_GLOW,
+            Vector3::new(BOLT_COLOR.r, BOLT_COLOR.g, BOLT_COLOR.b).cast::<f32>() / 255.0
+                * BOLT_GLOW,
         );
         material.bind("emissionTexture", white);
         let material = MaterialResource::new_embedded(material);
@@ -173,11 +174,11 @@ impl Bolts {
                     base = base.with_child(hum);
                 }
                 let mesh = MeshBuilder::new(base)
-                .with_surfaces(vec![SurfaceBuilder::new(shape.clone())
-                    .with_material(material.clone())
-                    .build()])
-                .build(graph)
-                .to_base();
+                    .with_surfaces(vec![SurfaceBuilder::new(shape.clone())
+                        .with_material(material.clone())
+                        .build()])
+                    .build(graph)
+                    .to_base();
                 (mesh, None)
             })
             .collect();
@@ -230,9 +231,11 @@ impl Bolts {
         self.hum(graph, index, true);
         // The shot sounds where it leaves, once, and is gone.
         if let Some((buffer, reach)) = &self.shot {
-            SoundBuilder::new(BaseBuilder::new().with_local_transform(
-                TransformBuilder::new().with_local_position(from).build(),
-            ))
+            SoundBuilder::new(
+                BaseBuilder::new().with_local_transform(
+                    TransformBuilder::new().with_local_position(from).build(),
+                ),
+            )
             .with_buffer(Some(buffer.clone()))
             .with_radius(*reach)
             .with_play_once(true)
@@ -273,10 +276,12 @@ impl Player {
             .map(|(_, bolt)| {
                 let bolt = bolt.filter(|bolt| bolt.landed.is_none())?;
                 let step = (BOLT_SPEED * dt).min(bolt.range);
-                Some(match self.first_hit(graph, bolt.position, bolt.direction, step) {
-                    Some((reach, hit)) => (reach, Some(hit), true),
-                    None => (step, None, step >= bolt.range),
-                })
+                Some(
+                    match self.first_hit(graph, bolt.position, bolt.direction, step) {
+                        Some((reach, hit)) => (reach, Some(hit), true),
+                        None => (step, None, step >= bolt.range),
+                    },
+                )
             })
             .collect();
         for (index, flight) in flights.into_iter().enumerate() {

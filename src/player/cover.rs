@@ -75,7 +75,10 @@ fn read_keys(wish: Vector3<f32>, normal: Vector3<f32>) -> (f32, bool) {
     if length < 1.0e-3 {
         return (0.0, false);
     }
-    (wish.dot(&along(normal)) / length, wish.dot(&normal) > LET_GO * length)
+    (
+        wish.dot(&along(normal)) / length,
+        wish.dot(&normal) > LET_GO * length,
+    )
 }
 
 /// How fast the body closes on the wall, in meters per second, from `gap` off it: out if it is
@@ -97,7 +100,9 @@ impl Player {
             return;
         }
         let middle = graph[self.body].global_position();
-        let forward = flat(forward).try_normalize(1.0e-6).unwrap_or_else(Vector3::z);
+        let forward = flat(forward)
+            .try_normalize(1.0e-6)
+            .unwrap_or_else(Vector3::z);
         let nearest = LOOKING
             .iter()
             .filter_map(|&angle| {
@@ -112,7 +117,11 @@ impl Player {
             .min_by(|a, b| a.0.total_cmp(&b.0));
         if let Some((_, normal)) = nearest {
             // Facing along the wall the way the body was already turned.
-            let facing = if forward.dot(&along(normal)) < 0.0 { -1.0 } else { 1.0 };
+            let facing = if forward.dot(&along(normal)) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
             self.cover = Some(Cover {
                 normal,
                 facing,
@@ -210,7 +219,11 @@ impl Player {
         }
         // Either side of a wall may come back: the one facing `from` is wanted.
         let normal = flat(hit.normal).try_normalize(1.0e-6)?;
-        let normal = if normal.dot(&direction) > 0.0 { -normal } else { normal };
+        let normal = if normal.dot(&direction) > 0.0 {
+            -normal
+        } else {
+            normal
+        };
         Some(((hit.position.coords - from).norm(), normal))
     }
 }
@@ -228,7 +241,11 @@ mod tests {
         assert_eq!(read_keys(sideways, OUT), (1.0, false));
         assert_eq!(read_keys(-sideways, OUT), (-1.0, false));
         assert!(read_keys(OUT, OUT).1, "straight away");
-        assert_eq!(read_keys(-OUT, OUT), (0.0, false), "into the wall goes nowhere");
+        assert_eq!(
+            read_keys(-OUT, OUT),
+            (0.0, false),
+            "into the wall goes nowhere"
+        );
         assert_eq!(read_keys(Vector3::zeros(), OUT), (0.0, false));
         // Mostly along it, a little away: still sliding.
         let (push, letting_go) = read_keys(sideways + OUT * 0.5, OUT);

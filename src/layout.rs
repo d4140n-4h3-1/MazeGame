@@ -135,7 +135,16 @@ impl WalkGrid {
                 break;
             }
             let (x, z) = (at % self.width, at / self.width);
-            for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+            for (dx, dz) in [
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                (-1, -1),
+                (1, -1),
+                (-1, 1),
+                (1, 1),
+            ] {
                 if !self.walkable_at(x, z, dx, dz) {
                     continue;
                 }
@@ -144,7 +153,11 @@ impl WalkGrid {
                     continue;
                 }
                 let (nx, nz) = (x.wrapping_add_signed(dx), z.wrapping_add_signed(dz));
-                let step = if diagonal { std::f32::consts::SQRT_2 } else { 1.0 };
+                let step = if diagonal {
+                    std::f32::consts::SQRT_2
+                } else {
+                    1.0
+                };
                 let weight = if self.is_edge(nx, nz) { EDGE_COST } else { 1.0 };
                 let next = cost + step * weight;
                 let there = nz * self.width + nx;
@@ -329,13 +342,19 @@ mod tests {
             "#####..", //
             ".......", //
         ]);
-        let path = maze.routes_from((0, 1), f32::INFINITY).path_to((0, 4)).unwrap();
+        let path = maze
+            .routes_from((0, 1), f32::INFINITY)
+            .path_to((0, 4))
+            .unwrap();
         assert_eq!(path.first(), Some(&(0, 1)));
         assert_eq!(path.last(), Some(&(0, 4)));
         // Every step goes to a neighbour, and only ever onto floor.
         for pair in path.windows(2) {
             let (a, b) = (pair[0], pair[1]);
-            assert!(a.0.abs_diff(b.0) <= 1 && a.1.abs_diff(b.1) <= 1, "{a:?} to {b:?}");
+            assert!(
+                a.0.abs_diff(b.0) <= 1 && a.1.abs_diff(b.1) <= 1,
+                "{a:?} to {b:?}"
+            );
             assert!(maze.is_walkable(b.0, b.1));
         }
         // Round the end of the wall, and along the middle row rather than hugging the wall.
@@ -349,15 +368,24 @@ mod tests {
             "..", //
             "#.", //
         ]);
-        let path = maze.routes_from((0, 0), f32::INFINITY).path_to((1, 1)).unwrap();
+        let path = maze
+            .routes_from((0, 0), f32::INFINITY)
+            .path_to((1, 1))
+            .unwrap();
         assert_eq!(path, [(0, 0), (1, 0), (1, 1)]);
     }
 
     #[test]
     fn there_is_no_route_to_where_cannot_be_reached() {
         let maze = grid(&[".#."]);
-        assert_eq!(maze.routes_from((0, 0), f32::INFINITY).path_to((2, 0)), None);
-        assert_eq!(maze.routes_from((1, 0), f32::INFINITY).path_to((2, 0)), None);
+        assert_eq!(
+            maze.routes_from((0, 0), f32::INFINITY).path_to((2, 0)),
+            None
+        );
+        assert_eq!(
+            maze.routes_from((1, 0), f32::INFINITY).path_to((2, 0)),
+            None
+        );
     }
 
     #[test]

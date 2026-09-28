@@ -22,10 +22,22 @@ pub fn read_to_string(path: &str) -> Result<String, String> {
 /// The data files the web version carries, by the paths the game reads them from.
 #[cfg(target_arch = "wasm32")]
 const CARRIED: &[(&str, &str)] = &[
-    ("data/dialogue/droids.json", include_str!("../data/dialogue/droids.json")),
-    ("data/droid_motion.json", include_str!("../data/droid_motion.json")),
-    ("data/sounds/pistol_formants.json", include_str!("../data/sounds/pistol_formants.json")),
-    ("data/sounds/voice_formants.json", include_str!("../data/sounds/voice_formants.json")),
+    (
+        "data/dialogue/droids.json",
+        include_str!("../data/dialogue/droids.json"),
+    ),
+    (
+        "data/droid_motion.json",
+        include_str!("../data/droid_motion.json"),
+    ),
+    (
+        "data/sounds/pistol_formants.json",
+        include_str!("../data/sounds/pistol_formants.json"),
+    ),
+    (
+        "data/sounds/voice_formants.json",
+        include_str!("../data/sounds/voice_formants.json"),
+    ),
 ];
 
 /// The setting called `name`, if it is set. On the desktop settings are environment variables; a

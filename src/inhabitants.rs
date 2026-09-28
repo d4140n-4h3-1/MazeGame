@@ -12,13 +12,13 @@
 //! that sees another coming straight at it steps out of its way. Only someone right in front of
 //! it stops it, and kept waiting too long, it goes somewhere else instead.
 //!
-//! Only those the player could see are drawn. Like the player's droid, they cast no shadows.
+//! Only those the player could see are drawn, but all of them cast their shadows, even round a
+//! corner out of sight.
 //!
 //! Each is one of the kinds of droid in the conversations (see [`crate::dialogue`]), with a code
 //! of its own, and can be talked to by a player close by and facing it. While it is, it stands
-//! still and turns to face them, and afterwards stands a moment before going on its way. One of
-//! them does not wander at all: it stands just in front of where the player starts, and stays
-//! there, so that there is always someone near to talk to.
+//! still and turns to face them, and afterwards stands a moment before going on its way. They
+//! all start out of the player's sight, and wander.
 //!
 //! A conversation can turn a droid hostile (see [`Inhabitants::set_hostile`]), and a hostile
 //! droid hunts the player the way Metal Gear's guards do, through its [`Alert`] phases:
@@ -59,6 +59,7 @@
 //! next stage off; with the pistol off it for [`CALM`] seconds, it calms down again.
 
 use crate::{
+    dismember,
     layout::{Rng, WalkGrid},
     level::Level,
     player::{
@@ -66,7 +67,6 @@ use crate::{
         posture::{Gait, Posture},
         Strike,
     },
-    dismember,
     ragdoll::{self, Ragdoll},
     survey,
 };
@@ -78,11 +78,13 @@ use fyrox::{
         pool::Handle,
     },
     graph::SceneGraph,
+    material::MaterialResource,
     resource::model::ModelResource,
     scene::{
         base::BaseBuilder,
         collider::{Collider, ColliderBuilder, ColliderShape},
         graph::{physics::RayCastOptions, Graph},
+        mesh::Mesh,
         node::Node,
         rigidbody::{RigidBody, RigidBodyBuilder, RigidBodyType},
         transform::TransformBuilder,
@@ -90,6 +92,8 @@ use fyrox::{
     },
 };
 
+/// The droid in the colours any kind of droid takes on while it is after the player.
+pub const HOSTILE_MODEL: &str = "data/droid_hostile.glb";
 /// How many droids live in a maze, unless MAZE_INHABITANTS says otherwise.
 const COUNT: usize = 6;
 /// Their bodies: a capsule this far out from its middle line, with its middle this far above the
@@ -137,9 +141,6 @@ const FALLBACK_PACE: f32 = 1.4;
 /// player looks it can be, in radians, for the player to talk to it.
 const TALK_REACH: f32 = 2.5;
 const TALK_CONE: f32 = 40.0 * std::f32::consts::PI / 180.0;
-/// How far ahead of the player, in meters, the droid that stays near them stands: the first of
-/// these that is on the floor.
-const MEET_AT: [f32; 3] = [2.2, 1.8, 1.4];
 /// Where a droid's face is above its feet, in meters, if its model has no head to go by.
 const FACE_HEIGHT: f32 = 1.6;
 /// Its running pace, in meters per second, if the droid has no run to go by.
@@ -263,10 +264,10 @@ struct Inhabitant {
     /// Which kind of droid it is, as an index into the conversations' characters, and its code.
     character: usize,
     code: u32,
+    /// Whether it is in the hostile droid's colours.
+    looks_hostile: bool,
     /// Whether the player is talking to it.
     talking: bool,
-    /// Whether it stays where it was put, near where the player starts, rather than wandering.
-    stays: bool,
     /// How it is going about the player, once it has turned on them.
     alert: Option<Alert>,
     /// Whether, being hostile, it can see the player, as of this frame.
@@ -311,7 +312,8 @@ impl Inhabitant {
     /// a hit there breaks anything off: its head, an arm at the shoulder or the elbow, a leg at
     /// the hip or the knee - a hand at the elbow, a foot at the knee.
     fn break_off(&mut self, graph: &mut Graph, body: &str) {
-        let (Some(ragdoll), Some(part)) = (self.ragdoll.as_mut(), dismember::break_for(body)) else {
+        let (Some(ragdoll), Some(part)) = (self.ragdoll.as_mut(), dismember::break_for(body))
+        else {
             return;
         };
         if self.avatar.break_off(graph, part) {
@@ -337,10 +339,90 @@ impl Inhabitant {
     }
 }
 
+/// What a kind of droid looks like: the model it is made from, and which of that model's
+/// materials the hostile droid's model has others in place of, with those, for while it is after
+/// the player.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Livery {
+    model: ModelResource,
+    hostile: Vec<(MaterialResource, MaterialResource)>,
+}
+
+impl Livery {
+    /// A kind of droid made from `model`, loaded, that looks like the droid made from `hostile`
+    /// while it is after the player - the same droid in other colours - or, without, like itself.
+    pub fn new(model: ModelResource, hostile: Option<&ModelResource>) -> Self {
+        let hostile = hostile.map_or_else(Vec::new, |hostile| changed_materials(&model, hostile));
+        Self { model, hostile }
+    }
+}
+
+/// Each of `from`'s materials that `to` has a different one in place of, mesh by mesh by name and
+/// surface by surface, with the one in its place.
+fn changed_materials(
+    from: &ModelResource,
+    to: &ModelResource,
+) -> Vec<(MaterialResource, MaterialResource)> {
+    let (from, to) = (from.data_ref(), to.data_ref());
+    let (from, to) = (&from.get_scene().graph, &to.get_scene().graph);
+    let mut changed: Vec<(MaterialResource, MaterialResource)> = Vec::new();
+    for node in from.linear_iter() {
+        let Some(mesh) = node.cast::<Mesh>() else {
+            continue;
+        };
+        let Some((_, other)) = to.find_by_name_from_root(node.name()) else {
+            continue;
+        };
+        let Some(other) = other.cast::<Mesh>() else {
+            continue;
+        };
+        for (mine, theirs) in mesh.surfaces().iter().zip(other.surfaces()) {
+            let (mine, theirs) = (mine.material(), theirs.material());
+            if changed.iter().any(|(had, _)| had.key() == mine.key()) {
+                continue;
+            }
+            let (mine_state, theirs_state) = (mine.state(), theirs.state());
+            let differs = match (mine_state.data_ref(), theirs_state.data_ref()) {
+                (Some(a), Some(b)) => a != b,
+                _ => false,
+            };
+            if differs {
+                changed.push((mine.clone(), theirs.clone()));
+            }
+        }
+    }
+    changed
+}
+
+/// Puts the droid whose model is under `root` in `livery`'s hostile colours, or back in its own.
+fn recolour(graph: &mut Graph, root: Handle<Node>, livery: &Livery, hostile: bool) {
+    let nodes: Vec<Handle<Node>> = graph.traverse_handle_iter(root).collect();
+    for node in nodes {
+        let Some(mesh) = graph[node].cast_mut::<Mesh>() else {
+            continue;
+        };
+        for surface in mesh.surfaces_mut() {
+            let key = surface.material().key();
+            let swap = livery
+                .hostile
+                .iter()
+                .find_map(|(own, theirs)| match hostile {
+                    true => (own.key() == key).then_some(theirs),
+                    false => (theirs.key() == key).then_some(own),
+                });
+            if let Some(material) = swap {
+                surface.set_material(material.clone());
+            }
+        }
+    }
+}
+
 /// Everyone who lives in the maze.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Inhabitants {
     droids: Vec<Inhabitant>,
+    /// What each kind of droid looks like, by its index into the conversations' characters.
+    liveries: Vec<Livery>,
     /// The phases changed since the last update, as [`News::alerts`] has them, and those that
     /// heard the player.
     alerts: Vec<(usize, Option<Alert>)>,
@@ -449,7 +531,11 @@ fn could_see(
     in_the_dark: bool,
 ) -> bool {
     let to = player - feet;
-    let sight = if in_the_dark { SIGHT * DARK_SIGHT } else { SIGHT };
+    let sight = if in_the_dark {
+        SIGHT * DARK_SIGHT
+    } else {
+        SIGHT
+    };
     if flat(to).norm() < NOTICE {
         return true;
     }
@@ -650,9 +736,10 @@ fn route_to(
     feet: Vector3<f32>,
     to: Vector3<f32>,
 ) -> Vec<Vector3<f32>> {
-    let (Some(from), Some(goal)) =
-        (walkable_cell(grid, origin, feet), walkable_cell(grid, origin, to))
-    else {
+    let (Some(from), Some(goal)) = (
+        walkable_cell(grid, origin, feet),
+        walkable_cell(grid, origin, to),
+    ) else {
         return Vec::new();
     };
     let Some(path) = grid.routes_from(from, CHASE_REACH).path_to(goal) else {
@@ -676,8 +763,7 @@ fn plan(
     trip: (f32, f32),
     rng: &mut Rng,
 ) -> Vec<Vector3<f32>> {
-    let Some(from) =
-        survey::cell_at(grid, origin, feet).filter(|&(x, z)| grid.is_walkable(x, z))
+    let Some(from) = survey::cell_at(grid, origin, feet).filter(|&(x, z)| grid.is_walkable(x, z))
     else {
         return Vec::new();
     };
@@ -726,24 +812,24 @@ impl Inhabitants {
         self.populated = false;
     }
 
-    /// Puts the maze's inhabitants into `scene`, as droids from `model`, on the floor of `grid`
-    /// whose corner is at `origin`, well away from the `player`'s feet. They take turns being
-    /// each of the `characters` kinds of droid there are to talk to. The first stands just in
-    /// front of the player instead, `ahead` of them, facing them, and stays there, so that there
-    /// is always someone near to talk to.
-    #[allow(clippy::too_many_arguments)]
+    /// Puts the maze's inhabitants into `scene` on the floor of `grid` whose corner is at
+    /// `origin`, well away from the `player`'s feet. They take turns being each of the kinds of
+    /// droid there are to talk to, each looking as its one of `liveries` has it.
     pub fn populate(
         &mut self,
         scene: &mut Scene,
-        model: &ModelResource,
+        liveries: Vec<Livery>,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         player: Vector3<f32>,
-        ahead: Vector3<f32>,
-        characters: usize,
         rng: &mut Rng,
     ) {
         self.clear(&mut scene.graph);
         self.populated = true;
+        self.liveries = liveries;
+        let characters = self.liveries.len();
+        if characters == 0 {
+            return;
+        }
         ragdoll::prepare(&mut scene.graph);
         let count = crate::platform::var("MAZE_INHABITANTS")
             .and_then(|n| n.trim().parse().ok())
@@ -762,67 +848,50 @@ impl Inhabitants {
             .filter(|(_, cost)| cost.is_some_and(|c| c >= AWAY_FROM_PLAYER))
             .map(|(i, _)| (i % grid.width, i / grid.width))
             .collect();
-
-        // Where the one that stays near the player stands: the furthest of a few steps ahead of
-        // them that is on the floor.
-        let waiting = MEET_AT.iter().find_map(|&distance| {
-            survey::cell_at(grid, origin, player + ahead * distance)
-                .filter(|&(x, z)| grid.is_walkable(x, z))
-                .map(|cell| on_floor(grid, origin, cell))
-        });
-        let first = rng.below(characters.max(1));
+        let first = rng.below(characters);
         for n in 0..count {
-            let meeting = n == 0 && waiting.is_some();
-            if places.is_empty() && !meeting {
+            if places.is_empty() {
                 break;
             }
-            let feet = match waiting.filter(|_| meeting) {
-                Some(spot) => spot,
-                None => on_floor(grid, origin, places.swap_remove(rng.below(places.len()))),
-            };
+            let feet = on_floor(grid, origin, places.swap_remove(rng.below(places.len())));
             let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
                 .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
                 .with_collision_groups(ragdoll::character_groups())
                 .build(&mut scene.graph);
             let body = RigidBodyBuilder::new(
-                BaseBuilder::new().with_child(collider).with_local_transform(
-                    TransformBuilder::new()
-                        .with_local_position(feet + Vector3::new(0.0, MIDDLE, 0.0))
-                        .build(),
-                ),
+                BaseBuilder::new()
+                    .with_child(collider)
+                    .with_local_transform(
+                        TransformBuilder::new()
+                            .with_local_position(feet + Vector3::new(0.0, MIDDLE, 0.0))
+                            .build(),
+                    ),
             )
             .with_body_type(RigidBodyType::KinematicPositionBased)
             .build(&mut scene.graph)
             .to_base();
+            let character = (first + n) % characters;
+            let model = &self.liveries[character].model;
             let Some(avatar) = Avatar::spawn(model, scene, body, -MIDDLE, true) else {
                 scene.graph.remove_node(body);
                 break;
             };
-            let to_player = flat(player - feet);
             self.droids.push(Inhabitant {
                 body,
                 collider,
                 avatar,
                 feet,
                 speed: 0.0,
-                heading: if meeting {
-                    to_player.x.atan2(to_player.z)
-                } else {
-                    between(rng, (-std::f32::consts::PI, std::f32::consts::PI))
-                },
+                heading: between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
                 route: Vec::new(),
-                // Not all setting off at once; and the one that stays never.
-                resting: if meeting {
-                    f32::INFINITY
-                } else {
-                    between(rng, REST)
-                },
+                // Not all setting off at once.
+                resting: between(rng, REST),
                 waiting: 0.0,
                 last_seen: None,
-                character: (first + n) % characters.max(1),
+                character,
                 code: 10 + rng.below(90) as u32,
+                looks_hostile: false,
                 talking: false,
-                stays: meeting,
                 alert: None,
                 sees_player: false,
                 lost_at: feet,
@@ -845,13 +914,6 @@ impl Inhabitants {
             });
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
-        match waiting {
-            Some(spot) => Log::info(format!(
-                "Maze: one stays {:.1} m in front of the player",
-                flat(spot - player).norm()
-            )),
-            None => Log::warn("Maze: no floor in front of the player for a droid to stay on"),
-        }
     }
 
     /// Moves everyone along for another `dt`, over `grid` whose corner is at `origin`, making
@@ -887,6 +949,15 @@ impl Inhabitants {
         for (me, droid) in self.droids.iter_mut().enumerate() {
             if droid.gone {
                 continue;
+            }
+            // In the hostile droid's colours while it is after the player; it goes down in
+            // whichever it had on.
+            let hostile = droid.alert.is_some();
+            if !droid.down && hostile != droid.looks_hostile {
+                if let Some(livery) = self.liveries.get(droid.character) {
+                    recolour(graph, droid.avatar.root(), livery, hostile);
+                }
+                droid.looks_hostile = hostile;
             }
             if droid.down {
                 droid.down_for += dt;
@@ -926,10 +997,6 @@ impl Inhabitants {
             droid.resting = (droid.resting - dt).max(0.0);
             droid.windup = (droid.windup - dt).max(0.0);
             droid.deaf = (droid.deaf - dt).max(0.0);
-            // The one that stays may step out of someone's way, but never sets off anywhere.
-            if droid.stays {
-                droid.resting = f32::INFINITY;
-            }
             if droid.sees_player {
                 // Where the player is, and roughly which way they are going, from how they have
                 // moved lately.
@@ -1143,8 +1210,14 @@ impl Inhabitants {
         for droid in &mut self.droids {
             droid.sees_player = match droid.alert {
                 Some(alert) if !droid.down => {
-                    could_see(alert, droid.feet, droid.heading, player, posture, in_the_dark)
-                        && in_sight(droid.feet)
+                    could_see(
+                        alert,
+                        droid.feet,
+                        droid.heading,
+                        player,
+                        posture,
+                        in_the_dark,
+                    ) && in_sight(droid.feet)
                 }
                 _ => false,
             };
@@ -1184,7 +1257,6 @@ impl Inhabitants {
             let droid = &mut self.droids[m];
             if droid.alert.is_none() {
                 droid.windup = WINDUP;
-                droid.stays = false;
                 droid.threat = 0.0;
                 droid.warned = 0;
             }
@@ -1279,7 +1351,6 @@ impl Inhabitants {
             if !answering {
                 continue;
             }
-            droid.stays = false;
             droid.talking = false;
             droid.warned = 0;
             droid.threat = 0.0;
@@ -1293,7 +1364,9 @@ impl Inhabitants {
 
     /// The droid whose body `collider` is, if it is one.
     pub fn hit(&self, collider: Handle<Collider>) -> Option<usize> {
-        self.droids.iter().position(|droid| droid.collider == collider)
+        self.droids
+            .iter()
+            .position(|droid| droid.collider == collider)
     }
 
     /// A noise at `at`, that carries `loudness` meters along the corridors of `grid`, whose
@@ -1353,11 +1426,10 @@ impl Inhabitants {
     }
 
     /// Turns the `n`th droid on the player: after a moment it hunts them, and it cannot be
-    /// talked to any more. The one that stays near where the player starts leaves its place to.
+    /// talked to any more.
     pub fn set_hostile(&mut self, n: usize) {
         if let Some(droid) = self.droids.get_mut(n).filter(|droid| !droid.down) {
             droid.alert = Some(Alert::Alert);
-            droid.stays = false;
             droid.windup = WINDUP;
             droid.replan = 0.0;
         }
@@ -1385,7 +1457,11 @@ impl Inhabitants {
         };
         let n = (0..HITS).find_map(|_| self.shot(graph, strike, player))?;
         if let Some(bodies) = crate::platform::var("MAZE_DISMEMBER") {
-            for body in bodies.split(',').map(str::trim).filter(|body| !body.is_empty()) {
+            for body in bodies
+                .split(',')
+                .map(str::trim)
+                .filter(|body| !body.is_empty())
+            {
                 self.droids[n].break_off(graph, body);
                 Log::info(format!("MAZE_DISMEMBER: {body} broken off droid {n}"));
             }
@@ -1399,13 +1475,19 @@ impl Inhabitants {
     /// crouched. Short of that, if it has not seen who fired, it searches for them where they
     /// fired from. A droid already lying there is just shoved. The droid that went down, if one
     /// did.
-    pub fn shot(&mut self, graph: &mut Graph, strike: Strike, player: Vector3<f32>) -> Option<usize> {
+    pub fn shot(
+        &mut self,
+        graph: &mut Graph,
+        strike: Strike,
+        player: Vector3<f32>,
+    ) -> Option<usize> {
         let collider = strike.collider;
-        if let Some(droid) = self
-            .droids
-            .iter_mut()
-            .find(|droid| droid.ragdoll.as_ref().is_some_and(|ragdoll| ragdoll.owns(collider)))
-        {
+        if let Some(droid) = self.droids.iter_mut().find(|droid| {
+            droid
+                .ragdoll
+                .as_ref()
+                .is_some_and(|ragdoll| ragdoll.owns(collider))
+        }) {
             let ragdoll = droid.ragdoll.as_ref()?;
             ragdoll.shove(graph, collider, strike.way * ragdoll::SHOVE, strike.at);
             if let Some(body) = ragdoll.body_of(collider) {
@@ -1451,9 +1533,11 @@ impl Inhabitants {
         }
         if let Ok(shape) = graph.try_get_mut(droid.collider) {
             shape.set_shape(ColliderShape::capsule_y(0.5 * DOWN_HEIGHT - RADIUS, RADIUS));
-            shape
-                .local_transform_mut()
-                .set_position(Vector3::new(0.0, 0.5 * DOWN_HEIGHT - MIDDLE, 0.0));
+            shape.local_transform_mut().set_position(Vector3::new(
+                0.0,
+                0.5 * DOWN_HEIGHT - MIDDLE,
+                0.0,
+            ));
         }
         Some(n)
     }
@@ -1476,7 +1560,9 @@ impl Inhabitants {
     /// Which kind of droid the `n`th is, as an index into the conversations' characters, and its
     /// code.
     pub fn who(&self, n: usize) -> Option<(usize, u32)> {
-        self.droids.get(n).map(|droid| (droid.character, droid.code))
+        self.droids
+            .get(n)
+            .map(|droid| (droid.character, droid.code))
     }
 
     /// Where the `n`th droid's feet are.
@@ -1496,11 +1582,11 @@ impl Inhabitants {
     }
 
     /// Has the player talking to the `n`th droid, or done talking to it; done, it stands a
-    /// moment before going on its way, unless it is the one that stays.
+    /// moment before going on its way.
     pub fn set_talking(&mut self, n: usize, talking: bool) {
         if let Some(droid) = self.droids.get_mut(n) {
             droid.talking = talking;
-            if !talking && !droid.stays {
+            if !talking {
                 droid.resting = REST.0;
             }
         }
@@ -1516,7 +1602,9 @@ impl Inhabitants {
     /// Draws only those the player could see from where they are in `level`.
     pub fn show(&self, graph: &mut Graph, level: &Level) {
         for droid in &self.droids {
-            droid.avatar.set_visible(graph, !droid.gone && level.can_see(droid.feet));
+            droid
+                .avatar
+                .set_visible(graph, !droid.gone && level.can_see(droid.feet));
         }
     }
 
@@ -1582,7 +1670,10 @@ mod tests {
             Vector3::new(2.0, 0.0, 0.5),  // well off to the side
             Vector3::new(0.0, 0.0, 4.0),  // too far
         ];
-        assert_eq!(within_talking(droids.into_iter(), Vector3::zeros(), AHEAD), [1, 0]);
+        assert_eq!(
+            within_talking(droids.into_iter(), Vector3::zeros(), AHEAD),
+            [1, 0]
+        );
     }
 
     #[test]
@@ -1598,9 +1689,18 @@ mod tests {
     #[test]
     fn it_veers_right_round_someone_ahead_and_harder_the_nearer() {
         let right = right_of(AHEAD);
-        let (far, _) = make_way(Vector3::zeros(), AHEAD, [standing(0.0, 2.0)].into_iter(), EVERYWHERE);
-        let (near, blocked) =
-            make_way(Vector3::zeros(), AHEAD, [standing(0.0, 1.0)].into_iter(), EVERYWHERE);
+        let (far, _) = make_way(
+            Vector3::zeros(),
+            AHEAD,
+            [standing(0.0, 2.0)].into_iter(),
+            EVERYWHERE,
+        );
+        let (near, blocked) = make_way(
+            Vector3::zeros(),
+            AHEAD,
+            [standing(0.0, 1.0)].into_iter(),
+            EVERYWHERE,
+        );
         assert!(far.dot(&right) > 0.0 && near.dot(&right) > far.dot(&right));
         assert!(!blocked);
     }
@@ -1609,14 +1709,24 @@ mod tests {
     fn with_a_wall_on_the_right_it_veers_left() {
         let right = right_of(AHEAD);
         let floor = |spot: Vector3<f32>| spot.dot(&right_of(AHEAD)) < 0.1;
-        let (way, _) = make_way(Vector3::zeros(), AHEAD, [standing(0.0, 1.0)].into_iter(), floor);
+        let (way, _) = make_way(
+            Vector3::zeros(),
+            AHEAD,
+            [standing(0.0, 1.0)].into_iter(),
+            floor,
+        );
         assert!(way.dot(&right) < 0.0);
     }
 
     #[test]
     fn hemmed_in_with_someone_right_in_front_it_stops() {
         let floor = |spot: Vector3<f32>| spot.x.abs() < 0.05;
-        let (_, blocked) = make_way(Vector3::zeros(), AHEAD, [standing(0.0, 0.5)].into_iter(), floor);
+        let (_, blocked) = make_way(
+            Vector3::zeros(),
+            AHEAD,
+            [standing(0.0, 0.5)].into_iter(),
+            floor,
+        );
         assert!(blocked);
     }
 
@@ -1624,16 +1734,38 @@ mod tests {
     fn out_of_alert_it_sees_only_ahead_and_less_far_the_lower_the_player() {
         // Facing +z.
         let sees = |alert, x: f32, z: f32, posture| {
-            could_see(alert, Vector3::zeros(), 0.0, Vector3::new(x, 0.0, z), posture, false)
+            could_see(
+                alert,
+                Vector3::zeros(),
+                0.0,
+                Vector3::new(x, 0.0, z),
+                posture,
+                false,
+            )
         };
         let standing = Posture::Standing;
         assert!(sees(Alert::Caution, 0.0, 20.0, standing), "ahead");
         assert!(!sees(Alert::Caution, 0.0, -10.0, standing), "behind");
-        assert!(!sees(Alert::Caution, 10.0, 1.0, standing), "off to the side");
-        assert!(sees(Alert::Caution, 0.0, -1.0, standing), "right behind it, it notices");
-        assert!(!sees(Alert::Caution, 0.0, 20.0, Posture::Crouching), "crouched, far off");
-        assert!(sees(Alert::Caution, 0.0, 12.0, Posture::Crouching), "crouched, nearer");
-        assert!(!sees(Alert::Evasion, 0.0, 12.0, Posture::Crawling), "crawling");
+        assert!(
+            !sees(Alert::Caution, 10.0, 1.0, standing),
+            "off to the side"
+        );
+        assert!(
+            sees(Alert::Caution, 0.0, -1.0, standing),
+            "right behind it, it notices"
+        );
+        assert!(
+            !sees(Alert::Caution, 0.0, 20.0, Posture::Crouching),
+            "crouched, far off"
+        );
+        assert!(
+            sees(Alert::Caution, 0.0, 12.0, Posture::Crouching),
+            "crouched, nearer"
+        );
+        assert!(
+            !sees(Alert::Evasion, 0.0, 12.0, Posture::Crawling),
+            "crawling"
+        );
         // On Alert it keeps track of them wherever they go, as long as they are not too far off.
         assert!(sees(Alert::Alert, 0.0, -20.0, Posture::Crawling));
         assert!(!sees(Alert::Alert, 0.0, SIGHT + 1.0, standing));
@@ -1677,13 +1809,21 @@ mod tests {
         assert!(joiners(&[chaser(), droid(false, None, false, 0.0)], false, open).is_empty());
         let facing_away = droid(true, None, false, 20.0);
         assert!(joiners(&[chaser(), facing_away], false, open).is_empty());
-        let walled_off = joiners(&[chaser(), droid(true, None, false, 0.0)], false, |_, _| false);
+        let walled_off = joiners(&[chaser(), droid(true, None, false, 0.0)], false, |_, _| {
+            false
+        });
         assert!(walled_off.is_empty());
-        let talking = Watch { busy: true, ..droid(true, None, false, 0.0) };
+        let talking = Watch {
+            busy: true,
+            ..droid(true, None, false, 0.0)
+        };
         assert!(joiners(&[chaser(), talking], false, open).is_empty());
         // One still standing, having just turned hostile, is not yet after them; nor is one on
         // Alert that has lost sight of them.
-        let winding_up = Watch { windup: 0.5, ..chaser() };
+        let winding_up = Watch {
+            windup: 0.5,
+            ..chaser()
+        };
         assert!(joiners(&[winding_up, droid(true, None, false, 0.0)], false, open).is_empty());
         let lost = droid(true, Some(Alert::Alert), false, 10.0);
         assert!(joiners(&[lost, droid(true, None, false, 0.0)], false, open).is_empty());
@@ -1693,7 +1833,14 @@ mod tests {
     fn in_the_dark_it_sees_less_far() {
         let sees = |alert, z: f32, dark| {
             let player = Vector3::new(0.0, 0.0, z);
-            could_see(alert, Vector3::zeros(), 0.0, player, Posture::Standing, dark)
+            could_see(
+                alert,
+                Vector3::zeros(),
+                0.0,
+                player,
+                Posture::Standing,
+                dark,
+            )
         };
         assert!(sees(Alert::Caution, 20.0, false));
         assert!(!sees(Alert::Caution, 20.0, true));
@@ -1707,17 +1854,33 @@ mod tests {
         let eye = Vector3::zeros();
         let ahead = Vector3::z();
         assert!(pointed_at(eye, ahead, Vector3::new(0.3, 0.0, 10.0)));
-        assert!(!pointed_at(eye, ahead, Vector3::new(1.0, 0.0, 10.0)), "off to the side");
-        assert!(!pointed_at(eye, ahead, Vector3::new(0.0, 0.0, -5.0)), "behind");
-        assert!(!pointed_at(eye, ahead, Vector3::new(0.0, 0.0, AIM_RANGE + 1.0)), "too far");
+        assert!(
+            !pointed_at(eye, ahead, Vector3::new(1.0, 0.0, 10.0)),
+            "off to the side"
+        );
+        assert!(
+            !pointed_at(eye, ahead, Vector3::new(0.0, 0.0, -5.0)),
+            "behind"
+        );
+        assert!(
+            !pointed_at(eye, ahead, Vector3::new(0.0, 0.0, AIM_RANGE + 1.0)),
+            "too far"
+        );
     }
 
     #[test]
     fn each_warning_holds_long_enough_to_be_said() {
-        assert_eq!(stage_after(0, 1.0), 1.0, "its patience, before it first warns");
+        assert_eq!(
+            stage_after(0, 1.0),
+            1.0,
+            "its patience, before it first warns"
+        );
         assert!(stage_after(1, 1.0) >= WARNING, "then time to say it");
         assert_eq!(stage_after(1, 1.0), stage_after(2, 1.0));
-        assert!(stage_after(0, 1.0) < stage_after(0, 2.0), "a less patient droid is sooner");
+        assert!(
+            stage_after(0, 1.0) < stage_after(0, 2.0),
+            "a less patient droid is sooner"
+        );
     }
 
     #[test]
@@ -1740,8 +1903,14 @@ mod tests {
         assert!(spot.dot(&right_of(AHEAD)) < -0.5);
         // Nobody walking at it, or someone walking away, leaves it be.
         let going_away = (Vector3::new(0.0, 0.0, -1.5), Some(-AHEAD));
-        assert_eq!(step_aside(Vector3::zeros(), [going_away].into_iter(), EVERYWHERE), None);
+        assert_eq!(
+            step_aside(Vector3::zeros(), [going_away].into_iter(), EVERYWHERE),
+            None
+        );
         let waiting = standing(0.0, -1.5);
-        assert_eq!(step_aside(Vector3::zeros(), [waiting].into_iter(), EVERYWHERE), None);
+        assert_eq!(
+            step_aside(Vector3::zeros(), [waiting].into_iter(), EVERYWHERE),
+            None
+        );
     }
 }

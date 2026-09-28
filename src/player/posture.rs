@@ -113,7 +113,11 @@ impl Player {
     /// walking and running Caps Lock last left them in. Strafing, or with the pistol out, Shift
     /// only runs. Out of breath, or edging along a wall in cover, they only walk.
     pub(super) fn gait(&self) -> Gait {
-        match (self.winded || self.in_cover(), self.keys.sprint, self.running) {
+        match (
+            self.winded || self.in_cover(),
+            self.keys.sprint,
+            self.running,
+        ) {
             (true, _, _) => Gait::Walking,
             (false, true, _) if self.strafing() => Gait::Running,
             (false, true, _) => Gait::Sprinting,
@@ -192,7 +196,10 @@ mod tests {
                 _ => unreachable!(),
             };
             assert!((middle - half_height).abs() < 1e-5, "{posture:?}");
-            assert!(posture.eyes() < 2.0 * half_height, "{posture:?}: eyes above the head");
+            assert!(
+                posture.eyes() < 2.0 * half_height,
+                "{posture:?}: eyes above the head"
+            );
         }
     }
 }

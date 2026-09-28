@@ -155,7 +155,11 @@ mod tests {
             buzz: flat(0.0),
             noise: flat(1.0),
             loudness: flat(1.0),
-            formants: vec![Formant { frequency: flat(frequency), width: 80.0, gain: 1.0 }],
+            formants: vec![Formant {
+                frequency: flat(frequency),
+                width: 80.0,
+                gain: 1.0,
+            }],
             volume: 1.0,
             reach: 1.0,
         }
@@ -164,8 +168,14 @@ mod tests {
     #[test]
     fn a_formant_lets_its_own_frequency_through_and_not_others() {
         let samples = make(&noise_through(1000.0), 44100);
-        let (at, off) = (strength(&samples, 1000.0, 44100.0), strength(&samples, 3000.0, 44100.0));
-        assert!(at > 5.0 * off, "{at} at the formant, {off} well away from it");
+        let (at, off) = (
+            strength(&samples, 1000.0, 44100.0),
+            strength(&samples, 3000.0, 44100.0),
+        );
+        assert!(
+            at > 5.0 * off,
+            "{at} at the formant, {off} well away from it"
+        );
     }
 
     #[test]
@@ -185,12 +195,22 @@ mod tests {
             buzz: flat(1.0),
             noise: flat(0.0),
             pitch: flat(200.0),
-            formants: vec![Formant { frequency: flat(400.0), width: 600.0, gain: 1.0 }],
+            formants: vec![Formant {
+                frequency: flat(400.0),
+                width: 600.0,
+                gain: 1.0,
+            }],
             ..noise_through(0.0)
         };
         let samples = make(&sound, 44100);
-        let (on, between) = (strength(&samples, 400.0, 44100.0), strength(&samples, 500.0, 44100.0));
-        assert!(on > 5.0 * between, "{on} on a harmonic, {between} between two");
+        let (on, between) = (
+            strength(&samples, 400.0, 44100.0),
+            strength(&samples, 500.0, 44100.0),
+        );
+        assert!(
+            on > 5.0 * between,
+            "{on} on a harmonic, {between} between two"
+        );
     }
 
     #[test]
@@ -204,7 +224,14 @@ mod tests {
         }
         let hum = make(&sounds.sounds["hum"], sounds.sample_rate);
         let (last, first) = (hum[hum.len() - 1], hum[0]);
-        let typical = hum.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
-        assert!((first - last).abs() <= typical, "the seam jumps {} ", (first - last).abs());
+        let typical = hum
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            (first - last).abs() <= typical,
+            "the seam jumps {} ",
+            (first - last).abs()
+        );
     }
 }

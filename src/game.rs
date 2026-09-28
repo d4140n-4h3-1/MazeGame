@@ -1,7 +1,9 @@
 //! The game itself: loading a level, playing rounds in it, and the player's input.
 
 use crate::{
-    computer::{Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
+    computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
+    drone::{Drone, DRONE_MODEL},
+    notes::{self, Notes, NOTES},
     diagnostics::{self, FrameStats},
     dialogue::{
         screen::{self, DialogueScreen, Pointer, Subtitles},
@@ -14,7 +16,7 @@ use crate::{
     },
     generate::Maze,
     hud::{self, Hud, Status},
-    inhabitants::{Alert, Inhabitants, News, Threat},
+    inhabitants::{Alert, Inhabitants, Livery, News, Threat, HOSTILE_MODEL},
     layout::Rng,
     level::Level,
     menu::{Choice, PauseMenu},
@@ -60,6 +62,8 @@ use fyrox::{
 
 /// How many junctions wide and deep a maze is, unless MAZE_SIZE says otherwise.
 const MAZE_SIZE: (usize, usize) = (20, 20);
+/// How many computers there are in a maze, to hack and read the notes on.
+const COMPUTERS: usize = 6;
 /// The chance of a dead end being opened into a neighbouring corridor, which makes loops.
 const LOOP_CHANCE: f32 = 0.15;
 /// How close to the exit counts as reaching it.
@@ -182,10 +186,18 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     droid: Option<ModelResource>,
-    /// The same droid, loaded, for the maze's inhabitants.
+    /// The same droid, loaded, for the maze's inhabitants of any kind whose own model is not.
     #[visit(skip)]
     #[reflect(hidden)]
     droid_model: Option<ModelResource>,
+    /// Each kind of droid's own model, by its index into the conversations' characters, and the
+    /// droid in the colours of one after the player.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    kind_models: Vec<Option<ModelResource>>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    hostile_model: Option<ModelResource>,
     /// Droids going about the maze by themselves.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -245,15 +257,35 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     dialogue: DialogueScreen,
-    /// The computer to hack, as its model loads and once it is in the scene; whether it has been
-    /// put down in this round, near the cell the player started from; whether the player is
-    /// using it; and whether they are close enough to, as the hint on screen says.
+    /// The computers to hack, as their model loads and once they are in the scene - the first
+    /// near the cell the player started from, the rest about the maze; whether they have been put
+    /// down in this round; whether the player is using one; and which they are close enough to
+    /// use, if any, and whether it is cleared, as the hint on screen says.
     #[visit(skip)]
     #[reflect(hidden)]
     computer_model: Option<ModelResource>,
     #[visit(skip)]
     #[reflect(hidden)]
-    computer: Option<Computer>,
+    computers: Vec<Computer>,
+    /// The drone, as its model loads and once it is in the scene, and whether it has been put in
+    /// front of the player this round.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_model: Option<ModelResource>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone: Option<Drone>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_placed: bool,
+    /// Which the player is using, or last used, whose terminal shows.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    using: Option<usize>,
+    /// The notes and diary entries shared out among them each round.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    notes: Option<Notes>,
     /// Its terminal, on its screen while the player uses it - or, with MAZE_TERMINAL_OVERLAY=1,
     /// over it.
     #[visit(skip)]
@@ -277,7 +309,12 @@ pub struct MazeGame {
     hacking: bool,
     #[visit(skip)]
     #[reflect(hidden)]
-    at_computer: Option<bool>,
+    at_computer: Option<(usize, bool)>,
+    /// Whether Shift is held, for telling what the player meant to type from what Caps Lock made
+    /// of it.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    shift: bool,
     /// The sounds that were playing as the game was paused, to carry on with once it resumes.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -370,6 +407,7 @@ impl MazeGame {
         let resources = &ctx.resource_manager;
         self.droid = Some(resources.request::<Model>(DROID_MODEL));
         self.computer_model = Some(resources.request::<Model>(COMPUTER_MODEL));
+        self.drone_model = Some(resources.request::<Model>(DRONE_MODEL));
         match platform::var("MAZE_MODEL") {
             Some(path) => self.model = Some(resources.request::<Model>(path)),
             None => self.prefabs = Some(Prefabs::request(resources)),
@@ -464,6 +502,7 @@ impl MazeGame {
         }
         self.start_cell = Some(start);
         self.computer_placed = false;
+        self.drone_placed = false;
         let start_position = survey::cell_center(*origin, start.0, start.1);
         let exit_position = survey::cell_center(*origin, exit.0, exit.1);
 
@@ -639,8 +678,7 @@ impl MazeGame {
         self.barks.clear();
         if self.prefabs.is_some() {
             // Out of the way first: the new maze's survey would take them for walls.
-            self.inhabitants
-                .clear(&mut ctx.scenes[self.scene].graph);
+            self.inhabitants.clear(&mut ctx.scenes[self.scene].graph);
             self.level.clear(&mut ctx.scenes[self.scene]);
             self.set_banner(ctx, "");
             self.phase = Phase::Loading;
@@ -668,28 +706,61 @@ impl MazeGame {
         self.dialogue.set_subtitles(ui, self.subtitles);
     }
 
-    /// Puts the maze's inhabitants into it once there is a droid to make them from, and moves
+    /// What each kind of droid looks like, once every model there is to make them from has
+    /// loaded, or failed to: in its own model, or the player's droid's if that failed.
+    fn liveries(&self) -> Option<Vec<Livery>> {
+        let droid = self.droid_model.as_ref()?;
+        let settled = |model: &ModelResource| model.is_ok() || model.is_failed_to_load();
+        if !self
+            .kind_models
+            .iter()
+            .flatten()
+            .chain(&self.hostile_model)
+            .all(settled)
+        {
+            return None;
+        }
+        let hostile = self.hostile_model.as_ref().filter(|model| model.is_ok());
+        let characters = self
+            .script
+            .as_ref()
+            .map_or(0, |s| s.characters.len())
+            .max(1);
+        Some(
+            (0..characters)
+                .map(|n| {
+                    let own = self.kind_models.get(n).and_then(Option::as_ref);
+                    if let Some(own) = own.filter(|model| model.is_failed_to_load()) {
+                        Log::err(format!(
+                            "Could not load {}; using {DROID_MODEL}",
+                            own.kind()
+                        ));
+                    }
+                    let model = own.filter(|model| model.is_ok()).unwrap_or(droid);
+                    Livery::new(model.clone(), hostile)
+                })
+                .collect(),
+        )
+    }
+
+    /// Puts the maze's inhabitants into it once there are droids to make them from, and moves
     /// them along. Whether any caught the player, and whose phase changed.
     fn update_inhabitants(&mut self, ctx: &mut PluginContext) -> News {
-        let (Some(model), Some((grid, origin)), Some(rng)) =
-            (&self.droid_model, &self.level.grid, self.rng.as_mut())
-        else {
+        let liveries = match self.inhabitants.is_populated() {
+            true => None,
+            false => match self.liveries() {
+                Some(liveries) => Some(liveries),
+                None => return News::default(),
+            },
+        };
+        let (Some((grid, origin)), Some(rng)) = (&self.level.grid, self.rng.as_mut()) else {
             return News::default();
         };
         let scene = &mut ctx.scenes[self.scene];
         let player = self.player.feet(&scene.graph);
-        if !self.inhabitants.is_populated() {
-            let characters = self.script.as_ref().map_or(0, |s| s.characters.len());
-            let ahead = self.player.ahead();
-            self.inhabitants.populate(
-                scene,
-                model,
-                (grid, *origin),
-                player,
-                ahead,
-                characters,
-                rng,
-            );
+        if let Some(liveries) = liveries {
+            self.inhabitants
+                .populate(scene, liveries, (grid, *origin), player, rng);
         }
         let graph = &scene.graph;
         // With the lights off, the player is hard to see, unless their flashlight gives them
@@ -702,9 +773,10 @@ impl MazeGame {
             });
         // A sentry's eyes are no flashlight: with the lights off, the others see it only near.
         let script = self.script.as_ref();
-        self.inhabitants.join_chases(graph, self.lights_off, |character| {
-            script.is_some_and(|script| is_sentry(script, character))
-        });
+        self.inhabitants
+            .join_chases(graph, self.lights_off, |character| {
+                script.is_some_and(|script| is_sentry(script, character))
+            });
         self.inhabitants
             .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt)
     }
@@ -895,27 +967,32 @@ impl MazeGame {
         };
         let graph = &mut ctx.scenes[self.scene].graph;
         let inhabitants = &self.inhabitants;
-        self.barks.retain(|Barking { droid, making: Making(receiver, reach) }| {
-            let samples = match receiver.try_recv() {
-                Ok(samples) => samples,
-                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => return false,
-            };
-            if let (Some(face), Some(buffer)) = (
-                inhabitants.face(graph, *droid),
-                formants::playable(samples, voices.sample_rate),
-            ) {
-                SoundBuilder::new(BaseBuilder::new().with_local_transform(
-                    TransformBuilder::new().with_local_position(face).build(),
-                ))
-                .with_buffer(Some(buffer))
-                .with_radius(*reach)
-                .with_play_once(true)
-                .with_status(SoundStatus::Playing)
-                .build(graph);
-            }
-            false
-        });
+        self.barks.retain(
+            |Barking {
+                 droid,
+                 making: Making(receiver, reach),
+             }| {
+                let samples = match receiver.try_recv() {
+                    Ok(samples) => samples,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return false,
+                };
+                if let (Some(face), Some(buffer)) = (
+                    inhabitants.face(graph, *droid),
+                    formants::playable(samples, voices.sample_rate),
+                ) {
+                    SoundBuilder::new(BaseBuilder::new().with_local_transform(
+                        TransformBuilder::new().with_local_position(face).build(),
+                    ))
+                    .with_buffer(Some(buffer))
+                    .with_radius(*reach)
+                    .with_play_once(true)
+                    .with_status(SoundStatus::Playing)
+                    .build(graph);
+                }
+                false
+            },
+        );
     }
 
     /// The player has been caught by the `n`th droid: they stop where they are, and are told so
@@ -987,7 +1064,8 @@ impl MazeGame {
         let can_talk = can_use_computer && self.script.is_some();
         let found = if can_talk {
             let graph = &ctx.scenes[self.scene].graph;
-            let (player, feet, ahead) = (&self.player, self.player.feet(graph), self.player.ahead());
+            let (player, feet, ahead) =
+                (&self.player, self.player.feet(graph), self.player.ahead());
             self.inhabitants
                 .to_talk_to(feet, ahead, |there| player.can_see(graph, there))
         } else {
@@ -995,20 +1073,22 @@ impl MazeGame {
         };
         let talkable = found.and_then(|n| Some((n, self.name_of(n)?)));
         // With nobody to talk to, the computer, if the player is at it.
-        let at_computer = match (&self.computer, talkable.is_none() && can_use_computer) {
-            (Some(computer), true) if self.computer_placed => {
+        let at_computer = match talkable.is_none() && can_use_computer && self.computer_placed {
+            true => {
                 let graph = &ctx.scenes[self.scene].graph;
-                computer
-                    .within_reach(graph, self.player.feet(graph))
-                    .then(|| computer.cleared())
+                let feet = self.player.feet(graph);
+                self.computers
+                    .iter()
+                    .position(|computer| computer.within_reach(graph, feet))
+                    .map(|n| (n, self.computers[n].cleared()))
             }
-            _ => None,
+            false => None,
         };
         if talkable != self.talkable || (talkable.is_none() && at_computer != self.at_computer) {
             let ui = ctx.user_interfaces.first();
             match (&talkable, at_computer) {
                 (Some((_, who)), _) => self.dialogue.set_prompt(ui, Some(who)),
-                (None, Some(cleared)) => self.dialogue.set_action_prompt(
+                (None, Some((_, cleared))) => self.dialogue.set_action_prompt(
                     ui,
                     Some(("Computer", if cleared { "Use" } else { "Hack" })),
                 ),
@@ -1145,9 +1225,10 @@ impl MazeGame {
         ) else {
             return;
         };
-        talking.voice = SoundBuilder::new(BaseBuilder::new().with_local_transform(
-            TransformBuilder::new().with_local_position(face).build(),
-        ))
+        talking.voice = SoundBuilder::new(
+            BaseBuilder::new()
+                .with_local_transform(TransformBuilder::new().with_local_position(face).build()),
+        )
         .with_buffer(Some(buffer))
         .with_radius(reach)
         .with_play_once(true)
@@ -1180,7 +1261,8 @@ impl MazeGame {
             let view = talking.conversation.view(script, &talking.facts);
             self.dialogue
                 .show(ctx.user_interfaces.first(), &talking.who, &view);
-            self.inhabitants.set_eyes(talking.droid, screen::eyes(view.mood));
+            self.inhabitants
+                .set_eyes(talking.droid, screen::eyes(view.mood));
             self.speak(ctx);
         } else {
             self.stop_talking(ctx);
@@ -1230,12 +1312,19 @@ impl MazeGame {
         self.talking.is_some() || self.hacking
     }
 
-    /// Puts the computer into the scene once its model has loaded, and near where the player
-    /// started once a round is under way; keeps its screen going.
+    /// Puts the computers into the scene once their model has loaded, and about the maze once a
+    /// round is under way, with the notes shared out among them; keeps their screens going.
     fn set_up_computer(&mut self, ctx: &mut PluginContext) {
         if let Some(model) = self.computer_model.take_if(|model| model.is_ok()) {
             let seed = platform::nanos_now();
-            self.computer = Computer::spawn(&model, &mut ctx.scenes[self.scene], seed);
+            let beeps = Beeps::make();
+            let scene = &mut ctx.scenes[self.scene];
+            self.computers = (0..COMPUTERS as u64)
+                .filter_map(|n| {
+                    let seed = seed ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                    Computer::spawn(&model, scene, seed, &beeps)
+                })
+                .collect();
         } else if self
             .computer_model
             .as_ref()
@@ -1246,17 +1335,43 @@ impl MazeGame {
             ));
             self.computer_model = None;
         }
-        let Some(computer) = self.computer.as_mut() else {
+        if self.computers.is_empty() {
             return;
-        };
+        }
         if !self.computer_placed && self.phase == Phase::Playing {
-            if let (Some((grid, origin)), Some(start)) = (self.level.grid.as_mut(), self.start_cell)
+            self.rng();
+            if let (Some((grid, origin)), Some(start), Some(rng)) =
+                (self.level.grid.as_mut(), self.start_cell, self.rng.as_mut())
             {
-                self.computer_placed =
-                    computer.place(&mut ctx.scenes[self.scene].graph, grid, *origin, start);
-                if !self.computer_placed {
-                    Log::warn("Maze: found no wall near the start to put the computer against");
+                let graph = &mut ctx.scenes[self.scene].graph;
+                let colliders: Vec<_> = self.computers.iter().map(Computer::collider).collect();
+                let mut taken = Vec::new();
+                let mut placed = Vec::new();
+                for (n, computer) in self.computers.iter_mut().enumerate() {
+                    let spot = match n {
+                        0 => computer::spot(grid, start),
+                        _ => computer::spot_away(grid, start, &taken, rng),
+                    };
+                    match spot {
+                        Some(spot) => {
+                            computer.place(graph, grid, *origin, spot, &colliders);
+                            taken.push(spot.0);
+                            placed.push(n);
+                        }
+                        None => computer.hide(graph),
+                    }
                 }
+                if placed.first() != Some(&0) {
+                    Log::warn("Maze: found no wall near the start to put a computer against");
+                }
+                // The notes, among those put somewhere.
+                let entries = self.notes.as_ref().map_or(&[][..], |notes| &notes.entries);
+                let shares = notes::share_out(entries, placed.len(), rng);
+                for (&n, share) in placed.iter().zip(shares) {
+                    let files = share.into_iter().map(|e| entries[e].clone()).collect();
+                    self.computers[n].set_files(files);
+                }
+                Log::info(format!("Maze: {} computers", placed.len()));
                 // Tried once a round, found or not.
                 self.computer_placed = true;
                 // MAZE_COMPUTER, next frame: where it is now is only worked out after this one.
@@ -1268,18 +1383,24 @@ impl MazeGame {
         // MAZE_COMPUTER=breach, a breach under way too.
         if std::mem::take(&mut self.computer_test) {
             {
-                if let Some(test) = platform::var("MAZE_COMPUTER") {
+                if let (Some(test), Some(computer)) =
+                    (platform::var("MAZE_COMPUTER"), self.computers.first_mut())
+                {
                     let graph = &mut ctx.scenes[self.scene].graph;
                     let (middle, facing) = computer.screen(graph);
                     let mut feet = middle + facing * 1.1;
                     feet.y = computer.floor(graph);
-                    self.player.teleport(graph, feet + Vector3::new(0.0, 1.2, 0.0), (-facing.x).atan2(-facing.z));
+                    self.player.teleport(
+                        graph,
+                        feet + Vector3::new(0.0, 1.2, 0.0),
+                        (-facing.x).atan2(-facing.z),
+                    );
                     if test == "breach" {
-                        computer.enter();
+                        computer.enter(graph);
                     }
                     // With MAZE_COMPUTER=look, only put in front of it, to see it from there.
                     if test != "look" {
-                        self.at_computer = Some(false);
+                        self.at_computer = Some((0, false));
                         self.start_hacking(ctx);
                     }
                     return;
@@ -1287,8 +1408,14 @@ impl MazeGame {
             }
         }
         if !self.menu.is_open() {
-            computer.update(ctx.dt);
+            for computer in &mut self.computers {
+                computer.update(ctx.dt);
+            }
         }
+        // The terminal of the one the player is using, or last used.
+        let Some(computer) = self.using.and_then(|n| self.computers.get(n)) else {
+            return;
+        };
         // Over the screen, wherever the camera sees it, while the player is at it.
         let ui = ctx.user_interfaces.first();
         let size = ui.screen_size();
@@ -1305,12 +1432,16 @@ impl MazeGame {
                 .map(|(x, y)| centre + Vector2::new(x * half_width, y * half_height))
         };
         // Anywhere but in the window, it goes in the middle too.
-        let in_view = |c: &Vector2<f32>| c.x >= -1.0 && c.y >= -1.0 && c.x <= size.x + 1.0 && c.y <= size.y + 1.0;
+        let in_view = |c: &Vector2<f32>| {
+            c.x >= -1.0 && c.y >= -1.0 && c.x <= size.x + 1.0 && c.y <= size.y + 1.0
+        };
         let overlay = platform::var("MAZE_TERMINAL_OVERLAY").as_deref() == Some("1");
         let shown = (self.hacking && overlay).then(|| {
             let (lines, stage, wrong) = computer.terminal();
             let corners = match corners {
-                [Some(a), Some(b), Some(c), Some(d)] if [a, b, c, d].iter().all(in_view) => [a, b, c, d],
+                [Some(a), Some(b), Some(c), Some(d)] if [a, b, c, d].iter().all(in_view) => {
+                    [a, b, c, d]
+                }
                 _ => middle(),
             };
             (lines, corners, stage, wrong)
@@ -1322,17 +1453,52 @@ impl MazeGame {
             .show(ctx.user_interfaces, computer, on_screen, ctx.dt);
     }
 
+    /// Puts the drone into the scene once its model has loaded, and in front of the player once a
+    /// round is under way; keeps it going.
+    fn set_up_drone(&mut self, ctx: &mut PluginContext) {
+        if let Some(model) = self.drone_model.take_if(|model| model.is_ok()) {
+            self.drone = Drone::spawn(&model, &mut ctx.scenes[self.scene]);
+        } else if self.drone_model.as_ref().is_some_and(|model| model.is_failed_to_load()) {
+            Log::err(format!("Could not load {DRONE_MODEL}; there is no drone"));
+            self.drone_model = None;
+        }
+        let Some(drone) = self.drone.as_mut() else {
+            return;
+        };
+        let graph = &mut ctx.scenes[self.scene].graph;
+        if !self.drone_placed && self.phase == Phase::Playing {
+            if let Some((grid, origin)) = self.level.grid.as_ref() {
+                let feet = self.player.feet(graph);
+                drone.place(graph, (grid, *origin), feet, self.player.ahead());
+                // Tried once a round, found or not.
+                self.drone_placed = true;
+            }
+        }
+        drone.update(graph);
+    }
+
     /// Starts using the computer, if the player is at it: the view goes in to its screen, and the
     /// keys are for typing.
     fn start_hacking(&mut self, ctx: &mut PluginContext) {
-        if self.phase != Phase::Playing || self.busy() || self.at_computer.is_none() {
+        if self.phase != Phase::Playing || self.busy() {
             return;
         }
-        let Some(computer) = &self.computer else {
+        let Some((n, _)) = self.at_computer else {
+            return;
+        };
+        let Some(computer) = self.computers.get(n) else {
             return;
         };
         let screen = computer.screen(&ctx.scenes[self.scene].graph);
         self.hacking = true;
+        // Off the screen of the one used last, should it be another.
+        if self.using.is_some_and(|last| last != n) {
+            if let Some(last) = self.using.and_then(|last| self.computers.get(last)) {
+                last.show_on_screen(None);
+            }
+            self.screen_terminal.forget();
+        }
+        self.using = Some(n);
         self.player.release_keys();
         self.player.use_screen(Some(screen));
         self.dialogue.set_prompt(ctx.user_interfaces.first(), None);
@@ -1354,21 +1520,28 @@ impl MazeGame {
 
     /// Keeps the view on the computer's screen while the player uses it.
     fn keep_hacking(&mut self, ctx: &mut PluginContext) {
-        if let (true, Some(computer)) = (self.hacking, &self.computer) {
+        let computer = self.using.and_then(|n| self.computers.get(n));
+        if let (true, Some(computer)) = (self.hacking, computer) {
             let screen = computer.screen(&ctx.scenes[self.scene].graph);
             self.player.use_screen(Some(screen));
         }
     }
 
-    /// A key pressed at the computer: Enter to breach it, or try again, and Tab to walk away.
-    /// What is typed goes to it in `on_os_event`.
+    /// A key pressed at the computer: Enter to breach it, try again or open a file; up and down
+    /// to go through its files or down the one open; Backspace to go back to the listing; and
+    /// Tab to walk away. What is typed goes to it in `on_os_event`.
     fn on_hacking_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
+        let graph = &mut ctx.scenes[self.scene].graph;
+        let Some(computer) = self.using.and_then(|n| self.computers.get_mut(n)) else {
+            return;
+        };
         match code {
-            KeyCode::Enter | KeyCode::NumpadEnter => {
-                if let Some(computer) = self.computer.as_mut() {
-                    computer.enter();
-                }
-            }
+            KeyCode::Enter | KeyCode::NumpadEnter => computer.enter(graph),
+            KeyCode::ArrowUp => computer.step(graph, -1),
+            KeyCode::ArrowDown => computer.step(graph, 1),
+            KeyCode::PageUp => computer.step(graph, -(computer::PAGE as i32)),
+            KeyCode::PageDown => computer.step(graph, computer::PAGE as i32),
+            KeyCode::Backspace => computer.back(graph),
             KeyCode::Tab => self.stop_hacking(ctx),
             _ => (),
         }
@@ -1423,6 +1596,21 @@ impl Plugin for MazeGame {
                 None
             }
         };
+        // Each kind of droid in its own colours, and any of them in the hostile droid's.
+        let resources = &ctx.resource_manager;
+        self.kind_models = self.script.as_ref().map_or_else(Vec::new, |script| {
+            let models = script
+                .characters
+                .iter()
+                .map(|character| character.model.as_ref());
+            models
+                .map(|path| path.map(|path| resources.request::<Model>(path)))
+                .collect()
+        });
+        self.hostile_model = Some(resources.request::<Model>(HOSTILE_MODEL));
+        self.notes = Notes::load(NOTES)
+            .inspect_err(|error| Log::err(format!("Maze: the computers hold no notes: {error}")))
+            .ok();
         self.voices = Voices::load(VOICES)
             .inspect_err(|error| Log::err(format!("Maze: the droids are silent: {error}")))
             .ok();
@@ -1454,14 +1642,18 @@ impl Plugin for MazeGame {
         // The droid joins the player whenever it has loaded; the game goes on without it if it
         // cannot, seen through the player's own eyes.
         if let Some(droid) = self.droid.take_if(|droid| droid.is_ok()) {
-            self.player.attach_avatar(&mut ctx.scenes[self.scene], &droid);
+            self.player
+                .attach_avatar(&mut ctx.scenes[self.scene], &droid);
             self.droid_model = Some(droid);
         } else if self.droid.as_ref().is_some_and(|d| d.is_failed_to_load()) {
-            Log::err(format!("Could not load {DROID_MODEL}; playing in first person"));
+            Log::err(format!(
+                "Could not load {DROID_MODEL}; playing in first person"
+            ));
             self.droid = None;
         }
 
         self.set_up_computer(ctx);
+        self.set_up_drone(ctx);
 
         match self.phase {
             // While the menu is open nothing happens: no loading, no clock, no player.
@@ -1604,7 +1796,10 @@ impl Plugin for MazeGame {
         self.follow_browser_mouse_lock(ctx);
         // A browser only locks the mouse for a click or a key, so there it is asked for in
         // `on_os_event`.
-        if self.want_mouse && !self.mouse_captured && self.focused && cfg!(not(target_arch = "wasm32"))
+        if self.want_mouse
+            && !self.mouse_captured
+            && self.focused
+            && cfg!(not(target_arch = "wasm32"))
         {
             self.set_mouse_captured(ctx, true);
         }
@@ -1665,6 +1860,9 @@ impl Plugin for MazeGame {
                 }
             }
             Event::WindowEvent { event, .. } => match event {
+                WindowEvent::ModifiersChanged(modifiers) => {
+                    self.shift = modifiers.state().shift_key();
+                }
                 WindowEvent::KeyboardInput { event: input, .. } => {
                     if let PhysicalKey::Code(code) = input.physical_key {
                         let pressed = input.state == ElementState::Pressed;
@@ -1676,10 +1874,11 @@ impl Plugin for MazeGame {
                         // At the computer, what is typed goes to it; Enter and Tab are keys.
                         if pressed && !input.repeat && self.hacking && !self.menu.is_open() {
                             if let (Some(text), Some(computer)) =
-                                (&input.text, self.computer.as_mut())
+                                (&input.text, self.using.and_then(|n| self.computers.get_mut(n)))
                             {
+                                let graph = &mut ctx.scenes[self.scene].graph;
                                 for c in text.chars().filter(|c| !c.is_control()) {
-                                    computer.type_char(c);
+                                    computer.type_char(graph, computer::without_caps_lock(c, self.shift));
                                 }
                             }
                         }

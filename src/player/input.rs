@@ -190,7 +190,11 @@ mod tests {
         player.on_key(KeyCode::ShiftLeft, true);
         assert_eq!(player.gait(), Gait::Sprinting, "sprinting from a run");
         player.on_key(KeyCode::ShiftLeft, false);
-        assert_eq!(player.gait(), Gait::Running, "running again once Shift is let go");
+        assert_eq!(
+            player.gait(),
+            Gait::Running,
+            "running again once Shift is let go"
+        );
     }
 
     #[test]
@@ -209,6 +213,10 @@ mod tests {
         press(&mut player, KeyCode::CapsLock);
         player.on_key(KeyCode::ShiftLeft, true);
         player.release_keys();
-        assert_eq!(player.gait(), Gait::Running, "still running, and Shift is no longer held");
+        assert_eq!(
+            player.gait(),
+            Gait::Running,
+            "still running, and Shift is no longer held"
+        );
     }
 }

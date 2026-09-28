@@ -22,6 +22,7 @@ mod culling;
 mod diagnostics;
 mod dialogue;
 mod dismember;
+mod drone;
 mod fixtures;
 mod formants;
 mod game;
@@ -32,9 +33,10 @@ mod inward;
 mod layout;
 mod level;
 mod menu;
+mod notes;
 mod platform;
-mod ragdoll;
 mod player;
+mod ragdoll;
 mod survey;
 mod tiles;
 
@@ -74,7 +76,9 @@ fn main() {
 /// MAZE_WINDOWED=1 opens it in an ordinary window instead. In a browser it fills the page, which
 /// the page's own style sees to.
 fn window_attributes() -> WindowAttributes {
-    let mut attributes = WindowAttributes::default().with_title("Maze").with_resizable(true);
+    let mut attributes = WindowAttributes::default()
+        .with_title("Maze")
+        .with_resizable(true);
     if platform::var("MAZE_WINDOWED").as_deref() != Some("1") && cfg!(not(target_arch = "wasm32")) {
         attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
     }

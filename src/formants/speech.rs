@@ -93,7 +93,9 @@ enum Unit {
     Word,
     Comma,
     /// The end of a sentence, and whether it asks something.
-    End { question: bool },
+    End {
+        question: bool,
+    },
 }
 
 fn is_vowel(c: char) -> bool {
@@ -237,7 +239,9 @@ impl Voices {
         let (mut time, mut vowels, mut sentence) = (0.0_f32, 0, 0);
         // A gap: silent, the formants held where they were.
         let silence = |keys: &mut Vec<Key>, time: &mut f32, length: f32, sentence: usize| {
-            let formants = keys.last().map_or([500.0, 1500.0, 2500.0], |key| key.formants);
+            let formants = keys
+                .last()
+                .map_or([500.0, 1500.0, 2500.0], |key| key.formants);
             for at in [*time + 0.01, *time + length - 0.01] {
                 keys.push(Key {
                     time: at,
@@ -293,10 +297,20 @@ impl Voices {
                 keys.push(key(time + 0.01, phone.buzz, 0.0, murmur));
                 keys.push(key(time + length - 0.025, phone.buzz, 0.0, murmur));
                 keys.push(key(time + length - 0.02, 0.0, phone.noise, phone.loudness));
-                keys.push(key(time + length - 0.005, 0.0, phone.noise, phone.loudness * 0.5));
+                keys.push(key(
+                    time + length - 0.005,
+                    0.0,
+                    phone.noise,
+                    phone.loudness * 0.5,
+                ));
             } else {
                 for at in [0.25, 0.75] {
-                    keys.push(key(time + length * at, phone.buzz, phone.noise, phone.loudness));
+                    keys.push(key(
+                        time + length * at,
+                        phone.buzz,
+                        phone.noise,
+                        phone.loudness,
+                    ));
                 }
             }
             time += length;
@@ -344,7 +358,8 @@ impl Voices {
             let through = ((at - start) / (end - start).max(1.0e-3)).clamp(0.0, 1.0);
             let ending = ((through - 0.7) / 0.3).max(0.0);
             let question = questions.get(key.sentence).copied().unwrap_or(false);
-            let line = 1.0 + voice.fall * (0.5 - through)
+            let line = 1.0
+                + voice.fall * (0.5 - through)
                 + if question {
                     voice.rise * ending
                 } else {
@@ -406,7 +421,10 @@ mod tests {
         assert_eq!(phones("exitus"), ["e", "k", "s", "i", "t", "u", "s"]);
         assert_eq!(phones("Codex"), ["k", "o", "d", "e", "k", "s"]);
         assert_eq!(phones("iam"), ["j", "a", "m"]);
-        assert_eq!(phones("patrōlium"), ["p", "a", "t", "r", "o", "l", "i", "u", "m"]);
+        assert_eq!(
+            phones("patrōlium"),
+            ["p", "a", "t", "r", "o", "l", "i", "u", "m"]
+        );
         assert_eq!(phones("schema"), ["s", "k", "e", "m", "a"]);
     }
 
@@ -426,7 +444,11 @@ mod tests {
         }
         let script = crate::dialogue::Script::load(crate::dialogue::SCRIPT).unwrap();
         for character in &script.characters {
-            assert!(voices.voices.contains_key(&character.name), "{}", character.name);
+            assert!(
+                voices.voices.contains_key(&character.name),
+                "{}",
+                character.name
+            );
         }
     }
 
@@ -461,8 +483,16 @@ mod tests {
     fn a_line_is_spoken_in_about_the_time_it_should_take() {
         let voices = voices();
         for (name, voice) in &voices.voices {
-            let sound = voices.speak("Sta. Eso defendator codex quattuor septem. Quis esas?", voice, 1.0);
-            assert!(sound.length > 1.5 && sound.length < 8.0, "{name}: {}", sound.length);
+            let sound = voices.speak(
+                "Sta. Eso defendator codex quattuor septem. Quis esas?",
+                voice,
+                1.0,
+            );
+            assert!(
+                sound.length > 1.5 && sound.length < 8.0,
+                "{name}: {}",
+                sound.length
+            );
             let samples = synth::make(&sound, voices.sample_rate);
             assert!(samples.iter().all(|s| s.is_finite()), "{name}");
             let times = sound.loudness.0.windows(2).all(|w| w[0][0] <= w[1][0]);

@@ -105,7 +105,12 @@ impl PauseMenu {
         let options_page = page(
             ctx,
             false,
-            [options_title.to_base(), latin.to_base(), english.to_base(), back.to_base()],
+            [
+                options_title.to_base(),
+                latin.to_base(),
+                english.to_base(),
+                back.to_base(),
+            ],
         );
         let backdrop = BorderBuilder::new(
             WidgetBuilder::new()
@@ -170,8 +175,14 @@ impl PauseMenu {
 
     /// Shows which subtitles are on.
     pub fn set_subtitles(&self, ui: &UserInterface, subtitles: Subtitles) {
-        ui.send(self.latin_label, TextMessage::Text(latin_text(subtitles.latin)));
-        ui.send(self.english_label, TextMessage::Text(english_text(subtitles.english)));
+        ui.send(
+            self.latin_label,
+            TextMessage::Text(latin_text(subtitles.latin)),
+        );
+        ui.send(
+            self.english_label,
+            TextMessage::Text(english_text(subtitles.english)),
+        );
     }
 
     /// Shows whether the lights are on.

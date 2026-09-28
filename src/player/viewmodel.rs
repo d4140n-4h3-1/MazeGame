@@ -164,7 +164,11 @@ impl Viewmodel {
         let ease = |rate: f32| 1.0 - (-rate * dt).exp();
         let aim = if raised && out { 1.0 } else { 0.0 };
         self.aim += (aim - self.aim) * ease(AIM_EASING);
-        self.kick = if fired { 1.0 } else { self.kick * (-KICK_SETTLE * dt).exp() };
+        self.kick = if fired {
+            1.0
+        } else {
+            self.kick * (-KICK_SETTLE * dt).exp()
+        };
         let tuck = ((TUCK_FROM - room) / TUCK_OVER).clamp(0.0, 1.0);
         self.tuck += (tuck - self.tuck) * ease(TUCK_EASING);
 
@@ -254,7 +258,9 @@ impl Player {
             graph[viewmodel.muzzle].global_position(),
         );
         let middle = (back + front) * 0.5;
-        let moved = viewmodel.last_seen.map_or(Vector3::zeros(), |last| middle - last);
+        let moved = viewmodel
+            .last_seen
+            .map_or(Vector3::zeros(), |last| middle - last);
         viewmodel.last_seen = Some(middle);
         Some(fyrox_gfx::MovingThing {
             bottom: back,
@@ -272,10 +278,16 @@ mod tests {
     #[test]
     fn at_the_hip_it_is_low_and_right_and_points_in_at_the_middle() {
         let (at, turn) = held(0.0);
-        assert!(at.x < 0.0 && at.y < 0.0, "low, and to the right (-x): {at:?}");
+        assert!(
+            at.x < 0.0 && at.y < 0.0,
+            "low, and to the right (-x): {at:?}"
+        );
         let ahead = turn * Vector3::z();
         let crosses = at + ahead * (CONVERGE / ahead.z);
-        assert!(crosses.xy().norm() < 0.02, "crosses the middle some way off: {crosses:?}");
+        assert!(
+            crosses.xy().norm() < 0.02,
+            "crosses the middle some way off: {crosses:?}"
+        );
     }
 
     #[test]

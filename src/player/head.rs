@@ -203,8 +203,15 @@ mod tests {
     #[test]
     fn the_knees_give_with_the_speed_of_the_fall_but_only_so_far() {
         assert_eq!(landing_dip(1.0), 0.0, "stepping down costs nothing");
-        assert!(landing_dip(5.0) > landing_dip(3.0), "a longer drop dips further");
-        assert_eq!(landing_dip(1000.0), LANDING_DIP_LIMIT, "and no further than that");
+        assert!(
+            landing_dip(5.0) > landing_dip(3.0),
+            "a longer drop dips further"
+        );
+        assert_eq!(
+            landing_dip(1000.0),
+            LANDING_DIP_LIMIT,
+            "and no further than that"
+        );
     }
 
     #[test]
@@ -212,9 +219,16 @@ mod tests {
         // Strafing right rolls right, the same way round as a lean to the right.
         assert!(roll_degrees(5.0, 6.5, 0.0) > 0.0);
         assert!(roll_degrees(-5.0, 6.5, 0.0) < 0.0);
-        assert_eq!(roll_degrees(0.0, 6.5, 0.0), 0.0, "straight ahead, on the level");
+        assert_eq!(
+            roll_degrees(0.0, 6.5, 0.0),
+            0.0,
+            "straight ahead, on the level"
+        );
         // Turning right takes the yaw down.
-        assert!(roll_degrees(0.0, 6.5, -1.0) > 0.0, "turning right rolls right");
+        assert!(
+            roll_degrees(0.0, 6.5, -1.0) > 0.0,
+            "turning right rolls right"
+        );
         assert!(roll_degrees(0.0, 6.5, 1.0) < 0.0);
         // Strafing right while turning right rolls further than either alone.
         let both = roll_degrees(5.0, 6.5, -1.0);
@@ -236,7 +250,10 @@ mod tests {
         for _ in 0..30 {
             player.look_back.advance(player.keys.look_back, 1.0 / 60.0);
         }
-        assert!((player.look_back.angle() - std::f32::consts::PI).abs() < 1e-5, "behind");
+        assert!(
+            (player.look_back.angle() - std::f32::consts::PI).abs() < 1e-5,
+            "behind"
+        );
         player.on_key(KeyCode::KeyQ, false);
         for _ in 0..30 {
             player.look_back.advance(player.keys.look_back, 1.0 / 60.0);

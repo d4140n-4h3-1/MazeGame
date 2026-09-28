@@ -94,10 +94,15 @@ fn spec() -> Option<&'static Spec> {
     static SPEC: std::sync::OnceLock<Option<Spec>> = std::sync::OnceLock::new();
     SPEC.get_or_init(|| {
         let read = crate::platform::read_to_string(MOTION);
-        match read.and_then(|text| serde_json::from_str::<Motion>(&text).map_err(|e| e.to_string())) {
-            Ok(Motion { dismember: Some(spec) }) => Some(spec),
+        match read.and_then(|text| serde_json::from_str::<Motion>(&text).map_err(|e| e.to_string()))
+        {
+            Ok(Motion {
+                dismember: Some(spec),
+            }) => Some(spec),
             Ok(_) => {
-                Log::warn(format!("Dismember: {MOTION} has none; droids stay in one piece"));
+                Log::warn(format!(
+                    "Dismember: {MOTION} has none; droids stay in one piece"
+                ));
                 None
             }
             Err(error) => {
@@ -113,7 +118,10 @@ fn spec() -> Option<&'static Spec> {
 pub fn break_for(body: &str) -> Option<&'static str> {
     let spec = spec()?;
     let body = spec.hit_body.get(body).map_or(body, String::as_str);
-    spec.breaks.iter().find(|b| b.body == body).map(|b| b.body.as_str())
+    spec.breaks
+        .iter()
+        .find(|b| b.body == body)
+        .map(|b| b.body.as_str())
 }
 
 /// A piece of the body, or a broken end: its mesh, and the bone it goes with.
@@ -205,23 +213,38 @@ impl Dismember {
             graph[node].set_visibility(false);
         }
         let (Some(intact), Some(parts), Some(breaks)) = (intact, parts, breaks) else {
-            Log::err("Dismember: the droid's model is missing some of its parts; it stays in one piece");
+            Log::err(
+                "Dismember: the droid's model is missing some of its parts; it stays in one piece",
+            );
             return None;
         };
         // The ends' glowing materials, each once.
         let mut glows: Vec<MaterialResource> = Vec::new();
         for part in parts.iter().filter(|part| part.end) {
-            let Some(mesh) = graph[part.node].cast::<Mesh>() else { continue };
+            let Some(mesh) = graph[part.node].cast::<Mesh>() else {
+                continue;
+            };
             for surface in mesh.surfaces() {
                 let material = surface.material();
-                let glowing = material.state().data_ref().is_some_and(|m| glow_strength(m).is_some());
+                let glowing = material
+                    .state()
+                    .data_ref()
+                    .is_some_and(|m| glow_strength(m).is_some());
                 if glowing && !glows.iter().any(|g| g.key() == material.key()) {
                     glows.push(material.clone());
                 }
             }
         }
         let dice = 0x9e37_79b9_7f4a_7c15 ^ u64::from(root.index());
-        Some(Self { intact, parts, breaks, apart: false, glows, spilt: Vec::new(), dice })
+        Some(Self {
+            intact,
+            parts,
+            breaks,
+            apart: false,
+            glows,
+            spilt: Vec::new(),
+            dice,
+        })
     }
 
     /// Breaks off the part the ragdoll body `body` carries, if it has a break and it has not come
@@ -232,7 +255,9 @@ impl Dismember {
             return false;
         };
         self.breaks[at].broken = true;
-        let Break { bone, stump, end, .. } = self.breaks[at].clone();
+        let Break {
+            bone, stump, end, ..
+        } = self.breaks[at].clone();
         if !self.apart {
             self.apart = true;
             graph[self.intact].set_visibility(false);
@@ -254,8 +279,11 @@ impl Dismember {
             let Some(mesh) = graph[part.node].cast::<Mesh>() else {
                 continue;
             };
-            let surfaces: Vec<Vec<Handle<Node>>> =
-                mesh.surfaces().iter().map(|surface| surface.bones().to_vec()).collect();
+            let surfaces: Vec<Vec<Handle<Node>>> = mesh
+                .surfaces()
+                .iter()
+                .map(|surface| surface.bones().to_vec())
+                .collect();
             let tied: Vec<Vec<Handle<Node>>> = surfaces
                 .into_iter()
                 .map(|bones| {
@@ -294,7 +322,8 @@ impl Dismember {
     /// A way at random, one meter long.
     fn any_way(&mut self) -> Vector3<f32> {
         loop {
-            let v = Vector3::new(self.roll(), self.roll(), self.roll()) * 2.0 - Vector3::repeat(1.0);
+            let v =
+                Vector3::new(self.roll(), self.roll(), self.roll()) * 2.0 - Vector3::repeat(1.0);
             let length = v.norm();
             if length > 0.05 && length <= 1.0 {
                 return v / length;
@@ -307,19 +336,29 @@ impl Dismember {
         if self.glows.is_empty() {
             return;
         }
-        let Break { bone, voxel, spill, .. } = self.breaks[at].clone();
+        let Break {
+            bone, voxel, spill, ..
+        } = self.breaks[at].clone();
         let transform = graph[bone].global_transform();
         let from = transform.position();
-        let along = transform.basis().column(1).try_normalize(1.0e-6).unwrap_or_else(Vector3::y);
+        let along = transform
+            .basis()
+            .column(1)
+            .try_normalize(1.0e-6)
+            .unwrap_or_else(Vector3::y);
         let size = voxel * SCALE;
         let groups = InteractionGroups::new(BitMask(SPILL), BitMask(!(CHARACTERS | SPILL)));
         for k in 0..spill {
             let side = if k % 2 == 0 { 1.0 } else { -1.0 };
-            let way = (along * side + self.any_way() * 0.7).try_normalize(1.0e-6).unwrap_or(along);
+            let way = (along * side + self.any_way() * 0.7)
+                .try_normalize(1.0e-6)
+                .unwrap_or(along);
             let speed = SPILL_SPEED.0 + (SPILL_SPEED.1 - SPILL_SPEED.0) * self.roll();
             let spin = self.any_way() * SPILL_SPIN * self.roll();
             let place = from + way * (size * 1.5) + self.any_way() * (size * self.roll());
-            let turned = UnitQuaternion::from_scaled_axis(self.any_way() * std::f32::consts::PI * self.roll());
+            let turned = UnitQuaternion::from_scaled_axis(
+                self.any_way() * std::f32::consts::PI * self.roll(),
+            );
             let material = self.glows[k % self.glows.len()].clone();
             let cube = MeshBuilder::new(BaseBuilder::new().with_cast_shadows(false))
                 .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
@@ -379,16 +418,24 @@ fn stand_in(
     if let Some(&node) = stand_ins.get(&(bone, anchor)) {
         return node;
     }
-    let local = graph[anchor].global_transform().try_inverse().unwrap_or_else(Matrix4::identity)
+    let local = graph[anchor]
+        .global_transform()
+        .try_inverse()
+        .unwrap_or_else(Matrix4::identity)
         * graph[bone].global_transform();
     let basis = local.basis();
-    let scale = Vector3::new(basis.column(0).norm(), basis.column(1).norm(), basis.column(2).norm());
+    let scale = Vector3::new(
+        basis.column(0).norm(),
+        basis.column(1).norm(),
+        basis.column(2).norm(),
+    );
     let unscaled = Matrix3::from_columns(&[
         basis.column(0) / scale.x,
         basis.column(1) / scale.y,
         basis.column(2) / scale.z,
     ]);
-    let rotation = UnitQuaternion::from_matrix_eps(&unscaled, f32::EPSILON, 16, UnitQuaternion::identity());
+    let rotation =
+        UnitQuaternion::from_matrix_eps(&unscaled, f32::EPSILON, 16, UnitQuaternion::identity());
     let name = format!("{} stand-in", graph[bone].name());
     let node = PivotBuilder::new(
         BaseBuilder::new()

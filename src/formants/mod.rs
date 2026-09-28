@@ -101,7 +101,9 @@ pub fn playable(samples: Vec<f32>, sample_rate: u32) -> Option<SoundBufferResour
         channel_count: 1,
         samples,
     };
-    SoundBuffer::raw_generic(data).ok().map(SoundBufferResource::new_embedded)
+    SoundBuffer::raw_generic(data)
+        .ok()
+        .map(SoundBufferResource::new_embedded)
 }
 
 #[cfg(test)]

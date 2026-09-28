@@ -49,8 +49,7 @@ impl Player {
     /// Whether the feet have something under them. A ray straight down from a little above them,
     /// reaching a little below: the body's own collider is passed over, so it can start inside it.
     pub(super) fn on_ground(&self, graph: &Graph) -> bool {
-        let feet =
-            graph[self.body].global_position() + Vector3::new(0.0, FEET + GROUND_REACH, 0.0);
+        let feet = graph[self.body].global_position() + Vector3::new(0.0, FEET + GROUND_REACH, 0.0);
         let reach = GROUND_REACH * 2.0;
         self.distance_to_hit(graph, feet, -Vector3::y(), reach) < reach
     }
@@ -105,12 +104,7 @@ impl Player {
         };
         let horizontal = match skid.filter(|_| self.grounded) {
             Some(skid) => Vector3::new(skid.x, 0.0, skid.z),
-            None => ramp(
-                Vector3::new(velocity.x, 0.0, velocity.z),
-                target,
-                push,
-                dt,
-            ),
+            None => ramp(Vector3::new(velocity.x, 0.0, velocity.z), target, push, dt),
         };
         velocity.x = horizontal.x;
         velocity.z = horizontal.z;
@@ -173,7 +167,10 @@ mod tests {
     #[test]
     fn getting_up_to_speed_takes_about_the_speed_over_the_acceleration() {
         let (seconds, _) = ramp_to(Vector3::zeros(), forward(6.0), 8.0);
-        assert!((seconds - 0.75).abs() < 0.05, "{seconds} s to 6 m/s at 8 m/s^2");
+        assert!(
+            (seconds - 0.75).abs() < 0.05,
+            "{seconds} s to 6 m/s at 8 m/s^2"
+        );
         // Twice the speed off a standstill is twice the wait.
         let (twice, _) = ramp_to(Vector3::zeros(), forward(12.0), 8.0);
         assert!((twice - 2.0 * seconds).abs() < 0.05, "{twice} s");
@@ -184,14 +181,20 @@ mod tests {
         let (_, fastest) = ramp_to(Vector3::zeros(), forward(5.0), 8.0);
         assert!(fastest <= 5.0 + 1e-5, "overshot to {fastest} m/s");
         // A step longer than the whole gap lands on the target rather than flying past it.
-        assert_eq!(ramp(Vector3::zeros(), forward(5.0), 8.0, 10.0), forward(5.0));
+        assert_eq!(
+            ramp(Vector3::zeros(), forward(5.0), 8.0, 10.0),
+            forward(5.0)
+        );
     }
 
     #[test]
     fn stopping_is_quicker_than_starting() {
         let (starting, _) = ramp_to(Vector3::zeros(), forward(5.0), 8.0);
         let (stopping, _) = ramp_to(forward(5.0), Vector3::zeros(), 8.0);
-        assert!(stopping < starting, "{stopping} s to stop, {starting} s to start");
+        assert!(
+            stopping < starting,
+            "{stopping} s to stop, {starting} s to start"
+        );
         assert!((starting / stopping - BRAKING).abs() < 0.1);
         // Dropping from a sprint to a walk brakes too, rather than easing down.
         let (slowing, _) = ramp_to(forward(6.5), forward(2.9), 8.0);
@@ -214,8 +217,16 @@ mod tests {
         let dt = 1.0 / 60.0;
         let target = Vector3::new(5.0, 0.0, 0.0);
         let ground = ramp(Vector3::zeros(), target, STANDING_ACCELERATION, dt);
-        let air = ramp(Vector3::zeros(), target, STANDING_ACCELERATION * AIR_CONTROL, dt);
-        assert!(air.norm() < ground.norm() * 0.5, "a jump can still be steered, barely");
+        let air = ramp(
+            Vector3::zeros(),
+            target,
+            STANDING_ACCELERATION * AIR_CONTROL,
+            dt,
+        );
+        assert!(
+            air.norm() < ground.norm() * 0.5,
+            "a jump can still be steered, barely"
+        );
         assert!(air.norm() > 0.0, "but not steered at all is being on rails");
     }
 }

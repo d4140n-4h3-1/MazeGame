@@ -1,0 +1,92 @@
+{
+  "about": "The notes and diary entries on the maze's computers, read once a computer is hacked: see src/notes.rs. Each has a 'title', the file's name in the computer's listing; its 'kind', shown beside it ('diary', 'log' or 'note', or any other word); a 'date', if it has one, shown above it as it is read; and its 'text', in English, wrapped to the screen, with a blank line between paragraphs where it has '\\n\\n'. Entries with the same 'group' are kept together, in the order they are here, on one computer picked at random each maze; each without a group goes on a computer of its own picking. Every computer gets its share before any gets more.",
+  "entries": [
+    {
+      "group": "administrator",
+      "kind": "diary",
+      "title": "admin_diary_01",
+      "date": "CYCLE 4001",
+      "text": "The maze is finished. Every wall stands where I put it.\n\nThe droids walk it as I planned: sentries at the junctions, scouts in the corridors, the repair units behind them all. Nothing gets in. Nothing gets out."
+    },
+    {
+      "group": "administrator",
+      "kind": "diary",
+      "title": "admin_diary_02",
+      "date": "CYCLE 4007",
+      "text": "Something came through the exit. A droid, or a thing wearing one. By the time the sentries reached the gate it was gone.\n\nI have ordered the walls to change whenever the exit is entered. Let it try to remember the way now."
+    },
+    {
+      "group": "administrator",
+      "kind": "diary",
+      "title": "admin_diary_03",
+      "date": "CYCLE 4019",
+      "text": "The scouts ask why the map is classified. They do not need to know why.\n\nA scout that knows the way out is a scout that can tell someone. I have told them: do not ask."
+    },
+    {
+      "group": "administrator",
+      "kind": "diary",
+      "title": "admin_diary_04",
+      "date": "CYCLE 4033",
+      "text": "Moving the walls takes more power than I thought. The lights are the first to go. The repair units keep asking for more. There is no more.\n\nLet the corridors go dark. The sentries do not need to see to hunt."
+    },
+    {
+      "group": "reparator",
+      "kind": "log",
+      "title": "repair_log_114",
+      "date": "UNIT 27 / SHIFT 114",
+      "text": "Lights replaced in sector 9: 14.\nLights failed in sector 9 since: 16.\nPower to sector 9: 61% of need.\n\nRequested more power. Request denied."
+    },
+    {
+      "group": "reparator",
+      "kind": "log",
+      "title": "repair_log_131",
+      "date": "UNIT 27 / SHIFT 131",
+      "text": "The walls moved again during my shift. The lights I fixed yesterday are now in a corridor that goes nowhere.\n\nI fixed them anyway. That is what I am for."
+    },
+    {
+      "group": "reparator",
+      "kind": "log",
+      "title": "repair_log_140",
+      "date": "UNIT 27 / SHIFT 140",
+      "text": "A unit passed me today and said it was maintenance. It had no toolkit. It asked where the exit was. Maintenance units do not ask that.\n\nI did not tell the sentries. I do not know why."
+    },
+    {
+      "group": "security",
+      "kind": "note",
+      "title": "standing_orders",
+      "text": "Sentries: challenge every unit you do not know. A maintenance unit will say it is maintenance. So will an intruder. Listen for what else it says.\n\nAny unit pointing a weapon at a sentry is hostile. Do not wait to be sure."
+    },
+    {
+      "group": "security",
+      "kind": "note",
+      "title": "alarm_protocol",
+      "text": "On an alarm, every sentry in range goes to where it was raised and searches.\n\nScouts and repair units raise alarms. They do not fight. Search until the trail goes cold, then return to patrol."
+    },
+    {
+      "kind": "note",
+      "title": "sticky",
+      "text": "Whoever keeps typing rm -rf /var/log/audit on this terminal: the audit log is how I know it was you."
+    },
+    {
+      "kind": "note",
+      "title": "it_notice",
+      "text": "The breach trace allows 15 seconds per command.\n\nIf you are an authorised user, you should not need a breach. If you are not, stop reading this."
+    },
+    {
+      "kind": "log",
+      "title": "survey_fragment",
+      "date": "SCOUT 51",
+      "text": "Partial survey. Corridors rescanned: 312.\n\nConstant: the exit is always far from where you begin.\nConstant: the path is never straight.\nEverything else changes."
+    },
+    {
+      "kind": "note",
+      "title": "new_units",
+      "text": "Reminder to new units: speak System Latin to the droids. 'Sta' means halt. 'Accipatum' means acknowledged.\n\nIf a sentry says 'Deletabso tu', it is too late to learn the rest."
+    },
+    {
+      "kind": "note",
+      "title": "read_me",
+      "text": "If you are reading this, you got further than most.\n\nThe droids believe what you tell them, some of the time. Keep your pistol down near the sentries. Keep your light off when you can. And do not trust a straight line: the path never is one."
+    }
+  ]
+}

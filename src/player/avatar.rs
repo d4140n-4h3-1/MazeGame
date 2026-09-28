@@ -72,8 +72,9 @@
 //! all the while the pistol is out, the core and the shell tumbling every way round, each the
 //! opposite way to the other.
 //!
-//! Its meshes cast no shadows. The traced shadows are gathered once, when meshes are added or
-//! removed, so a droid in them would leave its shadow behind where it was first put down.
+//! Its meshes cast shadows, traced as it is posed each frame. The player's own droid casts them
+//! only while it is seen from outside (see [`Avatar::set_casts_shadows`]): seen through its
+//! eyes, the flashlight is inside its head.
 
 use super::posture::{Gait, Posture};
 use crate::dismember::Dismember;
@@ -100,7 +101,8 @@ use fyrox::{
 };
 use fyrox_gfx::{replace_materials, GlassMaterial};
 
-/// The droid's model.
+/// The player's droid's model. The maze's inhabitants each have their kind's (see
+/// data/dialogue/droids.json), the same droid in other colours.
 pub const DROID_MODEL: &str = "data/droid_full_deform.glb";
 /// How much the model is scaled. It stands 2 m tall; the body is 1.7 m.
 pub(crate) const SCALE: f32 = 0.85;
@@ -279,7 +281,14 @@ fn claim_eyes(graph: &mut Graph, eyes: Handle<Node>) -> Option<Eyes> {
         let glow = glow_strength(material)?;
         let colour = property(material, DIFFUSE_COLOR)?;
         let copy = MaterialResource::new_embedded(material.clone());
-        Some((original.key(), Eyes { material: copy, colour, glow }))
+        Some((
+            original.key(),
+            Eyes {
+                material: copy,
+                colour,
+                glow,
+            },
+        ))
     })?;
     for surface in mesh.surfaces_mut() {
         if surface.material().key() == key {
@@ -309,7 +318,13 @@ fn claim_crosshair(graph: &mut Graph, screen: Handle<Node>) -> Option<Crosshair>
             let material = state.data_ref()?;
             let glow = glow_strength(material)?;
             let copy = MaterialResource::new_embedded(material.clone());
-            Some((original.key(), Crosshair { material: copy, glow }))
+            Some((
+                original.key(),
+                Crosshair {
+                    material: copy,
+                    glow,
+                },
+            ))
         })
     })?;
     for mark in marks {
@@ -487,13 +502,13 @@ enum Step {
 /// nearer by `STRAFE_MARGIN`.
 fn nearest<T: Copy + PartialEq>(way: f32, steps: &[(f32, T)], current: Option<T>) -> Option<T> {
     let off = |step: f32| wrap(way - step).abs();
-    let (best, best_off) = steps
-        .iter()
-        .map(|&(step, t)| (t, off(step)))
-        .fold(None, |best: Option<(T, f32)>, (t, o)| match best {
+    let (best, best_off) = steps.iter().map(|&(step, t)| (t, off(step))).fold(
+        None,
+        |best: Option<(T, f32)>, (t, o)| match best {
             Some((_, b)) if b <= o + 1.0e-3 => best,
             _ => Some((t, o)),
-        })?;
+        },
+    )?;
     let kept = current.and_then(|c| steps.iter().find(|&&(_, t)| t == c));
     Some(match kept {
         Some(&(step, t)) if off(step) <= best_off + STRAFE_MARGIN => t,
@@ -528,7 +543,9 @@ fn pace_of(stances: &[Stance], ground: f32) -> Option<Vector3<f32>> {
     let (went, planted) = stances
         .windows(2)
         .filter_map(|pair| stride(&pair[0], &pair[1], ground))
-        .fold((Vector3::zeros(), 0), |(went, planted), stride| (went + stride, planted + 1));
+        .fold((Vector3::zeros(), 0), |(went, planted), stride| {
+            (went + stride, planted + 1)
+        });
     (planted > 0).then(|| went / (planted as f32 * SAMPLE))
 }
 
@@ -846,7 +863,11 @@ fn yaw_of(way: Vector3<f32>) -> f32 {
 /// Turns the last bone of `chain` in `target` by `angle` about the droid's up, in its own terms,
 /// left positive, and with it everything that hangs off it.
 fn turn_bone(target: &mut FxHashMap<Handle<Node>, Bone>, chain: &[Handle<Node>], angle: f32) {
-    rotate_bone(target, chain, UnitQuaternion::from_axis_angle(&Vector3::y_axis(), angle));
+    rotate_bone(
+        target,
+        chain,
+        UnitQuaternion::from_axis_angle(&Vector3::y_axis(), angle),
+    );
 }
 
 /// Turns the last bone of `chain` in `target` by `turn`, in the droid's own terms, and with it
@@ -869,7 +890,11 @@ fn rotate_bone(
 /// The way `pitch` up and `yaw` to the left, in radians, points: one meter long, in the droid's
 /// own terms.
 fn pointing(pitch: f32, yaw: f32) -> Vector3<f32> {
-    Vector3::new(pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos())
+    Vector3::new(
+        pitch.cos() * yaw.sin(),
+        pitch.sin(),
+        pitch.cos() * yaw.cos(),
+    )
 }
 
 /// What the droid does with its pistol next, doing `arms` with things as `wants` has them. None
@@ -1081,6 +1106,8 @@ pub(crate) struct Going {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Avatar {
     root: Handle<Node>,
+    /// Its meshes, which cast its shadows.
+    meshes: Vec<Handle<Node>>,
     /// How the model's root is turned as it comes, before the droid turns it any further.
     upright: UnitQuaternion<f32>,
     animations: Handle<Node>,
@@ -1301,7 +1328,9 @@ fn left_step(stances: &[(f32, Stance)]) -> Option<f32> {
         .iter()
         .filter(|(_, stance)| stance.feet[0].y < stance.feet[1].y)
         .map(|(time, _)| (time - start) / (end - start) * std::f32::consts::TAU)
-        .fold((0.0, 0.0), |(sin, cos), angle| (sin + angle.sin(), cos + angle.cos()));
+        .fold((0.0, 0.0), |(sin, cos), angle| {
+            (sin + angle.sin(), cos + angle.cos())
+        });
     (sin != 0.0 || cos != 0.0)
         .then(|| sin.atan2(cos).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU)
 }
@@ -1334,7 +1363,10 @@ impl Avatar {
         let root = model.instantiate(scene);
         let avatar = Self::build(&mut scene.graph, root, body, feet, quiet);
         if avatar.is_none() {
-            Log::err(format!("Droid: {DROID_MODEL} is missing its rig or its cycles"));
+            Log::err(format!(
+                "Droid: {} is missing its rig or its cycles",
+                model.kind()
+            ));
             scene.graph.remove_node(root);
         }
         avatar
@@ -1362,16 +1394,19 @@ impl Avatar {
         transform.set_position(Vector3::new(0.0, feet, 0.0));
         transform.set_scale(Vector3::repeat(SCALE));
         let nodes: Vec<Handle<Node>> = graph.traverse_handle_iter(root).collect();
-        for &node in &nodes {
-            if graph[node].cast::<Mesh>().is_some() {
-                graph[node].set_cast_shadows(false);
-            }
-        }
+        let meshes: Vec<Handle<Node>> = nodes
+            .iter()
+            .copied()
+            .filter(|&node| graph[node].cast::<Mesh>().is_some())
+            .collect();
         // Out of sight until it is drawn.
         let motions = motions();
         let pistol_motion = motions.and_then(|motions| motions.pistol.as_ref());
         let pistol_node = graph
-            .find_by_name(root, pistol_motion.map_or(PISTOL, |motion| motion.node.as_str()))
+            .find_by_name(
+                root,
+                pistol_motion.map_or(PISTOL, |motion| motion.node.as_str()),
+            )
             .map(|(pistol, _)| pistol);
         if let Some(pistol) = pistol_node {
             graph[pistol].set_visibility(false);
@@ -1395,7 +1430,10 @@ impl Avatar {
         let parent_of = |node: Handle<Node>| graph[node].parent();
         let skeleton = Skeleton {
             hips: chain(parent_of, root, hips),
-            feet: [chain(parent_of, root, left?), chain(parent_of, root, right?)],
+            feet: [
+                chain(parent_of, root, left?),
+                chain(parent_of, root, right?),
+            ],
         };
         let rest = graph
             .traverse_handle_iter(root)
@@ -1411,15 +1449,20 @@ impl Avatar {
             Some(Square {
                 upper: chain(parent_of, root, find(UPPER_BODY)?),
                 head,
-                shoulders: [chain(parent_of, root, left?), chain(parent_of, root, right?)],
+                shoulders: [
+                    chain(parent_of, root, left?),
+                    chain(parent_of, root, right?),
+                ],
                 face,
             })
         })();
         let barrel_chain = muzzle.map_or_else(Vec::new, |muzzle| chain(parent_of, root, muzzle));
         let right_forearm =
             find(RIGHT_FOREARM).map_or_else(Vec::new, |forearm| chain(parent_of, root, forearm));
-        let parents: FxHashMap<Handle<Node>, Handle<Node>> =
-            rest.keys().map(|&bone| (bone, graph[bone].parent())).collect();
+        let parents: FxHashMap<Handle<Node>, Handle<Node>> = rest
+            .keys()
+            .map(|&bone| (bone, graph[bone].parent()))
+            .collect();
         let eyes = find(EYES).and_then(|eyes| claim_eyes(graph, eyes));
         let dismember = Dismember::new(graph, root);
         // The screen and the shell as see-through green glass - the model's own see-through
@@ -1428,7 +1471,9 @@ impl Avatar {
         let spinning: Vec<(Handle<Node>, bool)> = pistol_node.map_or_else(Vec::new, |pistol| {
             [(PISTOL_SHELL, false), (PISTOL_CORE, true)]
                 .into_iter()
-                .filter_map(|(name, reversed)| Some((graph.find_by_name(pistol, name)?.0, reversed)))
+                .filter_map(|(name, reversed)| {
+                    Some((graph.find_by_name(pistol, name)?.0, reversed))
+                })
                 .collect()
         });
         let flash = pistol_node.and_then(|pistol| {
@@ -1456,8 +1501,10 @@ impl Avatar {
             })
         });
 
-        let named: FxHashMap<String, Handle<Node>> =
-            nodes.iter().map(|&node| (graph[node].name().to_owned(), node)).collect();
+        let named: FxHashMap<String, Handle<Node>> = nodes
+            .iter()
+            .map(|&node| (graph[node].name().to_owned(), node))
+            .collect();
         let animations = nodes
             .iter()
             .copied()
@@ -1527,48 +1574,54 @@ impl Avatar {
                 .collect()
         };
         // In cover: made or not yet, so there is nothing to warn about without them.
-        let cover_walk = container.find_by_name_mut(COVER_WALK).and_then(|(handle, animation)| {
-            let (pace, phase) = measure(animation);
-            let speed = pace.map(|pace| pace.z).filter(|s| *s > STILL)?;
-            info(format!("Droid: its {COVER_WALK} goes {speed:.2} m/s"));
-            cycles.push(Cycle {
-                animation: handle,
-                gait: Some(Gait::Walking),
-                speed,
-                way: 0.0,
-                phase,
+        let cover_walk = container
+            .find_by_name_mut(COVER_WALK)
+            .and_then(|(handle, animation)| {
+                let (pace, phase) = measure(animation);
+                let speed = pace.map(|pace| pace.z).filter(|s| *s > STILL)?;
+                info(format!("Droid: its {COVER_WALK} goes {speed:.2} m/s"));
+                cycles.push(Cycle {
+                    animation: handle,
+                    gait: Some(Gait::Walking),
+                    speed,
+                    way: 0.0,
+                    phase,
+                });
+                Some(cycles.len() - 1)
             });
-            Some(cycles.len() - 1)
+        let strafes: [[Option<usize>; 7]; 3] = std::array::from_fn(|row| {
+            STRAFES[row].map(|name| {
+                let Some((handle, animation)) = container.find_by_name_mut(name) else {
+                    warn(format!("Droid: it has no {name}"));
+                    return None;
+                };
+                let (pace, phase) = measure(animation);
+                let Some(pace) = pace.filter(|p| p.norm() > STILL) else {
+                    warn(format!("Droid: its {name} goes nowhere"));
+                    return None;
+                };
+                let way = pace.x.atan2(pace.z);
+                info(format!(
+                    "Droid: its {name} goes {:.2} m/s, {:.0} degrees left of ahead",
+                    pace.norm(),
+                    way.to_degrees()
+                ));
+                cycles.push(Cycle {
+                    animation: handle,
+                    gait: STRAFE_GAITS[row],
+                    speed: pace.norm(),
+                    way,
+                    phase,
+                });
+                Some(cycles.len() - 1)
+            })
         });
-        let strafes: [[Option<usize>; 7]; 3] = std::array::from_fn(|row| STRAFES[row].map(|name| {
-            let Some((handle, animation)) = container.find_by_name_mut(name) else {
-                warn(format!("Droid: it has no {name}"));
-                return None;
-            };
-            let (pace, phase) = measure(animation);
-            let Some(pace) = pace.filter(|p| p.norm() > STILL) else {
-                warn(format!("Droid: its {name} goes nowhere"));
-                return None;
-            };
-            let way = pace.x.atan2(pace.z);
-            info(format!(
-                "Droid: its {name} goes {:.2} m/s, {:.0} degrees left of ahead",
-                pace.norm(),
-                way.to_degrees()
-            ));
-            cycles.push(Cycle {
-                animation: handle,
-                gait: STRAFE_GAITS[row],
-                speed: pace.norm(),
-                way,
-                phase,
+        let cover_idle = container
+            .find_by_name_mut(COVER_IDLE)
+            .map(|(handle, animation)| {
+                animation.set_loop(true);
+                handle
             });
-            Some(cycles.len() - 1)
-        }));
-        let cover_idle = container.find_by_name_mut(COVER_IDLE).map(|(handle, animation)| {
-            animation.set_loop(true);
-            handle
-        });
         if cover_walk.is_none() || cover_idle.is_none() {
             info(format!(
                 "Droid: in cover it walks and idles as usual, without {COVER_WALK} and {COVER_IDLE}"
@@ -1584,32 +1637,34 @@ impl Avatar {
                 None
             }
         };
-        let leaps = LEAPS.map(|heights| heights.map(|names| {
-            let moves = names.map(|name| {
-                let Some((handle, animation)) = container.find_by_name_mut(name) else {
-                    warn(format!("Droid: it has no {name}"));
+        let leaps = LEAPS.map(|heights| {
+            heights.map(|names| {
+                let moves = names.map(|name| {
+                    let Some((handle, animation)) = container.find_by_name_mut(name) else {
+                        warn(format!("Droid: it has no {name}"));
+                        return None;
+                    };
+                    let speed = speed_of(animation).filter(|s| *s > IN_PLACE);
+                    Some(Move {
+                        animation: handle,
+                        speed,
+                    })
+                });
+                let [Some(start), Some(flight), Some(land)] = moves else {
                     return None;
                 };
-                let speed = speed_of(animation).filter(|s| *s > IN_PLACE);
-                Some(Move {
-                    animation: handle,
-                    speed,
+                // Pushing off and landing are played once through; flying, for as long as it lasts.
+                container[start.animation].set_loop(false);
+                container[land.animation].set_loop(false);
+                let push_off = lowest(&skeleton.stances(&mut container[start.animation], &rest))?;
+                Some(Leap {
+                    start,
+                    flight,
+                    land,
+                    push_off,
                 })
-            });
-            let [Some(start), Some(flight), Some(land)] = moves else {
-                return None;
-            };
-            // Pushing off and landing are played once through; flying, for as long as it lasts.
-            container[start.animation].set_loop(false);
-            container[land.animation].set_loop(false);
-            let push_off = lowest(&skeleton.stances(&mut container[start.animation], &rest))?;
-            Some(Leap {
-                start,
-                flight,
-                land,
-                push_off,
             })
-        }));
+        });
         let mut skids = FxHashMap::default();
         for &name in TURNS.iter().chain(&CUTS).chain([&STOP]) {
             let Some((handle, animation)) = container.find_by_name_mut(name) else {
@@ -1655,9 +1710,16 @@ impl Avatar {
                     find_some(&clips.ready_to_aim, false),
                     find_some(&clips.aim_to_ready, false),
                 ) {
-                    (Some(ready), Some(raise), Some(lower)) => Some(Ready { ready, raise, lower }),
+                    (Some(ready), Some(raise), Some(lower)) => Some(Ready {
+                        ready,
+                        raise,
+                        lower,
+                    }),
                     _ => {
-                        info("Droid: without a ready, its pistol aims all the while it is out".into());
+                        info(
+                            "Droid: without a ready, its pistol aims all the while it is out"
+                                .into(),
+                        );
                         None
                     }
                 };
@@ -1678,73 +1740,82 @@ impl Avatar {
                 }
             }
             _ => {
-                warn(format!("Droid: without a pistol in {MOTION} and the model, it has none"));
+                warn(format!(
+                    "Droid: without a pistol in {MOTION} and the model, it has none"
+                ));
                 None
             }
         };
-        let aims = motions.and_then(|motions| motions.aim.as_ref()).and_then(|motion| {
-            let bones: Vec<Handle<Node>> =
-                motion.bones.iter().filter_map(|name| named.get(name).copied()).collect();
-            // A held pose: the bones as the first frame of the animation called `name` has them.
-            let mut pose_of = |name: &str| {
-                let Some((_, animation)) = container.find_by_name_mut(name) else {
-                    warn(format!("Droid: it has no {name}"));
-                    return None;
-                };
-                animation.rewind();
-                animation.tick(0.0);
-                let pose: FxHashMap<Handle<Node>, Bone> = bones
+        let aims = motions
+            .and_then(|motions| motions.aim.as_ref())
+            .and_then(|motion| {
+                let bones: Vec<Handle<Node>> = motion
+                    .bones
                     .iter()
-                    .map(|&bone| {
-                        let rest = rest.get(&bone).copied().unwrap_or_else(Bone::identity);
-                        let (position, rotation) = posed(animation, bone);
-                        let posed = Bone {
-                            position: position.unwrap_or(rest.position),
-                            rotation: rotation.unwrap_or(rest.rotation),
-                        };
-                        (bone, posed)
-                    })
+                    .filter_map(|name| named.get(name).copied())
                     .collect();
-                Some(pose)
-            };
-            let reference = pose_of(&motion.reference_clip)?;
-            let mut offsets = Vec::new();
-            for &pitch in &motion.pitches {
-                let mut row = Vec::new();
-                for &yaw in &motion.yaws {
-                    let name = motion.clips.get(&format!("{pitch},{yaw}"))?;
-                    let pose = pose_of(name)?;
-                    // Off the reference pose, in each bone's parent's terms.
-                    row.push(
-                        pose.iter()
-                            .map(|(bone, pose)| {
-                                let reference = reference[bone];
-                                let offset = Bone {
-                                    position: pose.position - reference.position,
-                                    rotation: reference.rotation.inverse() * pose.rotation,
-                                };
-                                (*bone, offset)
-                            })
-                            .collect(),
-                    );
+                // A held pose: the bones as the first frame of the animation called `name` has them.
+                let mut pose_of = |name: &str| {
+                    let Some((_, animation)) = container.find_by_name_mut(name) else {
+                        warn(format!("Droid: it has no {name}"));
+                        return None;
+                    };
+                    animation.rewind();
+                    animation.tick(0.0);
+                    let pose: FxHashMap<Handle<Node>, Bone> = bones
+                        .iter()
+                        .map(|&bone| {
+                            let rest = rest.get(&bone).copied().unwrap_or_else(Bone::identity);
+                            let (position, rotation) = posed(animation, bone);
+                            let posed = Bone {
+                                position: position.unwrap_or(rest.position),
+                                rotation: rotation.unwrap_or(rest.rotation),
+                            };
+                            (bone, posed)
+                        })
+                        .collect();
+                    Some(pose)
+                };
+                let reference = pose_of(&motion.reference_clip)?;
+                let mut offsets = Vec::new();
+                for &pitch in &motion.pitches {
+                    let mut row = Vec::new();
+                    for &yaw in &motion.yaws {
+                        let name = motion.clips.get(&format!("{pitch},{yaw}"))?;
+                        let pose = pose_of(name)?;
+                        // Off the reference pose, in each bone's parent's terms.
+                        row.push(
+                            pose.iter()
+                                .map(|(bone, pose)| {
+                                    let reference = reference[bone];
+                                    let offset = Bone {
+                                        position: pose.position - reference.position,
+                                        rotation: reference.rotation.inverse() * pose.rotation,
+                                    };
+                                    (*bone, offset)
+                                })
+                                .collect(),
+                        );
+                    }
+                    offsets.push(row);
                 }
-                offsets.push(row);
-            }
-            info(format!(
-                "Droid: its pistol aims {} to {} degrees up and {} to {} to the left",
-                motion.pitches.first()?,
-                motion.pitches.last()?,
-                motion.yaws.first()?,
-                motion.yaws.last()?
-            ));
-            Some(Aims {
-                pitches: motion.pitches.iter().map(|p| p.to_radians()).collect(),
-                yaws: motion.yaws.iter().map(|y| y.to_radians()).collect(),
-                offsets,
-            })
-        });
+                info(format!(
+                    "Droid: its pistol aims {} to {} degrees up and {} to {} to the left",
+                    motion.pitches.first()?,
+                    motion.pitches.last()?,
+                    motion.yaws.first()?,
+                    motion.yaws.last()?
+                ));
+                Some(Aims {
+                    pitches: motion.pitches.iter().map(|p| p.to_radians()).collect(),
+                    yaws: motion.yaws.iter().map(|y| y.to_radians()).collect(),
+                    offsets,
+                })
+            });
         if aims.is_none() {
-            warn(format!("Droid: without aims in {MOTION}, its pistol only points ahead"));
+            warn(format!(
+                "Droid: without aims in {MOTION}, its pistol only points ahead"
+            ));
         }
         let arms_pose = upper
             .iter()
@@ -1752,6 +1823,7 @@ impl Avatar {
             .collect();
 
         Some(Self {
+            meshes,
             upright: **graph[root].local_transform().rotation(),
             root,
             animations,
@@ -1841,7 +1913,9 @@ impl Avatar {
     /// Breaks off the part the ragdoll body `body` carries, as [`Dismember::break_off`] does.
     /// Whether it came off.
     pub(crate) fn break_off(&mut self, graph: &mut Graph, body: &str) -> bool {
-        self.dismember.as_mut().is_some_and(|parts| parts.break_off(graph, body))
+        self.dismember
+            .as_mut()
+            .is_some_and(|parts| parts.break_off(graph, body))
     }
 
     /// Takes the loose voxels its breaks have spilt out of the scene.
@@ -1860,9 +1934,10 @@ impl Avatar {
     /// above its head bone, which sits at the bottom of the head. None without the bone.
     pub(crate) fn face_at(&self, graph: &Graph) -> Option<Vector3<f32>> {
         let &head = self.square.as_ref()?.head.last()?;
-        let point = graph[head]
-            .global_transform()
-            .transform_point(&Point3::new(0.0, FACE_ABOVE_HEAD, 0.0));
+        let point =
+            graph[head]
+                .global_transform()
+                .transform_point(&Point3::new(0.0, FACE_ABOVE_HEAD, 0.0));
         Some(point.coords)
     }
 
@@ -1891,6 +1966,18 @@ impl Avatar {
 
     pub(crate) fn is_visible(&self, graph: &Graph) -> bool {
         graph[self.root].global_visibility()
+    }
+
+    /// Whether it casts shadows. The player's droid does not while the player sees through its
+    /// eyes: the flashlight is inside its head, and the head would shut its light in.
+    pub(crate) fn set_casts_shadows(&self, graph: &mut Graph, casts: bool) {
+        let first = self.meshes.first().copied();
+        if first.is_none_or(|mesh| graph[mesh].cast_shadows() == casts) {
+            return;
+        }
+        for &mesh in &self.meshes {
+            graph[mesh].set_cast_shadows(casts);
+        }
     }
 
     pub(crate) fn set_visible(&self, graph: &mut Graph, visible: bool) {
@@ -2027,7 +2114,11 @@ impl Avatar {
             self.shot = Some((graph[pistol.muzzle].global_position(), self.barrel));
         }
         self.flash(graph, show, dt);
-        let out = if self.arms == Arms::Holstered { 0.0 } else { 1.0 };
+        let out = if self.arms == Arms::Holstered {
+            0.0
+        } else {
+            1.0
+        };
         let step = dt / ARMS_FADE;
         self.arms_weight += (out - self.arms_weight).clamp(-step, step);
         let free = if self.arms == Arms::Ready { 1.0 } else { 0.0 };
@@ -2049,10 +2140,16 @@ impl Avatar {
         // Only while it is still dying down: done, it glows as it always does.
         if (glow - flash.glow).abs() > 1.0e-3 {
             flash.glow = glow;
-            flash.glass.data_ref().set_property("emissionStrength", glow);
+            flash
+                .glass
+                .data_ref()
+                .set_property("emissionStrength", glow);
             if let Some(crosshair) = &flash.crosshair {
                 let lit = brighter(&crosshair.glow, glow / SCREEN_GLOW);
-                crosshair.material.data_ref().set_property(EMISSION_STRENGTH, lit);
+                crosshair
+                    .material
+                    .data_ref()
+                    .set_property(EMISSION_STRENGTH, lit);
             }
         }
     }
@@ -2382,7 +2479,10 @@ impl Avatar {
             }
         }
         let back = std::f32::consts::PI;
-        if !steps.iter().any(|&(way, _)| wrap(way - back).abs() < STRAFE_MARGIN) {
+        if !steps
+            .iter()
+            .any(|&(way, _)| wrap(way - back).abs() < STRAFE_MARGIN)
+        {
             steps.push((back, Step::Back));
         }
         steps
@@ -2437,7 +2537,10 @@ impl Avatar {
         let Some((kind, name)) = skid_for(gait, self.heading, heading, going.pushing) else {
             return false;
         };
-        let Some(&Skid { animation, entry, .. }) = self.skids.get(name) else {
+        let Some(&Skid {
+            animation, entry, ..
+        }) = self.skids.get(name)
+        else {
             return false;
         };
         let Some(container) = self.container(graph) else {
@@ -2451,7 +2554,10 @@ impl Avatar {
         let scale = going.speed / entry;
         let along = |axis: Vector3<f32>| {
             let way = frame.transform_vector(&axis);
-            Vector3::new(way.x, 0.0, way.z).try_normalize(1.0e-6).unwrap_or_default() * scale
+            Vector3::new(way.x, 0.0, way.z)
+                .try_normalize(1.0e-6)
+                .unwrap_or_default()
+                * scale
         };
         self.skidding = Some(Skidding {
             skid: name,
@@ -2599,7 +2705,10 @@ impl Avatar {
                     })
                     .unwrap_or(0.0)
                     .clamp(0.0, 1.0);
-                let low = Leaping { leap: low, ..leaping };
+                let low = Leaping {
+                    leap: low,
+                    ..leaping
+                };
                 self.enter(graph, low, leaping.phase, through);
             }
         }
@@ -2695,7 +2804,11 @@ mod tests {
 
     #[test]
     fn each_gait_plays_its_own_cycle() {
-        assert_eq!(choose(&ALL, Gait::Walking, false, true), Some(0), "walking walks");
+        assert_eq!(
+            choose(&ALL, Gait::Walking, false, true),
+            Some(0),
+            "walking walks"
+        );
         assert_eq!(choose(&ALL, Gait::Running, false, true), Some(1));
         assert_eq!(choose(&ALL, Gait::Sprinting, false, true), Some(2));
     }
@@ -2703,8 +2816,16 @@ mod tests {
     #[test]
     fn crouched_it_crouches_and_still_it_rests() {
         assert_eq!(choose(&ALL, Gait::Sprinting, true, true), Some(3));
-        assert_eq!(choose(&ALL, Gait::Walking, true, false), Some(3), "held crouched");
-        assert_eq!(choose(&ALL, Gait::Running, false, false), None, "standing at rest");
+        assert_eq!(
+            choose(&ALL, Gait::Walking, true, false),
+            Some(3),
+            "held crouched"
+        );
+        assert_eq!(
+            choose(&ALL, Gait::Running, false, false),
+            None,
+            "standing at rest"
+        );
     }
 
     #[test]
@@ -2734,14 +2855,36 @@ mod tests {
         use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
         let sprinting = |from: f32, to: f32| skid_for(Gait::Sprinting, from, to, true);
         let round = |name| Some((SkidKind::Round, name));
-        assert_eq!(sprinting(0.0, FRAC_PI_4), None, "an eighth of the way round is only a turn");
-        assert_eq!(sprinting(0.0, FRAC_PI_2), Some((SkidKind::Cut, CUTS[0])), "W to A");
-        assert_eq!(sprinting(FRAC_PI_4, -FRAC_PI_4), Some((SkidKind::Cut, CUTS[1])), "W+A to W+D");
+        assert_eq!(
+            sprinting(0.0, FRAC_PI_4),
+            None,
+            "an eighth of the way round is only a turn"
+        );
+        assert_eq!(
+            sprinting(0.0, FRAC_PI_2),
+            Some((SkidKind::Cut, CUTS[0])),
+            "W to A"
+        );
+        assert_eq!(
+            sprinting(FRAC_PI_4, -FRAC_PI_4),
+            Some((SkidKind::Cut, CUTS[1])),
+            "W+A to W+D"
+        );
         assert_eq!(sprinting(0.0, 3.0 * FRAC_PI_4), round(TURNS[0]), "W to S+A");
-        assert_eq!(sprinting(0.0, -3.0 * FRAC_PI_4), round(TURNS[1]), "W to S+D");
-        assert!(sprinting(0.0, PI).is_some_and(|(kind, _)| kind == SkidKind::Round), "W to S");
+        assert_eq!(
+            sprinting(0.0, -3.0 * FRAC_PI_4),
+            round(TURNS[1]),
+            "W to S+D"
+        );
+        assert!(
+            sprinting(0.0, PI).is_some_and(|(kind, _)| kind == SkidKind::Round),
+            "W to S"
+        );
         // Facing back-left, going forward-left is round to the right.
-        assert_eq!(sprinting(3.0 * FRAC_PI_4, -FRAC_PI_4 + 0.1), round(TURNS[1]));
+        assert_eq!(
+            sprinting(3.0 * FRAC_PI_4, -FRAC_PI_4 + 0.1),
+            round(TURNS[1])
+        );
     }
 
     #[test]
@@ -2749,7 +2892,11 @@ mod tests {
         use std::f32::consts::{FRAC_PI_2, PI};
         for gait in [Gait::Walking, Gait::Running] {
             assert_eq!(skid_for(gait, 0.0, PI, true), None, "{gait:?} round");
-            assert_eq!(skid_for(gait, 0.0, FRAC_PI_2, true), None, "{gait:?} across");
+            assert_eq!(
+                skid_for(gait, 0.0, FRAC_PI_2, true),
+                None,
+                "{gait:?} across"
+            );
             assert_eq!(skid_for(gait, 0.0, 0.0, false), None, "{gait:?} letting go");
         }
     }
@@ -2757,7 +2904,10 @@ mod tests {
     #[test]
     fn letting_go_sprinting_stops_whichever_way_it_faced() {
         for to in [0.0, 1.0, 3.0] {
-            assert_eq!(skid_for(Gait::Sprinting, 0.0, to, false), Some((SkidKind::Stop, STOP)));
+            assert_eq!(
+                skid_for(Gait::Sprinting, 0.0, to, false),
+                Some((SkidKind::Stop, STOP))
+            );
         }
     }
 
@@ -2770,17 +2920,27 @@ mod tests {
             turn_left_deg: vec![0.0, 45.0, 90.0],
         };
         let skid = Skid::new(Handle::NONE, &clip).unwrap();
-        assert!((skid.entry - 2.0).abs() < 1e-5, "0.2 m in the first tenth of a second");
+        assert!(
+            (skid.entry - 2.0).abs() < 1e-5,
+            "0.2 m in the first tenth of a second"
+        );
         let halfway = skid.at(0.15);
         assert!((halfway - Vector3::new(0.25, 0.05, 67.5f32.to_radians())).norm() < 1e-5);
-        assert_eq!(skid.at(5.0), skid.at(0.2), "stays where the last frame leaves it");
+        assert_eq!(
+            skid.at(5.0),
+            skid.at(0.2),
+            "stays where the last frame leaves it"
+        );
         let on_the_spot = Clip {
             forward_m: vec![0.0, 0.0],
             left_m: vec![0.0, 0.0],
             turn_left_deg: vec![0.0, 0.0],
             ..clip
         };
-        assert!(Skid::new(Handle::NONE, &on_the_spot).is_none(), "not going in on the move");
+        assert!(
+            Skid::new(Handle::NONE, &on_the_spot).is_none(),
+            "not going in on the move"
+        );
     }
 
     /// Standing with its hips at `hips` along the way, its left foot at `left` along the way and
@@ -2791,7 +2951,10 @@ mod tests {
                 position: Vector3::new(0.0, 1.0, hips),
                 rotation: UnitQuaternion::identity(),
             },
-            feet: [Vector3::new(0.1, left_up, left), Vector3::new(-0.1, 0.3, 0.0)],
+            feet: [
+                Vector3::new(0.1, left_up, left),
+                Vector3::new(-0.1, 0.3, 0.0),
+            ],
         }
     }
 
@@ -2804,7 +2967,10 @@ mod tests {
         let through = stride(&stance(0.0, 0.2, 0.0), &stance(0.1, 0.2, 0.0), 0.0);
         assert_eq!(through, Some(Vector3::new(0.0, 0.0, 0.1)));
         // With the foot off the floor, it says nothing about the ground.
-        assert_eq!(stride(&stance(0.0, 0.2, 0.2), &stance(0.0, 0.1, 0.2), 0.0), None);
+        assert_eq!(
+            stride(&stance(0.0, 0.2, 0.2), &stance(0.0, 0.1, 0.2), 0.0),
+            None
+        );
     }
 
     #[test]
@@ -2833,7 +2999,12 @@ mod tests {
     #[test]
     fn strafing_it_steps_the_nearest_way_and_keeps_to_it_near_halfway() {
         use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
-        let steps = [(0.0, "ahead"), (PI, "back"), (FRAC_PI_2, "left"), (-FRAC_PI_2, "right")];
+        let steps = [
+            (0.0, "ahead"),
+            (PI, "back"),
+            (FRAC_PI_2, "left"),
+            (-FRAC_PI_2, "right"),
+        ];
         let step = |way: f32, current: Option<&'static str>| nearest(way, &steps, current);
         assert_eq!(step(0.1, None), Some("ahead"));
         assert_eq!(step(-PI + 0.1, None), Some("back"), "round the back");
@@ -2876,7 +3047,11 @@ mod tests {
             (0..=40)
                 .map(|i| {
                     let first = i < 20;
-                    let (left, right) = if first == left_first { (0.0, 0.2) } else { (0.2, 0.0) };
+                    let (left, right) = if first == left_first {
+                        (0.0, 0.2)
+                    } else {
+                        (0.2, 0.0)
+                    };
                     let mut stance = stance(0.0, 0.0, left);
                     stance.feet[1].y = right;
                     (i as f32 * 0.05, stance)
@@ -2889,50 +3064,151 @@ mod tests {
         assert!((right - 0.75).abs() < 0.02, "{right}");
         // A tenth of the way into a stride on the left foot is six tenths into one on the right.
         assert!((in_step(0.1, left, right) - 0.6).abs() < 0.02);
-        assert!((in_step(0.9, right, right) - 0.9).abs() < 1e-6, "same foot, same place");
-        assert!((in_step(0.9, left, right) - 0.4).abs() < 0.02, "round past the end");
+        assert!(
+            (in_step(0.9, right, right) - 0.9).abs() < 1e-6,
+            "same foot, same place"
+        );
+        assert!(
+            (in_step(0.9, left, right) - 0.4).abs() < 0.02,
+            "round past the end"
+        );
     }
 
     #[test]
     fn the_pistol_is_drawn_to_the_ready_raised_fired_and_holstered_in_turn() {
         use Arms::*;
-        let wants = Wants { out: true, rested: true, can_ready: true, ..Default::default() };
-        let ended = Wants { ended: true, ..wants };
-        let raised = Wants { raised: true, ..wants };
-        let trigger = Wants { trigger: true, ..wants };
+        let wants = Wants {
+            out: true,
+            rested: true,
+            can_ready: true,
+            ..Default::default()
+        };
+        let ended = Wants {
+            ended: true,
+            ..wants
+        };
+        let raised = Wants {
+            raised: true,
+            ..wants
+        };
+        let trigger = Wants {
+            trigger: true,
+            ..wants
+        };
         // Drawn, it comes down to the ready - or stays up, held raised.
         assert_eq!(next_arms(Holstered, wants), Some(Drawing));
         assert_eq!(next_arms(Drawing, wants), None, "still drawing");
         assert_eq!(next_arms(Drawing, ended), Some(Lowering));
-        assert_eq!(next_arms(Drawing, Wants { raised: true, ..ended }), Some(Aiming));
+        assert_eq!(
+            next_arms(
+                Drawing,
+                Wants {
+                    raised: true,
+                    ..ended
+                }
+            ),
+            Some(Aiming)
+        );
         assert_eq!(next_arms(Lowering, ended), Some(Ready));
         // Raised to aim, or to fire; and lowered again, rested and let go.
         assert_eq!(next_arms(Ready, wants), None, "at the ready");
         assert_eq!(next_arms(Ready, raised), Some(Raising));
         assert_eq!(next_arms(Ready, trigger), Some(Raising), "up to fire");
-        assert_eq!(next_arms(Lowering, trigger), Some(Raising), "back up halfway down");
-        assert_eq!(next_arms(Raising, Wants { ended: true, ..raised }), Some(Aiming));
+        assert_eq!(
+            next_arms(Lowering, trigger),
+            Some(Raising),
+            "back up halfway down"
+        );
+        assert_eq!(
+            next_arms(
+                Raising,
+                Wants {
+                    ended: true,
+                    ..raised
+                }
+            ),
+            Some(Aiming)
+        );
         assert_eq!(next_arms(Aiming, raised), None, "held up");
-        assert_eq!(next_arms(Aiming, Wants { rested: false, ..wants }), None, "just fired");
-        assert_eq!(next_arms(Aiming, wants), Some(Lowering), "let go, and rested");
+        assert_eq!(
+            next_arms(
+                Aiming,
+                Wants {
+                    rested: false,
+                    ..wants
+                }
+            ),
+            None,
+            "just fired"
+        );
+        assert_eq!(
+            next_arms(Aiming, wants),
+            Some(Lowering),
+            "let go, and rested"
+        );
         // The trigger fires only once it is up, and again only once the shot has left.
         assert_eq!(next_arms(Drawing, trigger), None, "not drawn yet");
         assert_eq!(next_arms(Aiming, trigger), Some(Firing(false)));
-        assert_eq!(next_arms(Firing(false), trigger), None, "the shot is yet to leave");
+        assert_eq!(
+            next_arms(Firing(false), trigger),
+            None,
+            "the shot is yet to leave"
+        );
         assert_eq!(next_arms(Firing(true), trigger), Some(Firing(false)));
         assert_eq!(next_arms(Firing(true), ended), Some(Aiming));
         // Put away from anything, and drawn again halfway through putting it away.
-        let away = Wants { out: false, ..wants };
-        for arms in [Drawing, Ready, Raising, Lowering, Aiming, Firing(false), Firing(true)] {
+        let away = Wants {
+            out: false,
+            ..wants
+        };
+        for arms in [
+            Drawing,
+            Ready,
+            Raising,
+            Lowering,
+            Aiming,
+            Firing(false),
+            Firing(true),
+        ] {
             assert_eq!(next_arms(arms, away), Some(Holstering), "{arms:?}");
         }
-        assert_eq!(next_arms(Holstering, Wants { ended: true, ..away }), Some(Holstered));
+        assert_eq!(
+            next_arms(
+                Holstering,
+                Wants {
+                    ended: true,
+                    ..away
+                }
+            ),
+            Some(Holstered)
+        );
         assert_eq!(next_arms(Holstering, wants), Some(Drawing));
-        assert_eq!(next_arms(Holstered, Wants { trigger: true, ..away }), None);
+        assert_eq!(
+            next_arms(
+                Holstered,
+                Wants {
+                    trigger: true,
+                    ..away
+                }
+            ),
+            None
+        );
         // Without a ready, it aims all the while it is out.
-        let no_ready = Wants { can_ready: false, ..ended };
+        let no_ready = Wants {
+            can_ready: false,
+            ..ended
+        };
         assert_eq!(next_arms(Drawing, no_ready), Some(Aiming));
-        assert_eq!(next_arms(Aiming, Wants { can_ready: false, ..wants }), None);
+        assert_eq!(
+            next_arms(
+                Aiming,
+                Wants {
+                    can_ready: false,
+                    ..wants
+                }
+            ),
+            None
+        );
     }
 
     #[test]
@@ -2950,9 +3226,27 @@ mod tests {
         let (hips, chest, arm) = (Handle::new(1, 1), Handle::new(2, 1), Handle::new(3, 1));
         let tilt = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.3);
         let mut target: FxHashMap<Handle<Node>, Bone> = [
-            (hips, Bone { position: Vector3::new(0.0, 1.0, 0.0), rotation: tilt }),
-            (chest, Bone { position: Vector3::new(0.0, 0.2, 0.0), rotation: UnitQuaternion::identity() }),
-            (arm, Bone { position: Vector3::new(0.2, 0.3, 0.0), rotation: UnitQuaternion::identity() }),
+            (
+                hips,
+                Bone {
+                    position: Vector3::new(0.0, 1.0, 0.0),
+                    rotation: tilt,
+                },
+            ),
+            (
+                chest,
+                Bone {
+                    position: Vector3::new(0.0, 0.2, 0.0),
+                    rotation: UnitQuaternion::identity(),
+                },
+            ),
+            (
+                arm,
+                Bone {
+                    position: Vector3::new(0.2, 0.3, 0.0),
+                    rotation: UnitQuaternion::identity(),
+                },
+            ),
         ]
         .into_iter()
         .collect();
@@ -2972,15 +3266,25 @@ mod tests {
     fn the_flash_dies_away() {
         assert_eq!(flash_glow(0.0), 1.0);
         assert!(flash_glow(0.1) < 0.5 && flash_glow(0.1) > flash_glow(0.2));
-        assert!(flash_glow(f32::INFINITY) == 0.0, "dark until the first pull");
+        assert!(
+            flash_glow(f32::INFINITY) == 0.0,
+            "dark until the first pull"
+        );
     }
 
     #[test]
     fn it_tumbles_every_way_round_and_keeps_going() {
-        assert_eq!(tumbled(0.0), UnitQuaternion::identity(), "at rest to start with");
+        assert_eq!(
+            tumbled(0.0),
+            UnitQuaternion::identity(),
+            "at rest to start with"
+        );
         // About every axis at once: not a turn about any one of them.
         let axis = tumbled(0.01).axis().unwrap();
-        assert!(axis.x.abs() > 0.1 && axis.y.abs() > 0.1 && axis.z.abs() > 0.1, "{axis:?}");
+        assert!(
+            axis.x.abs() > 0.1 && axis.y.abs() > 0.1 && axis.z.abs() > 0.1,
+            "{axis:?}"
+        );
         // And not settling on one: the way it turns wanders as it goes.
         let later = (tumbled(2.0) * tumbled(1.9).inverse()).axis().unwrap();
         let sooner = (tumbled(0.6) * tumbled(0.5).inverse()).axis().unwrap();
@@ -2990,7 +3294,11 @@ mod tests {
     #[test]
     fn an_aim_falls_between_the_two_either_side_of_it() {
         let grid = [-60.0, -30.0, 0.0, 30.0, 60.0];
-        assert_eq!(between(&grid, 0.0), (1, 2, 1.0), "on one, all the way to it");
+        assert_eq!(
+            between(&grid, 0.0),
+            (1, 2, 1.0),
+            "on one, all the way to it"
+        );
         assert_eq!(between(&grid, 15.0), (2, 3, 0.5));
         assert_eq!(between(&grid, -45.0), (0, 1, 0.5));
         assert_eq!(between(&grid, 90.0), (3, 4, 1.0), "held to the top");
@@ -3013,17 +3321,27 @@ mod tests {
             .iter()
             .map(|p| yaws.iter().map(|y| turned(p + 2.0 * y)).collect())
             .collect();
-        let aims = Aims { pitches, yaws, offsets };
+        let aims = Aims {
+            pitches,
+            yaws,
+            offsets,
+        };
         let at = |pitch: f32, yaw: f32| aims.offset(pitch, yaw)[&bone].position.x;
         assert!((at(0.0, 0.0) - 0.0).abs() < 1e-5);
         assert!((at(0.25, 0.25) - 0.75).abs() < 1e-5, "halfway between four");
-        assert!((at(2.0, -2.0) - (0.5 - 1.0)).abs() < 1e-5, "held to the corner");
+        assert!(
+            (at(2.0, -2.0) - (0.5 - 1.0)).abs() < 1e-5,
+            "held to the corner"
+        );
     }
 
     #[test]
     fn a_way_to_point_is_up_and_to_the_left() {
         assert!((pointing(0.0, 0.0) - Vector3::z()).norm() < 1e-6, "ahead");
-        assert!((pointing(0.0, std::f32::consts::FRAC_PI_2) - Vector3::x()).norm() < 1e-6, "left");
+        assert!(
+            (pointing(0.0, std::f32::consts::FRAC_PI_2) - Vector3::x()).norm() < 1e-6,
+            "left"
+        );
         let up = pointing(0.5, 0.3);
         assert!((up.y.asin() - 0.5).abs() < 1e-5 && (up.x.atan2(up.z) - 0.3).abs() < 1e-5);
     }
@@ -3033,8 +3351,20 @@ mod tests {
         let (hips, chest) = (Handle::new(1, 1), Handle::new(2, 1));
         let tilt = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.3);
         let mut target: FxHashMap<Handle<Node>, Bone> = [
-            (hips, Bone { position: Vector3::zeros(), rotation: tilt }),
-            (chest, Bone { position: Vector3::y(), rotation: UnitQuaternion::identity() }),
+            (
+                hips,
+                Bone {
+                    position: Vector3::zeros(),
+                    rotation: tilt,
+                },
+            ),
+            (
+                chest,
+                Bone {
+                    position: Vector3::y(),
+                    rotation: UnitQuaternion::identity(),
+                },
+            ),
         ]
         .into_iter()
         .collect();
@@ -3056,7 +3386,11 @@ mod tests {
     fn a_missing_cycle_falls_back_to_the_walk() {
         let no_sprint = [Some(Gait::Walking), Some(Gait::Running)];
         assert_eq!(choose(&no_sprint, Gait::Sprinting, false, true), Some(0));
-        assert_eq!(choose(&no_sprint, Gait::Walking, true, true), None, "no crouch: rest");
+        assert_eq!(
+            choose(&no_sprint, Gait::Walking, true, true),
+            None,
+            "no crouch: rest"
+        );
     }
 
     #[test]

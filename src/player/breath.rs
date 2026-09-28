@@ -64,7 +64,10 @@ mod tests {
     fn a_sprint_runs_the_breath_out_in_about_the_time_it_should() {
         let mut player = sprinting();
         assert_eq!(player.gait(), Gait::Sprinting);
-        assert!(breathe_for(&mut player, SPRINT_TIME * 0.5, true) > 0.4, "half gone by halfway");
+        assert!(
+            breathe_for(&mut player, SPRINT_TIME * 0.5, true) > 0.4,
+            "half gone by halfway"
+        );
 
         let dt = 1.0 / 60.0;
         let mut seconds = SPRINT_TIME * 0.5;
@@ -73,7 +76,10 @@ mod tests {
             seconds += dt;
         }
         assert!(player.winded, "never ran out");
-        assert!((seconds - SPRINT_TIME).abs() < 0.1, "{seconds} s of sprinting on a full breath");
+        assert!(
+            (seconds - SPRINT_TIME).abs() < 0.1,
+            "{seconds} s of sprinting on a full breath"
+        );
         // And once it has run out, it starts coming back: being winded is already a walk.
         assert!(breathe_for(&mut player, 1.0, true) > 0.0);
     }
@@ -92,7 +98,11 @@ mod tests {
         press(&mut player, KeyCode::CapsLock);
         breathe_for(&mut player, SPRINT_TIME * 1.1, true);
         assert!(player.winded);
-        assert_eq!(player.gait(), Gait::Walking, "no sprinting, and no running either");
+        assert_eq!(
+            player.gait(),
+            Gait::Walking,
+            "no sprinting, and no running either"
+        );
 
         // A moment's rest is not enough to set off again.
         breathe_for(&mut player, RECOVER_TIME * RECOVERED * 0.5, true);
@@ -129,7 +139,11 @@ mod tests {
         assert!(!player.winded);
         assert_eq!(player.posture, Posture::Standing, "back on its feet");
         assert_eq!(player.yaw, 1.0);
-        assert_eq!(player.gait(), Gait::Sprinting, "Shift and the latch are the player's own");
+        assert_eq!(
+            player.gait(),
+            Gait::Sprinting,
+            "Shift and the latch are the player's own"
+        );
         player.on_key(KeyCode::ShiftLeft, false);
         assert_eq!(player.gait(), Gait::Running, "still latched into a run");
     }

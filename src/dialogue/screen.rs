@@ -306,7 +306,10 @@ impl DialogueScreen {
         ui.send(self.means, TextMessage::Text(view.means.clone()));
         self.has_means = !view.means.is_empty();
         self.show_subtitles(ui);
-        ui.send(self.note, TextMessage::Text(view.note.clone().unwrap_or_default()));
+        ui.send(
+            self.note,
+            TextMessage::Text(view.note.clone().unwrap_or_default()),
+        );
         ui.send(self.note, WidgetMessage::Visibility(view.note.is_some()));
         self.said.clear();
         for (i, &(reply, label)) in self.replies.iter().enumerate() {
@@ -332,7 +335,11 @@ impl DialogueScreen {
             self.means,
             WidgetMessage::Visibility(self.subtitles.english && self.has_means),
         );
-        let size = if self.subtitles.latin { MEANS_SIZE } else { SAYS_SIZE };
+        let size = if self.subtitles.latin {
+            MEANS_SIZE
+        } else {
+            SAYS_SIZE
+        };
         ui.send(self.means, TextMessage::FontSize(size.into()));
     }
 
@@ -341,7 +348,10 @@ impl DialogueScreen {
     fn colour(&mut self, ui: &UserInterface, palette: Palette) {
         self.palette = palette;
         let solid = |color: Color| Brush::Solid(color).into();
-        ui.send(self.frame, WidgetMessage::Background(solid(palette.backdrop)));
+        ui.send(
+            self.frame,
+            WidgetMessage::Background(solid(palette.backdrop)),
+        );
         ui.send(self.frame, WidgetMessage::Foreground(solid(palette.dim)));
         ui.send(self.rule, WidgetMessage::Background(solid(palette.dim)));
         for (text, color) in [

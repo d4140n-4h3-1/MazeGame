@@ -69,7 +69,6 @@ mod view;
 mod viewmodel;
 
 pub use avatar::DROID_MODEL;
-pub use pistol::Strike;
 use avatar::{heading, Avatar, Going};
 use fyrox::{
     core::{
@@ -91,6 +90,7 @@ use fyrox::{
 };
 use head::LookBack;
 use input::Keys;
+pub use pistol::Strike;
 use posture::Posture;
 use third_person::{Orbit, BOOM_LENGTH};
 use view::{DEFAULT_FOV, DEFAULT_SENSITIVITY, NEAR_PLANE};
@@ -255,13 +255,19 @@ impl Player {
         .to_base();
 
         // The ears: what sounds in the scene is heard from the camera, facing its way.
-        let listener: Handle<Node> = ListenerBuilder::new(BaseBuilder::new()).build(graph).to_base();
+        let listener: Handle<Node> = ListenerBuilder::new(BaseBuilder::new())
+            .build(graph)
+            .to_base();
 
         let camera = CameraBuilder::new(
             BaseBuilder::new()
                 .with_local_transform(
                     TransformBuilder::new()
-                        .with_local_position(Vector3::new(0.0, FEET + Posture::Standing.eyes(), 0.0))
+                        .with_local_position(Vector3::new(
+                            0.0,
+                            FEET + Posture::Standing.eyes(),
+                            0.0,
+                        ))
                         .build(),
                 )
                 .with_child(flashlight)
@@ -425,7 +431,10 @@ impl Player {
         if let Some(avatar) = self.avatar.as_mut() {
             avatar.animate(graph, going, dt);
         }
-        let fired = self.avatar.as_ref().is_some_and(|avatar| avatar.shot().is_some());
+        let fired = self
+            .avatar
+            .as_ref()
+            .is_some_and(|avatar| avatar.shot().is_some());
         self.hold_pistol(graph, fired, dt);
         self.shoot(graph, dt);
     }
