@@ -716,6 +716,8 @@ pub struct Computer {
     screen_middle: Vector3<f32>,
     screen_corners: [Vector3<f32>; 4],
     hack: Hack,
+    /// Whether it stands in the maze this round, rather than out of the way.
+    placed: bool,
     /// How long the cursor has been blinking, in seconds.
     blink: f32,
     lit: Option<Stage>,
@@ -821,6 +823,7 @@ impl Computer {
                 Vector3::new(high.x, high.y, middle.z),
             ],
             hack: Hack::new(seed),
+            placed: false,
             blink: 0.0,
             lit: None,
         })
@@ -828,7 +831,8 @@ impl Computer {
 
     /// Puts it against a wall a little way from the `start` of the maze whose `grid` has its
     /// corner at `origin`, facing into the open, locked; and takes the floor it stands on out of
-    /// `grid`, so that the droids walk round it. Whether there was anywhere to put it.
+    /// `grid`, so that the droids walk round it. Whether there was anywhere to put it: if not, it
+    /// goes out of the way, rather than staying where it stood in the last maze.
     pub fn place(
         &mut self,
         graph: &mut Graph,
@@ -838,7 +842,11 @@ impl Computer {
     ) -> bool {
         self.hack = Hack::new(self.hack.dice.rotate_left(17) ^ 0x5bd1_e995);
         self.lit = None;
+        self.placed = false;
         let Some((cell, facing)) = spot(grid, start) else {
+            graph[self.body]
+                .local_transform_mut()
+                .set_position(Vector3::new(0.0, -1000.0, 0.0));
             return false;
         };
         let across = (-facing.1, facing.0);
@@ -881,6 +889,7 @@ impl Computer {
                 grid.set(x as usize, z as usize, false);
             }
         }
+        self.placed = true;
         true
     }
 
@@ -911,8 +920,12 @@ impl Computer {
             .map(|corner| transform.transform_point(&Point3::from(corner)).coords)
     }
 
-    /// Whether someone standing at `feet` is close enough in front of it to use it.
+    /// Whether someone standing at `feet` is close enough in front of it to use it. Never while it
+    /// is out of the way.
     pub fn within_reach(&self, graph: &Graph, feet: Vector3<f32>) -> bool {
+        if !self.placed {
+            return false;
+        }
         let (middle, facing) = self.screen(graph);
         let off = Vector3::new(feet.x - middle.x, 0.0, feet.z - middle.z);
         off.norm() < REACH && off.dot(&facing) > IN_FRONT
