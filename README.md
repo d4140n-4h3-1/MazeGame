@@ -102,8 +102,9 @@ shadows (its `raytracing` feature).
 - **A computer to hack, as in Welcome to the Game.** A monitor and keyboard float against a wall
   a few steps from where you start, the monitor's frame glowing red while it is locked. Close to
   it and in front of it, `Computer` and `E) Hack` show under the middle of the screen; E takes
-  the view in close, square on to the screen, and a terminal in green text comes up over it,
-  as big as the screen is in the view. Enter starts a breach: six commands, one at a time, each
+  the view in close, square on to the screen, and a terminal in green text comes up on the
+  screen itself (`MAZE_TERMINAL_OVERLAY=1` puts it over the screen instead, as a panel of the
+  game's interface, as it used to be). Enter starts a breach: six commands, one at a time, each
   to be typed exactly into the box under the output before its trace runs out, 15 seconds for
   each. A wrong key does not go in, costs half a second, flashes `ERR` and jolts the
   terminal, and the trace bar flashes once it is nearly out. If the trace completes first,
@@ -430,7 +431,8 @@ logs goes to the browser's console there.
 | `MAZE_REFLECTIONS=0`     | Turns floor reflections off.                                            |
 | `MAZE_KNOCKDOWN=<s>`     | That many seconds into a round, shoots down the droid nearest you, to try the ragdolls out. |
 | `MAZE_DISMEMBER=<parts>` | With `MAZE_KNOCKDOWN`, breaks those parts off it too, such as `head,forearm.L,shin.R`. |
-| `MAZE_COMPUTER=1`        | Puts you at the computer, using it, as soon as it is placed; `breach` starts a breach too. |
+| `MAZE_COMPUTER=1`        | Puts you at the computer, using it, as soon as it is placed; `breach` starts a breach too, and `look` only puts you in front of it. |
+| `MAZE_TERMINAL_OVERLAY=1` | Shows the computer's terminal over its screen, as a panel of the game's interface, instead of on the screen itself. |
 
 ### Fixed maze models
 
