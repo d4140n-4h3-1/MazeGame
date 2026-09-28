@@ -1647,7 +1647,6 @@ dependencies = [
 [[package]]
 name = "fyrox-graphics-wgpu"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
 dependencies = [
  "bytemuck",
  "fyrox-core",
