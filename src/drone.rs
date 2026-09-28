@@ -145,6 +145,13 @@ impl Drone {
             graph.remove_node(root);
             return None;
         };
+        // Its own shell and rings, just behind its lamp, would throw shadows across the corridor
+        // from shadow maps. Traced shadows leave it out, as they are gathered once; so do these.
+        for &node in &nodes {
+            if graph[node].cast::<Mesh>().is_some() {
+                graph[node].set_cast_shadows(false);
+            }
+        }
         let body = graph.find_by_name(root, BODY).map_or(root, |(body, _)| body);
         // Not scattering into a haze in the air: the drone is what glows.
         let lamp = PointLightBuilder::new(
