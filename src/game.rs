@@ -802,7 +802,7 @@ impl MazeGame {
         let player = self.player.feet(&scene.graph);
         if let Some(liveries) = liveries {
             self.inhabitants
-                .populate(scene, liveries, (grid, *origin), player, rng);
+                .populate(scene, liveries, (grid, *origin), player, self.player.yaw(), rng);
         }
         let graph = &scene.graph;
         // With the lights off, the player is hard to see, unless their flashlight gives them

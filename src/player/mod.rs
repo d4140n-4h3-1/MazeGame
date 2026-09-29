@@ -324,6 +324,11 @@ impl Player {
         graph[self.body].global_position()
     }
 
+    /// Which way the player faces, in radians, left positive from the world's +z.
+    pub fn yaw(&self) -> f32 {
+        self.yaw
+    }
+
     /// Where the player's feet are.
     pub fn feet(&self, graph: &Graph) -> Vector3<f32> {
         self.position(graph) + Vector3::new(0.0, FEET, 0.0)

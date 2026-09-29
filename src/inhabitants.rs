@@ -18,7 +18,8 @@
 //! Each is one of the kinds of droid in the conversations (see [`crate::dialogue`]), with a code
 //! of its own, and can be talked to by a player close by and facing it. While it is, it stands
 //! still and turns to face them, and afterwards stands a moment before going on its way. They
-//! all start out of the player's sight, and wander.
+//! all start out of the player's sight, and wander - all but one, which stands a little way in
+//! front of where the player starts, facing them, for a while before it sets off too.
 //!
 //! A conversation can turn a droid hostile (see [`Inhabitants::set_hostile`]), and a hostile
 //! droid hunts the player the way Metal Gear's guards do, through its [`Alert`] phases:
@@ -104,6 +105,12 @@ const MIDDLE: f32 = 0.85;
 /// How far from the player they are put down, in steps across the grid's half-meter cells
 /// (see [`WalkGrid::routes_from`]): out of sight to begin with.
 const AWAY_FROM_PLAYER: f32 = 24.0;
+/// How far from the player the one put down near them is, from least to most, in the same steps;
+/// how far to either side of the way they face, in radians, if there is room there; and how long
+/// it stands there, in seconds, before it sets off.
+const NEAR_PLAYER: (f32, f32) = (8.0, 14.0);
+const NEAR_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
+const NEAR_REST: f32 = 20.0;
 /// How far a droid goes each time it sets off, in steps across the grid, from least to most:
 /// never just round the corner, never across the whole maze.
 const TRIP: (f32, f32) = (30.0, 160.0);
@@ -830,14 +837,16 @@ impl Inhabitants {
     }
 
     /// Puts the maze's inhabitants into `scene` on the floor of `grid` whose corner is at
-    /// `origin`, well away from the `player`'s feet. They take turns being each of the kinds of
-    /// droid there are to talk to, each looking as its one of `liveries` has it.
+    /// `origin`, well away from the `player`'s feet - all but one, a little way in front of them
+    /// as they face `facing`. They take turns being each of the kinds of droid there are to talk
+    /// to, each looking as its one of `liveries` has it.
     pub fn populate(
         &mut self,
         scene: &mut Scene,
         liveries: Vec<Livery>,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         player: Vector3<f32>,
+        facing: f32,
         rng: &mut Rng,
     ) {
         self.clear(&mut scene.graph);
@@ -865,12 +874,33 @@ impl Inhabitants {
             .filter(|(_, cost)| cost.is_some_and(|c| c >= AWAY_FROM_PLAYER))
             .map(|(i, _)| (i % grid.width, i / grid.width))
             .collect();
+        let near: Vec<(usize, usize)> = routes
+            .costs
+            .iter()
+            .enumerate()
+            .filter(|(_, cost)| cost.is_some_and(|c| (NEAR_PLAYER.0..=NEAR_PLAYER.1).contains(&c)))
+            .map(|(i, _)| (i % grid.width, i / grid.width))
+            .collect();
+        // In front of them if there is room, where they will see it.
+        let ahead: Vec<(usize, usize)> = near
+            .iter()
+            .copied()
+            .filter(|&cell| {
+                let to = flat(on_floor(grid, origin, cell) - player).try_normalize(1.0e-3);
+                to.is_some_and(|to| to.dot(&forward(facing)) >= NEAR_CONE.cos())
+            })
+            .collect();
+        let near = if ahead.is_empty() { near } else { ahead };
         let first = rng.below(characters);
         for n in 0..count {
-            if places.is_empty() {
-                break;
-            }
-            let feet = on_floor(grid, origin, places.swap_remove(rng.below(places.len())));
+            // The first near the player, if there is room; the rest away.
+            let close = n == 0 && !near.is_empty();
+            let place = match close {
+                true => near[rng.below(near.len())],
+                false if places.is_empty() => break,
+                false => places.swap_remove(rng.below(places.len())),
+            };
+            let feet = on_floor(grid, origin, place);
             let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
                 .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
                 .with_collision_groups(ragdoll::character_groups())
@@ -899,10 +929,19 @@ impl Inhabitants {
                 avatar,
                 feet,
                 speed: 0.0,
-                heading: between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
+                heading: match close {
+                    true => {
+                        let to_player = flat(player - feet);
+                        to_player.x.atan2(to_player.z)
+                    }
+                    false => between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
+                },
                 route: Vec::new(),
-                // Not all setting off at once.
-                resting: between(rng, REST),
+                // Not all setting off at once, and the one near the player not for a while.
+                resting: match close {
+                    true => NEAR_REST,
+                    false => between(rng, REST),
+                },
                 waiting: 0.0,
                 last_seen: None,
                 character,
