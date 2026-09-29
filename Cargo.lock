@@ -1537,7 +1537,7 @@ dependencies = [
 [[package]]
 name = "fyrox"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fyrox-impl",
 ]
@@ -1545,7 +1545,7 @@ dependencies = [
 [[package]]
 name = "fyrox-animation"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1558,7 +1558,7 @@ dependencies = [
 [[package]]
 name = "fyrox-autotile"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fxhash",
  "nalgebra 0.35.0",
@@ -1568,7 +1568,7 @@ dependencies = [
 [[package]]
 name = "fyrox-core"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "android-activity",
  "arrayvec",
@@ -1603,7 +1603,7 @@ dependencies = [
 [[package]]
 name = "fyrox-core-derive"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "convert_case",
  "darling",
@@ -1616,7 +1616,7 @@ dependencies = [
 [[package]]
 name = "fyrox-gfx"
 version = "0.1.0"
-source = "git+https://github.com/d4140n-4h3-1/fyrox-gfx.git?branch=main#7ab808dcba71e7894f1b8607f43cad1a1cb5f0a5"
+source = "git+https://github.com/d4140n-4h3-1/fyrox-gfx.git?branch=main#8db74b58f036513488e50725e7a01f4166201d24"
 dependencies = [
  "fyrox",
  "fyrox-graphics-wgpu",
@@ -1625,7 +1625,7 @@ dependencies = [
 [[package]]
 name = "fyrox-graph"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1635,7 +1635,7 @@ dependencies = [
 [[package]]
 name = "fyrox-graphics"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "bytemuck",
  "fyrox-core",
@@ -1659,7 +1659,7 @@ dependencies = [
 [[package]]
 name = "fyrox-impl"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "approx",
  "base64",
@@ -1712,7 +1712,7 @@ dependencies = [
 [[package]]
 name = "fyrox-material"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1730,7 +1730,7 @@ dependencies = [
 [[package]]
 name = "fyrox-math"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "arrayvec",
  "bytemuck",
@@ -1743,7 +1743,7 @@ dependencies = [
 [[package]]
 name = "fyrox-resource"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fxhash",
  "fyrox-core",
@@ -1756,7 +1756,7 @@ dependencies = [
 [[package]]
 name = "fyrox-sound"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "fyrox-core",
  "fyrox-resource",
@@ -1772,7 +1772,7 @@ dependencies = [
 [[package]]
 name = "fyrox-texture"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "ddsfile",
  "fast_image_resize",
@@ -1789,7 +1789,7 @@ dependencies = [
 [[package]]
 name = "fyrox-ui"
 version = "2.0.0-rc.1"
-source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#b463456a7049408af1dc2f61d707efd7a1d401c8"
+source = "git+https://github.com/d4140n-4h3-1/Fyrox.git?branch=vulkan#6a44772d1fe152ee4e5f5a864837afe3853c8e7e"
 dependencies = [
  "bytemuck",
  "copypasta",
