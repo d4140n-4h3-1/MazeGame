@@ -26,6 +26,7 @@ use crate::{
     player::{Player, DROID_MODEL},
     survey,
     tiles::{self, Measured, Prefabs},
+    winded::Winded,
 };
 use fyrox::{
     core::{
@@ -184,6 +185,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     moving: fyrox_gfx::MovingThings,
+    /// The sweat drops over the droids out of breath.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    winded: Winded,
     /// The glowing frames of the computers, for the effects to light with.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -366,6 +371,7 @@ impl MazeGame {
         Self {
             moving,
             area_lights,
+            winded: Winded::make(),
             ..Default::default()
         }
     }
@@ -555,6 +561,7 @@ impl MazeGame {
         // longest route, often at an opening in the outer wall, and facing the sky is no start.
         let into_maze = survey::open_direction(grid, *origin, start);
         // Everyone is put down afresh for the new round, away from where the player starts.
+        self.winded.clear(&mut scene.graph);
         self.inhabitants.clear(&mut scene.graph);
         self.player.teleport(
             &mut scene.graph,
@@ -707,6 +714,7 @@ impl MazeGame {
         self.barks.clear();
         if self.prefabs.is_some() {
             // Out of the way first: the new maze's survey would take them for walls.
+            self.winded.clear(&mut ctx.scenes[self.scene].graph);
             self.inhabitants.clear(&mut ctx.scenes[self.scene].graph);
             self.level.clear(&mut ctx.scenes[self.scene]);
             self.set_banner(ctx, "");
@@ -935,6 +943,9 @@ impl MazeGame {
             heard,
             alarmed,
         } = self.update_inhabitants(ctx);
+        let graph = &mut ctx.scenes[self.scene].graph;
+        let winded = self.inhabitants.winded(graph);
+        self.winded.update(graph, &winded, ctx.dt);
         for (n, alert) in alerts {
             // The eyes show the phase: red after the player, orange searching, yellow wary, and
             // their own colour once it is calm again.

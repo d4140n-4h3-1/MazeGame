@@ -26,7 +26,8 @@
 //!
 //! - **Alert**: it can see the player, and after a first moment runs at them, breaking into a
 //!   sprint now and then (see [`SPRINT_EVERY`]), on breath spent and got back as the player's
-//!   is: out of it, it walks until enough is back. If it gets close enough to touch them, it
+//!   is: out of it, it walks until enough is back, sweat drops over its head saying so (see
+//!   [`crate::winded`]). If it gets close enough to touch them, it
 //!   has caught them.
 //! - **Evasion**: it has lost them. It runs to where they were going when it last saw them, and
 //!   looks about; then walks to one spot after another nearby, looking about at each, until
@@ -218,8 +219,10 @@ const CATCH_HEIGHT: f32 = 1.0;
 /// lasts. It never sprints the moment it turns on them.
 const SPRINT_EVERY: (f32, f32) = (4.0, 10.0);
 const SPRINT_FOR: (f32, f32) = (1.5, 3.0);
-/// How much breath a sentry has, to the player's 1: it is trained.
+/// How much breath a sentry has, to the player's 1: it is trained; and how fast it gets it back,
+/// to the player's 1: it is heavier.
 const SENTRY_STAMINA: f32 = 1.5;
+const SENTRY_RECOVERY: f32 = 2.0 / 3.0;
 /// How many of the pistol's bolts it takes to stop a hostile droid.
 pub const HITS: u32 = 3;
 /// How long, in seconds, a droid that has been stopped lies there before it is gone.
@@ -322,7 +325,8 @@ struct Inhabitant {
     sprint_in: f32,
     sprinting: f32,
     /// Its breath, from 1 - or a sentry's [`SENTRY_STAMINA`] - down to 0, spent and got back as
-    /// the player's is; and whether it has run out of it, and can only walk until enough is back.
+    /// the player's is, but a sentry's back more slowly; and whether it has run out of it, and
+    /// can only walk until enough is back.
     stamina: f32,
     winded: bool,
     /// How many of the pistol's bolts have hit it while hostile.
@@ -1186,10 +1190,13 @@ impl Inhabitants {
             };
             let moving = droid.speed > 0.1 && !droid.down;
             let breathing = if moving { gait } else { Gait::Walking };
-            let most = if sentry(droid.character) { SENTRY_STAMINA } else { 1.0 };
+            let (most, recovery) = match sentry(droid.character) {
+                true => (SENTRY_STAMINA, SENTRY_RECOVERY),
+                false => (1.0, 1.0),
+            };
             droid.stamina = droid.stamina.min(most);
             (droid.stamina, droid.winded) =
-                breath::breathe(droid.stamina, droid.winded, breathing, dt, most);
+                breath::breathe(droid.stamina, droid.winded, breathing, dt, most, recovery);
             if droid.winded {
                 droid.sprinting = 0.0;
             }
@@ -1526,6 +1533,16 @@ impl Inhabitants {
             .map(|droid| droid.search_left)
             .fold(0.0, f32::max);
         Some((alert, left))
+    }
+
+    /// The droids out of breath, as indices, and where their faces are.
+    pub fn winded(&self, graph: &Graph) -> Vec<(usize, Vector3<f32>)> {
+        self.droids
+            .iter()
+            .enumerate()
+            .filter(|(_, droid)| droid.winded && !droid.down && !droid.gone)
+            .filter_map(|(n, _)| Some((n, self.face(graph, n)?)))
+            .collect()
     }
 
     /// Turns the `n`th droid on the player: after a moment it hunts them, and it cannot be
