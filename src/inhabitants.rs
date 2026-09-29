@@ -1459,6 +1459,16 @@ impl Inhabitants {
         Some((alert, left))
     }
 
+    /// The sentries locking on to the player, as indices, and where their faces are.
+    pub fn locking(&self, graph: &Graph) -> Vec<(usize, Vector3<f32>)> {
+        self.droids
+            .iter()
+            .enumerate()
+            .filter(|(_, droid)| droid.lock > 0.0 && !droid.down && !droid.gone)
+            .filter_map(|(n, _)| Some((n, self.face(graph, n)?)))
+            .collect()
+    }
+
     /// Turns the `n`th droid on the player: after a moment it hunts them, and it cannot be
     /// talked to any more.
     pub fn set_hostile(&mut self, n: usize) {
