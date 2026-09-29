@@ -3,7 +3,7 @@
 use crate::{
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
     drone::{Drone, DroneLines, DRONE_LINES, DRONE_MODEL},
-    health::Health,
+    health::{Health, HealthSounds, Healing, Heard},
     hearts::{self, Hearts, HEART_MODEL},
     notes::{self, Notes, NOTES},
     diagnostics::{self, FrameStats},
@@ -293,10 +293,13 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     hearts: Hearts,
-    /// The player's health this round.
+    /// The player's health this round, and how it is heard.
     #[visit(skip)]
     #[reflect(hidden)]
     health: Health,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    health_sounds: HealthSounds,
     #[visit(skip)]
     #[reflect(hidden)]
     hearts_placed: bool,
@@ -377,6 +380,7 @@ impl MazeGame {
         Self {
             moving,
             area_lights,
+            health_sounds: HealthSounds::make(),
             ..Default::default()
         }
     }
@@ -606,7 +610,15 @@ impl MazeGame {
         let round = matches!(self.phase, Phase::Playing | Phase::Won | Phase::Deleted);
         if round && !self.menu.is_open() {
             let resting = self.phase == Phase::Playing && self.player.resting();
-            self.health.update(ctx.dt, resting);
+            if let Some(healing) = self.health.update(ctx.dt, resting) {
+                let graph = &mut ctx.scenes[self.scene].graph;
+                let at = self.player.position(graph);
+                let heard = match healing {
+                    Healing::Started => Heard::Healing,
+                    Healing::Whole => Heard::Whole,
+                };
+                self.health_sounds.play(graph, heard, at);
+            }
         }
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
         self.show_breath_bars(ctx);
@@ -976,6 +988,9 @@ impl MazeGame {
             // Hit, they lose some health, and with none left they are deleted.
             Some(n) if self.phase == Phase::Playing => {
                 let last = self.health.hit();
+                let graph = &mut ctx.scenes[self.scene].graph;
+                let at = self.player.position(graph);
+                self.health_sounds.play(graph, Heard::Hit, at);
                 if last {
                     self.delete_player(ctx, n);
                 }
@@ -1640,7 +1655,11 @@ impl MazeGame {
             if self.phase == Phase::Playing && self.health.hurt() {
                 let player = self.player.position(graph);
                 if self.hearts.take(graph, player) {
-                    self.health.heart();
+                    let whole = self.health.heart_and_whole();
+                    self.health_sounds.play(graph, Heard::Heart, player);
+                    if whole {
+                        self.health_sounds.play(graph, Heard::Whole, player);
+                    }
                 }
             }
         }
