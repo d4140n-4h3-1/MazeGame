@@ -34,7 +34,7 @@ use crate::{
 use fyrox::{
     asset::untyped::ResourceKind,
     core::{
-        algebra::{Point3, UnitQuaternion, Vector2, Vector3},
+        algebra::{Matrix4, Point3, UnitQuaternion, Vector2, Vector3},
         color::Color,
         pool::Handle,
         uuid::Uuid,
@@ -123,10 +123,13 @@ const DRAWN_BEFORE_SHOWN: u32 = 2;
 const LOCKED_COLOUR: Color = Color::opaque(255, 28, 28);
 const CLEARED_COLOUR: Color = Color::opaque(40, 110, 255);
 const FRAME_GLOW: f32 = 2.0;
-/// Its lamp, lighting what is in front of it in its frame's colour, as it glows: how far in front
-/// of the screen it is and how high, in meters, how bright it is, and how far it reaches.
-const LAMP_OUT: f32 = 0.35;
-const LAMP_BRIGHTNESS: f32 = 0.5;
+/// Its frame's glow on what is round it, in the frame's colour: a lamp at the middle of each of
+/// its four edges, just outside it and a little in front, so that together they light as the
+/// glowing rim does, and none shines onto the glass of the screen, where it would show as a spot
+/// of light. How far out from the rim and in front of it they are, in meters, how bright each is,
+/// and how far each reaches.
+const LAMP_OUT: f32 = 0.02;
+const LAMP_BRIGHTNESS: f32 = 0.18;
 const LAMP_REACH: f32 = 2.5;
 
 /// The room the monitor and keyboard take up against the wall, in meters: half as wide as they
@@ -968,8 +971,8 @@ pub struct Computer {
     /// its frame's glow.
     body: Handle<Node>,
     collider: Handle<Collider>,
-    /// Its lamp, in front of the screen, in the frame's colour.
-    lamp: Handle<Node>,
+    /// The lamps round its frame, in the frame's colour.
+    lamps: Vec<Handle<Node>>,
     frame: MaterialResource,
     /// What its screen glows with.
     glass: MaterialResource,
@@ -1062,31 +1065,56 @@ impl Computer {
         )
         .with_shape(ColliderShape::cuboid(BULK_HALF.x, BULK_HALF.y, BULK_HALF.z))
         .build(graph);
+        // The frame's rim, under the root, which the body carries as it is.
+        let (mut rim_low, mut rim_high) = (Vector3::repeat(f32::MAX), Vector3::repeat(f32::MIN));
+        let to_root = under(graph, root, frame_node);
+        if let Some(mesh) = graph[frame_node].cast::<Mesh>() {
+            for surface in mesh.surfaces() {
+                let data = surface.data();
+                let data = data.data_ref();
+                for vertex in data.vertex_buffer.iter() {
+                    if let Ok(position) = vertex.read_3_f32(VertexAttributeUsage::Position) {
+                        let point = to_root.transform_point(&Point3::from(position)).coords;
+                        rim_low = rim_low.inf(&point);
+                        rim_high = rim_high.sup(&point);
+                    }
+                }
+            }
+        }
+        let middle = (rim_low + rim_high) * 0.5;
+        let front = rim_high.z + LAMP_OUT;
+        let edges = [
+            Vector3::new(middle.x, rim_high.y + LAMP_OUT, front),
+            Vector3::new(middle.x, rim_low.y - LAMP_OUT, front),
+            Vector3::new(rim_low.x - LAMP_OUT, middle.y, front),
+            Vector3::new(rim_high.x + LAMP_OUT, middle.y, front),
+        ];
         // Not scattering into a haze in the air: the frame is what glows.
-        let lamp = PointLightBuilder::new(
-            BaseLightBuilder::new(
-                BaseBuilder::new().with_local_transform(
-                    TransformBuilder::new()
-                        .with_local_position(Vector3::new(
-                            0.0,
-                            BULK_HEIGHT,
-                            2.0 * BULK_HALF.z + LAMP_OUT,
-                        ))
-                        .build(),
-                ),
-            )
-            .with_color(LOCKED_COLOUR)
-            .with_intensity(LAMP_BRIGHTNESS)
-            .with_scatter_enabled(false),
-        )
-        .with_radius(LAMP_REACH)
-        .build(graph)
-        .to_base();
+        let lamps: Vec<Handle<Node>> = edges
+            .into_iter()
+            .filter(|edge| edge.iter().all(|v| v.is_finite()))
+            .map(|edge| {
+                PointLightBuilder::new(
+                    BaseLightBuilder::new(
+                        BaseBuilder::new().with_local_transform(
+                            TransformBuilder::new().with_local_position(edge).build(),
+                        ),
+                    )
+                    .with_color(LOCKED_COLOUR)
+                    .with_intensity(LAMP_BRIGHTNESS)
+                    .with_scatter_enabled(false),
+                )
+                .with_radius(LAMP_REACH)
+                .build(graph)
+                .to_base()
+            })
+            .collect();
+        let mut base = BaseBuilder::new().with_name("computer").with_child(collider);
+        for &lamp in &lamps {
+            base = base.with_child(lamp);
+        }
         let body = RigidBodyBuilder::new(
-            BaseBuilder::new()
-                .with_name("computer")
-                .with_child(collider)
-                .with_child(lamp)
+            base
                 .with_local_transform(
                     TransformBuilder::new()
                         .with_local_position(Vector3::new(0.0, -1000.0, 0.0))
@@ -1100,7 +1128,7 @@ impl Computer {
         Some(Self {
             body,
             collider,
-            lamp,
+            lamps,
             glass: glass.clone(),
             frame,
             screen,
@@ -1336,16 +1364,18 @@ impl Computer {
         self.lit = Some(stage);
     }
 
-    /// Has its lamp shine in its frame's colour: red while it is locked, blue once cleared.
+    /// Has its lamps shine in its frame's colour: red while it is locked, blue once cleared.
     pub fn light(&self, graph: &mut Graph) {
         let colour = if self.cleared() {
             CLEARED_COLOUR
         } else {
             LOCKED_COLOUR
         };
-        if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(self.lamp) {
-            if lamp.base_light_ref().color() != colour {
-                lamp.base_light_mut().set_color(colour);
+        for &lamp in &self.lamps {
+            if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(lamp) {
+                if lamp.base_light_ref().color() != colour {
+                    lamp.base_light_mut().set_color(colour);
+                }
             }
         }
     }
@@ -1428,6 +1458,18 @@ pub fn spot_away(
         }
         apart /= 2.0;
     }
+}
+
+/// How `node` is placed under `root`: its own transform and each parent's up to the root, as
+/// they are, whether or not the graph has worked out where anything is yet.
+fn under(graph: &Graph, root: Handle<Node>, node: Handle<Node>) -> Matrix4<f32> {
+    let mut transform = graph[node].local_transform().matrix();
+    let mut above = graph[node].parent();
+    while above.is_some() && above != root {
+        transform = graph[above].local_transform().matrix() * transform;
+        above = graph[above].parent();
+    }
+    transform
 }
 
 #[cfg(test)]

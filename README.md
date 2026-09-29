@@ -120,7 +120,7 @@ shadows (its `raytracing` feature).
   leaves it unlit); its see-through outer layer is made refractive glass in the game, since the
   engine draws a glTF model's surfaces solid whatever their alpha.
 - **What glows lights what is round it,** with ray-traced shadows like every other light: each
-  heart in red, each computer in its frame's colour (red while locked, blue once cleared), the
+  heart in red, each computer's frame in its colour (red while locked, blue once cleared), from four lamps round its rim that together light as the frame does, and leave no spot of light on the screen, the
   cyber pistol's muzzle in green while it is out, and every droid's eyes - dimly - in the
   colour they glow. The engine lights nothing from a glowing surface itself, so each has a small
   lamp of its own, as the drone does.
