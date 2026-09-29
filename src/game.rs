@@ -21,7 +21,6 @@ use crate::{
     inhabitants::{Alert, Inhabitants, Livery, News, Threat, HOSTILE_MODEL},
     layout::Rng,
     level::Level,
-    lock_on::LockOn,
     menu::{Choice, PauseMenu},
     platform,
     player::{Player, DROID_MODEL},
@@ -185,10 +184,6 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     moving: fyrox_gfx::MovingThings,
-    /// The charge of each sentry locking on to the player.
-    #[visit(skip)]
-    #[reflect(hidden)]
-    lock_on: LockOn,
     /// The glowing frames of the computers, for the effects to light with.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -371,7 +366,6 @@ impl MazeGame {
         Self {
             moving,
             area_lights,
-            lock_on: LockOn::make(),
             ..Default::default()
         }
     }
@@ -561,7 +555,6 @@ impl MazeGame {
         // longest route, often at an opening in the outer wall, and facing the sky is no start.
         let into_maze = survey::open_direction(grid, *origin, start);
         // Everyone is put down afresh for the new round, away from where the player starts.
-        self.lock_on.clear(&mut scene.graph);
         self.inhabitants.clear(&mut scene.graph);
         self.player.teleport(
             &mut scene.graph,
@@ -714,7 +707,6 @@ impl MazeGame {
         self.barks.clear();
         if self.prefabs.is_some() {
             // Out of the way first: the new maze's survey would take them for walls.
-            self.lock_on.clear(&mut ctx.scenes[self.scene].graph);
             self.inhabitants.clear(&mut ctx.scenes[self.scene].graph);
             self.level.clear(&mut ctx.scenes[self.scene]);
             self.set_banner(ctx, "");
@@ -943,9 +935,6 @@ impl MazeGame {
             heard,
             alarmed,
         } = self.update_inhabitants(ctx);
-        let graph = &mut ctx.scenes[self.scene].graph;
-        let locking = self.inhabitants.locking(graph);
-        self.lock_on.update(graph, &locking);
         for (n, alert) in alerts {
             // The eyes show the phase: red after the player, orange searching, yellow wary, and
             // their own colour once it is calm again.

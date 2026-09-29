@@ -56,7 +56,7 @@
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
 pub(crate) mod avatar;
-mod breath;
+pub(crate) mod breath;
 mod cover;
 mod head;
 mod input;

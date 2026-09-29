@@ -24,9 +24,10 @@
 //! A conversation can turn a droid hostile (see [`Inhabitants::set_hostile`]), and a hostile
 //! droid hunts the player the way Metal Gear's guards do, through its [`Alert`] phases:
 //!
-//! - **Alert**: it can see the player, and after a first moment runs at them. If it gets close
-//!   enough, it has caught them. A sentry need not: one that keeps them in sight for
-//!   [`LOCK_ON`] seconds stops them from wherever it stands.
+//! - **Alert**: it can see the player, and after a first moment runs at them, breaking into a
+//!   sprint now and then (see [`SPRINT_EVERY`]), on breath spent and got back as the player's
+//!   is: out of it, it walks until enough is back. If it gets close enough to touch them, it
+//!   has caught them.
 //! - **Evasion**: it has lost them. It runs to where they were going when it last saw them, and
 //!   looks about; then walks to one spot after another nearby, looking about at each, until
 //!   [`EVASION`] seconds are up.
@@ -66,6 +67,7 @@ use crate::{
     level::Level,
     player::{
         avatar::{self, Avatar, Going},
+        breath,
         posture::{Gait, Posture},
         Strike,
     },
@@ -151,8 +153,10 @@ const TALK_REACH: f32 = 2.5;
 const TALK_CONE: f32 = 40.0 * std::f32::consts::PI / 180.0;
 /// Where a droid's face is above its feet, in meters, if its model has no head to go by.
 const FACE_HEIGHT: f32 = 1.6;
-/// Its running pace, in meters per second, if the droid has no run to go by.
+/// Its running and sprinting paces, in meters per second, if the droid has no run or sprint to
+/// go by.
 const FALLBACK_RUN: f32 = 2.0;
+const FALLBACK_SPRINT: f32 = 3.5;
 /// How long a droid that has just turned hostile stands before it goes after the player, in
 /// seconds: long enough to finish its threat, and for the player to start running.
 const WINDUP: f32 = 1.0;
@@ -202,13 +206,20 @@ const ALARM_RANGE: f32 = 40.0;
 const REPLAN: f32 = 0.4;
 /// How far it looks for a way to the player, in steps across the grid's half-meter cells.
 const CHASE_REACH: f32 = 200.0;
-/// How near the player's feet, in meters, a hostile droid's have to get to catch them - short of
-/// their bodies touching - and how far above or below.
-const CATCH: f32 = 0.9;
+/// How far out from the middle of the player's body it goes, standing, in meters (see
+/// `crate::player::posture`).
+const PLAYER_RADIUS: f32 = 0.35;
+/// How near the player's feet, in meters, a hostile droid's have to get to catch them - their
+/// bodies touching, give or take a few centimeters - and how far above or below.
+const CATCH: f32 = RADIUS + PLAYER_RADIUS + 0.05;
 const CATCH_HEIGHT: f32 = 1.0;
-/// How long, in seconds, a sentry on Alert has to keep the player in sight to stop them from
-/// where it stands: long enough to duck out of sight, not to outrun it.
-pub const LOCK_ON: f32 = 1.5;
+/// How long, in seconds, a droid on Alert runs before it breaks into a sprint, from least to
+/// most - picked afresh each time, so the player cannot count on when - and how long each sprint
+/// lasts. It never sprints the moment it turns on them.
+const SPRINT_EVERY: (f32, f32) = (4.0, 10.0);
+const SPRINT_FOR: (f32, f32) = (1.5, 3.0);
+/// How much breath a sentry has, to the player's 1: it is trained.
+const SENTRY_STAMINA: f32 = 1.5;
 /// How many of the pistol's bolts it takes to stop a hostile droid.
 pub const HITS: u32 = 3;
 /// How long, in seconds, a droid that has been stopped lies there before it is gone.
@@ -281,10 +292,8 @@ struct Inhabitant {
     talking: bool,
     /// How it is going about the player, once it has turned on them.
     alert: Option<Alert>,
-    /// Whether, being hostile, it can see the player, as of this frame - itself, or through
-    /// another sentry it sees after them; and whether itself.
+    /// Whether, being hostile, it can see the player, as of this frame.
     sees_player: bool,
-    has_player_in_sight: bool,
     /// Where it last saw the player's feet, and which way they were going then, roughly.
     lost_at: Vector3<f32>,
     lost_going: Vector3<f32>,
@@ -308,9 +317,14 @@ struct Inhabitant {
     replan: f32,
     /// How long, having just turned hostile, it stands before going after the player, in seconds.
     windup: f32,
-    /// How long, as a sentry on Alert, it has kept the player in sight without a break, in
-    /// seconds.
-    lock: f32,
+    /// On Alert, how long until it sprints, in seconds - below 0 before it has been picked - and
+    /// how long it has left sprinting.
+    sprint_in: f32,
+    sprinting: f32,
+    /// Its breath, from 1 - or a sentry's [`SENTRY_STAMINA`] - down to 0, spent and got back as
+    /// the player's is; and whether it has run out of it, and can only walk until enough is back.
+    stamina: f32,
+    winded: bool,
     /// How many of the pistol's bolts have hit it while hostile.
     hits: u32,
     /// Whether it has been stopped, and stays where it went down.
@@ -677,12 +691,23 @@ fn stage_after(warned: u8, patience: f32) -> f32 {
     }
 }
 
-/// How long a sentry has kept the player in sight, `lock` seconds until now, after another `dt`
-/// in which it could `aim` at them - on Alert, done standing, and seeing them itself - or not;
-/// and whether that is long enough to stop them.
-fn lock_on(lock: f32, aim: bool, dt: f32) -> (f32, bool) {
-    let lock = if aim { lock + dt } else { 0.0 };
-    (lock, lock >= LOCK_ON)
+/// How long until a droid sprints, `sprint_in` - below 0 before it has been picked - and how
+/// long it has left `sprinting`, after another `dt` of `chasing` the player or not: a sprint
+/// comes some while into a chase, never at its start, and again some while after each ends.
+fn sprints(sprint_in: f32, sprinting: f32, chasing: bool, rng: &mut Rng, dt: f32) -> (f32, f32) {
+    if !chasing {
+        return (-1.0, 0.0);
+    }
+    if sprinting > 0.0 {
+        return (sprint_in, sprinting - dt);
+    }
+    if sprint_in < 0.0 {
+        return (between(rng, SPRINT_EVERY), 0.0);
+    }
+    match sprint_in - dt {
+        due if due <= 0.0 => (between(rng, SPRINT_EVERY), between(rng, SPRINT_FOR)),
+        due => (due, 0.0),
+    }
 }
 
 /// The phase a droid in `alert` goes into, seeing the player or not, with `left` seconds left of
@@ -950,7 +975,6 @@ impl Inhabitants {
                 talking: false,
                 alert: None,
                 sees_player: false,
-                has_player_in_sight: false,
                 lost_at: feet,
                 lost_going: Vector3::zeros(),
                 search_left: 0.0,
@@ -963,7 +987,10 @@ impl Inhabitants {
                 unaimed: 0.0,
                 replan: 0.0,
                 windup: 0.0,
-                lock: 0.0,
+                sprint_in: -1.0,
+                sprinting: 0.0,
+                stamina: SENTRY_STAMINA,
+                winded: false,
                 hits: 0,
                 down: false,
                 ragdoll: None,
@@ -975,9 +1002,9 @@ impl Inhabitants {
     }
 
     /// Moves everyone along for another `dt`, over `grid` whose corner is at `origin`, making
-    /// way for each other and - unless they are after them - for the `player`'s feet. Whether
-    /// anyone caught the player - or, being a sentry as `sentry` says of its kind, stopped them
-    /// from afar - and whose phase changed.
+    /// way for each other and - unless they are after them - for the `player`'s feet, sentries
+    /// as `sentry` says of their kind with more breath than the rest. Whether anyone caught the
+    /// player, and whose phase changed.
     pub fn update(
         &mut self,
         graph: &mut Graph,
@@ -1146,6 +1173,26 @@ impl Inhabitants {
             // Running after the player, and to where it lost them.
             let hurrying = droid.alert == Some(Alert::Alert)
                 || (droid.alert == Some(Alert::Evasion) && droid.searched <= 1);
+            // After the player, it sprints now and then, when it is not to be told.
+            let chasing = droid.alert == Some(Alert::Alert) && droid.windup == 0.0 && !droid.down;
+            (droid.sprint_in, droid.sprinting) =
+                sprints(droid.sprint_in, droid.sprinting, chasing, rng, dt);
+            // Out of breath, it walks until enough is back, and a sprint it was due waits.
+            let gait = match (hurrying, droid.sprinting > 0.0) {
+                _ if droid.winded => Gait::Walking,
+                (true, true) => Gait::Sprinting,
+                (true, false) => Gait::Jogging,
+                (false, _) => Gait::Walking,
+            };
+            let moving = droid.speed > 0.1 && !droid.down;
+            let breathing = if moving { gait } else { Gait::Walking };
+            let most = if sentry(droid.character) { SENTRY_STAMINA } else { 1.0 };
+            droid.stamina = droid.stamina.min(most);
+            (droid.stamina, droid.winded) =
+                breath::breathe(droid.stamina, droid.winded, breathing, dt, most);
+            if droid.winded {
+                droid.sprinting = 0.0;
+            }
             // Past each point on the way, bar the last, as soon as it is near - or already
             // behind, having been put off course making way for someone.
             while let [.., after, next] = droid.route[..] {
@@ -1176,16 +1223,15 @@ impl Inhabitants {
                         }
                     } else {
                         droid.waiting = 0.0;
-                        let pace = match hurrying {
-                            true => droid
-                                .avatar
-                                .pace(Posture::Standing, Gait::Jogging)
-                                .unwrap_or(FALLBACK_RUN),
-                            false => droid
-                                .avatar
-                                .pace(Posture::Standing, Gait::Walking)
-                                .unwrap_or(FALLBACK_PACE),
+                        let fallback = match gait {
+                            Gait::Sprinting => FALLBACK_SPRINT,
+                            Gait::Walking => FALLBACK_PACE,
+                            _ => FALLBACK_RUN,
                         };
+                        let pace = droid
+                            .avatar
+                            .pace(Posture::Standing, gait)
+                            .unwrap_or(fallback);
                         // Slower the further it has yet to turn, and slowing down to stop at the
                         // end of the way.
                         let off = droid.heading - droid.avatar.facing();
@@ -1219,18 +1265,6 @@ impl Inhabitants {
             {
                 caught = caught.or(Some(me));
             }
-            // A sentry that has kept them in sight long enough stops them from where it is.
-            let aim = sentry(droid.character)
-                && droid.alert == Some(Alert::Alert)
-                && droid.windup == 0.0
-                && droid.has_player_in_sight
-                && !droid.down
-                && !droid.talking;
-            let (lock, stopped) = lock_on(droid.lock, aim, dt);
-            droid.lock = lock;
-            if stopped {
-                caught = caught.or(Some(me));
-            }
 
             if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(droid.body) {
                 body.set_next_kinematic_translation(droid.feet + Vector3::new(0.0, MIDDLE, 0.0));
@@ -1242,10 +1276,7 @@ impl Inhabitants {
                     true => Posture::Crouching,
                     false => Posture::Standing,
                 },
-                gait: match hurrying {
-                    true => Gait::Jogging,
-                    false => Gait::Walking,
-                },
+                gait,
                 grounded: true,
                 jumped: false,
                 low: false,
@@ -1293,7 +1324,6 @@ impl Inhabitants {
                 }
                 _ => false,
             };
-            droid.has_player_in_sight = droid.sees_player;
         }
     }
 
@@ -1496,16 +1526,6 @@ impl Inhabitants {
             .map(|droid| droid.search_left)
             .fold(0.0, f32::max);
         Some((alert, left))
-    }
-
-    /// The sentries locking on to the player, as indices, and where their faces are.
-    pub fn locking(&self, graph: &Graph) -> Vec<(usize, Vector3<f32>)> {
-        self.droids
-            .iter()
-            .enumerate()
-            .filter(|(_, droid)| droid.lock > 0.0 && !droid.down && !droid.gone)
-            .filter_map(|(n, _)| Some((n, self.face(graph, n)?)))
-            .collect()
     }
 
     /// Turns the `n`th droid on the player: after a moment it hunts them, and it cannot be
@@ -1855,19 +1875,25 @@ mod tests {
     }
 
     #[test]
-    fn a_sentry_stops_the_player_kept_in_sight_long_enough() {
-        let dt = 0.1;
-        let (mut lock, mut stopped, mut frames) = (0.0, false, 0);
-        while !stopped {
-            (lock, stopped) = lock_on(lock, true, dt);
-            frames += 1;
-            assert!(frames < 100, "never stops them");
+    fn it_sprints_now_and_then_but_never_as_the_chase_starts() {
+        let dt = 0.05;
+        let mut rng = Rng::new(3);
+        let (mut sprint_in, mut sprinting) = (-1.0, 0.0);
+        let mut first = None;
+        let mut sprints_begun = 0;
+        for frame in 0..(60.0 / dt) as u32 {
+            let was = sprinting > 0.0;
+            (sprint_in, sprinting) = sprints(sprint_in, sprinting, true, &mut rng, dt);
+            if !was && sprinting > 0.0 {
+                sprints_begun += 1;
+                first.get_or_insert(frame as f32 * dt);
+            }
         }
-        assert!((frames as f32 * dt - LOCK_ON).abs() < dt + 1.0e-4, "after {frames} frames");
-        // Out of sight for a moment, it starts over.
-        let (lock, stopped) = lock_on(LOCK_ON - dt, false, dt);
-        assert_eq!((lock, stopped), (0.0, false));
-        assert!(!lock_on(lock, true, dt).1);
+        let first = first.expect("it sprints");
+        assert!(first >= SPRINT_EVERY.0 - dt, "not straight away: {first}");
+        assert!(sprints_begun >= 3, "again and again: {sprints_begun}");
+        // No longer chasing, it forgets, and starts over when it chases again.
+        assert_eq!(sprints(2.0, 1.0, false, &mut rng, dt), (-1.0, 0.0));
     }
 
     #[test]

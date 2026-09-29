@@ -34,7 +34,6 @@ mod inhabitants;
 mod inward;
 mod layout;
 mod level;
-mod lock_on;
 mod menu;
 mod notes;
 mod platform;

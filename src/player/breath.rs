@@ -26,30 +26,62 @@ impl Player {
     /// enough of it is back.
     pub(super) fn breathe(&mut self, dt: f32, moving: bool) {
         let gait = if moving { self.gait() } else { Gait::Walking };
-        let spend = match gait {
-            Gait::Sprinting => Some(SPRINT_TIME),
-            Gait::Running => Some(RUN_TIME),
-            _ => None,
-        };
-        if let Some(lasts) = spend {
-            self.stamina = (self.stamina - dt / lasts).max(0.0);
-            self.winded |= self.stamina == 0.0;
-            return;
-        }
-        // Still work, just not hard work: a jog gets the breath back more slowly than a walk.
-        let rate = if gait == Gait::Jogging {
-            RECOVER_JOGGING
-        } else {
-            1.0
-        };
-        self.stamina = (self.stamina + rate * dt / RECOVER_TIME).min(1.0);
-        self.winded &= self.stamina < RECOVERED;
+        (self.stamina, self.winded) = breathe(self.stamina, self.winded, gait, dt, 1.0);
     }
+}
+
+/// Breath left, `stamina` from `most` down to 0, and whether `winded`, after another `dt` at
+/// `gait`: the player's, whose most is 1, and the droids' after them just the same - trained,
+/// a sentry has more to spend, but spends and gets it back as fast.
+pub(crate) fn breathe(stamina: f32, winded: bool, gait: Gait, dt: f32, most: f32) -> (f32, bool) {
+    let spend = match gait {
+        Gait::Sprinting => Some(SPRINT_TIME),
+        Gait::Running => Some(RUN_TIME),
+        _ => None,
+    };
+    if let Some(lasts) = spend {
+        let stamina = (stamina - dt / lasts).max(0.0);
+        return (stamina, winded || stamina == 0.0);
+    }
+    // Still work, just not hard work: a jog gets the breath back more slowly than a walk.
+    let rate = if gait == Gait::Jogging {
+        RECOVER_JOGGING
+    } else {
+        1.0
+    };
+    let stamina = (stamina + rate * dt / RECOVER_TIME).min(most);
+    (stamina, winded && stamina < RECOVERED)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sentry_sprints_half_as_long_again_and_gets_it_back_as_fast() {
+        let dt = 1.0 / 60.0;
+        let sprint = |most: f32| {
+            let (mut stamina, mut winded, mut time) = (most, false, 0.0);
+            while !winded {
+                (stamina, winded) = breathe(stamina, winded, Gait::Sprinting, dt, most);
+                time += dt;
+            }
+            time
+        };
+        assert!((sprint(1.0) - SPRINT_TIME).abs() < 0.05);
+        assert!((sprint(1.5) - 1.5 * SPRINT_TIME).abs() < 0.05);
+        // Winded, it walks until as much is back as the player needs, and fills up to its most.
+        let (mut stamina, mut winded, mut time) = (0.0, true, 0.0);
+        while winded {
+            (stamina, winded) = breathe(stamina, winded, Gait::Walking, dt, 1.5);
+            time += dt;
+        }
+        assert!((time - RECOVERED * RECOVER_TIME).abs() < 0.05, "{time}");
+        for _ in 0..(30.0 / dt) as u32 {
+            (stamina, winded) = breathe(stamina, winded, Gait::Walking, dt, 1.5);
+        }
+        assert_eq!((stamina, winded), (1.5, false));
+    }
     use crate::player::{hold_shift, posture::Posture, press};
     use fyrox::keyboard::KeyCode;
 
