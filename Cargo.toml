@@ -43,7 +43,3 @@ wgpu = { version = "30", features = ["webgl"] }
 # settings from its address.
 web-sys = { version = "0.3", features = ["Document", "Element", "Location", "UrlSearchParams", "Window"] }
 
-# The engine fork's wgpu backend, with a fix for browsers until the fork has it: see the note at
-# the top of patches/fyrox-graphics-wgpu/Cargo.toml.
-[patch."https://github.com/d4140n-4h3-1/Fyrox.git"]
-fyrox-graphics-wgpu = { path = "patches/fyrox-graphics-wgpu" }

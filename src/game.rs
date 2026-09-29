@@ -184,6 +184,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     moving: fyrox_gfx::MovingThings,
+    /// The glowing frames of the computers, for the effects to light with.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    area_lights: fyrox_gfx::AreaLights,
     /// The droid the player is seen as, until it has loaded and joined the player.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -356,10 +360,12 @@ pub struct MazeGame {
 }
 
 impl MazeGame {
-    /// The game, telling the graphics effects what moves through `moving`.
-    pub fn new(moving: fyrox_gfx::MovingThings) -> Self {
+    /// The game, telling the graphics effects what moves through `moving`, and what glows through
+    /// `area_lights`.
+    pub fn new(moving: fyrox_gfx::MovingThings, area_lights: fyrox_gfx::AreaLights) -> Self {
         Self {
             moving,
+            area_lights,
             ..Default::default()
         }
     }
@@ -1436,10 +1442,8 @@ impl MazeGame {
             }
         }
         if !self.menu.is_open() {
-            let graph = &mut ctx.scenes[self.scene].graph;
             for computer in &mut self.computers {
                 computer.update(ctx.dt);
-                computer.light(graph);
             }
         }
         // The terminal of the one the player is using, or last used.
@@ -1896,6 +1900,25 @@ impl Plugin for MazeGame {
             _ => Vec::new(),
         };
         self.moving.set(moving);
+
+        // The frames of the computers nearest the player glow on what is round them; the effects
+        // light only so many strips.
+        // MAZE_AREA_LIGHTS=0 leaves them dark, to compare.
+        static LIT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let lit = *LIT.get_or_init(|| platform::var("MAZE_AREA_LIGHTS").as_deref() != Some("0"));
+        let lights = if self.computer_placed && lit {
+            let graph = &ctx.scenes[self.scene].graph;
+            let player = self.player.position(graph);
+            let mut nearest: Vec<&Computer> = self.computers.iter().collect();
+            nearest.sort_by(|a, b| {
+                let away = |c: &Computer| (c.position(graph) - player).norm_squared();
+                away(a).total_cmp(&away(b))
+            });
+            nearest.iter().flat_map(|c| c.lights(graph)).collect()
+        } else {
+            Vec::new()
+        };
+        self.area_lights.set(lights);
 
         #[cfg(target_arch = "wasm32")]
         self.follow_browser_mouse_lock(ctx);

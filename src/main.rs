@@ -69,8 +69,10 @@ fn main() {
     let effects = graphics_effects();
     // The game tells the effects what moves, so anti-aliasing does not leave a ghost behind it.
     let moving = effects.moving_things();
+    // And what glows: the computers' frames.
+    let area_lights = effects.area_lights();
     executor.add_plugin(effects);
-    executor.add_plugin(MazeGame::new(moving));
+    executor.add_plugin(MazeGame::new(moving, area_lights));
     executor.run()
 }
 

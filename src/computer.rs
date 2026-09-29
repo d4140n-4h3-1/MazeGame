@@ -63,10 +63,6 @@ use fyrox::{
             Mesh,
         },
         node::Node,
-        light::{
-            point::{PointLight, PointLightBuilder},
-            BaseLightBuilder,
-        },
         rigidbody::{RigidBodyBuilder, RigidBodyType},
         sound::{SoundBufferResource, SoundBuilder, Status},
         transform::TransformBuilder,
@@ -123,14 +119,22 @@ const DRAWN_BEFORE_SHOWN: u32 = 2;
 const LOCKED_COLOUR: Color = Color::opaque(255, 28, 28);
 const CLEARED_COLOUR: Color = Color::opaque(40, 110, 255);
 const FRAME_GLOW: f32 = 2.0;
-/// Its frame's glow on what is round it, in the frame's colour: a lamp at the middle of each of
-/// its four edges, just outside it and a little in front, so that together they light as the
-/// glowing rim does, and none shines onto the glass of the screen, where it would show as a spot
-/// of light. How far out from the rim and in front of it they are, in meters, how bright each is,
-/// and how far each reaches.
-const LAMP_OUT: f32 = 0.02;
-const LAMP_BRIGHTNESS: f32 = 0.18;
-const LAMP_REACH: f32 = 2.5;
+/// Its frame's glow on what is round it, in the frame's colour: each of the frame's four edges is
+/// an area light (see fyrox_gfx::area_lights) - a strip lying on the front of the rim, and one on
+/// each of its outer sides - that lights from all along it, as the glowing rim itself would. How wide each strip is and how far in
+/// front of the rim, in meters; how bright a square meter of it is; how far it reaches; and how
+/// far apart the points it is sampled at are.
+///
+/// Where shadows are not traced - in a browser - the strips light through walls, so there they
+/// reach less far.
+const STRIP_WIDTH: f32 = 0.03;
+const STRIP_OUT: f32 = 0.005;
+const STRIP_BRIGHTNESS: f32 = 20.0;
+#[cfg(not(target_arch = "wasm32"))]
+const STRIP_REACH: f32 = 2.5;
+#[cfg(target_arch = "wasm32")]
+const STRIP_REACH: f32 = 1.5;
+const STRIP_SPACING: f32 = 0.06;
 
 /// The room the monitor and keyboard take up against the wall, in meters: half as wide as they
 /// are, half as high, and half as far out from the wall; and how high the middle of that is.
@@ -971,8 +975,9 @@ pub struct Computer {
     /// its frame's glow.
     body: Handle<Node>,
     collider: Handle<Collider>,
-    /// The lamps round its frame, in the frame's colour.
-    lamps: Vec<Handle<Node>>,
+    /// The glowing strips round its frame, in the body's space: a corner and two edges each,
+    /// the light shining out from the first edge across the second.
+    strips: Vec<(Vector3<f32>, [Vector3<f32>; 2])>,
     frame: MaterialResource,
     /// What its screen glows with.
     glass: MaterialResource,
@@ -1081,38 +1086,29 @@ impl Computer {
                 }
             }
         }
-        let middle = (rim_low + rim_high) * 0.5;
-        let front = rim_high.z + LAMP_OUT;
-        let edges = [
-            Vector3::new(middle.x, rim_high.y + LAMP_OUT, front),
-            Vector3::new(middle.x, rim_low.y - LAMP_OUT, front),
-            Vector3::new(rim_low.x - LAMP_OUT, middle.y, front),
-            Vector3::new(rim_high.x + LAMP_OUT, middle.y, front),
-        ];
-        // Not scattering into a haze in the air: the frame is what glows.
-        let lamps: Vec<Handle<Node>> = edges
-            .into_iter()
-            .filter(|edge| edge.iter().all(|v| v.is_finite()))
-            .map(|edge| {
-                PointLightBuilder::new(
-                    BaseLightBuilder::new(
-                        BaseBuilder::new().with_local_transform(
-                            TransformBuilder::new().with_local_position(edge).build(),
-                        ),
-                    )
-                    .with_color(LOCKED_COLOUR)
-                    .with_intensity(LAMP_BRIGHTNESS)
-                    .with_scatter_enabled(false),
-                )
-                .with_radius(LAMP_REACH)
-                .build(graph)
-                .to_base()
-            })
-            .collect();
-        let mut base = BaseBuilder::new().with_name("computer").with_child(collider);
-        for &lamp in &lamps {
-            base = base.with_child(lamp);
-        }
+        let front = rim_high.z + STRIP_OUT;
+        let (width, height) = (rim_high.x - rim_low.x, rim_high.y - rim_low.y);
+        let (across, up) = (Vector3::x() * width, Vector3::y() * height);
+        let back = rim_low.z;
+        let deep = Vector3::z() * (rim_high.z - rim_low.z).max(STRIP_WIDTH);
+        let (thick_x, thick_y) = (Vector3::x() * STRIP_WIDTH, Vector3::y() * STRIP_WIDTH);
+        // Each with its edges in the order that has x across y point out of the front.
+        let strips = if width.is_finite() && height.is_finite() {
+            vec![
+                (Vector3::new(rim_low.x, rim_high.y - STRIP_WIDTH, front), [across, thick_y]),
+                (Vector3::new(rim_low.x, rim_low.y, front), [across, thick_y]),
+                (Vector3::new(rim_low.x, rim_low.y, front), [thick_x, up]),
+                (Vector3::new(rim_high.x - STRIP_WIDTH, rim_low.y, front), [thick_x, up]),
+                // Its outer sides, which glow too, and light the wall round it.
+                (Vector3::new(rim_low.x, rim_high.y, back), [deep, across]),
+                (Vector3::new(rim_low.x, rim_low.y, back), [across, deep]),
+                (Vector3::new(rim_low.x, rim_low.y, back), [deep, up]),
+                (Vector3::new(rim_high.x, rim_low.y, back), [up, deep]),
+            ]
+        } else {
+            Vec::new()
+        };
+        let base = BaseBuilder::new().with_name("computer").with_child(collider);
         let body = RigidBodyBuilder::new(
             base
                 .with_local_transform(
@@ -1128,7 +1124,7 @@ impl Computer {
         Some(Self {
             body,
             collider,
-            lamps,
+            strips,
             glass: glass.clone(),
             frame,
             screen,
@@ -1364,20 +1360,38 @@ impl Computer {
         self.lit = Some(stage);
     }
 
-    /// Has its lamps shine in its frame's colour: red while it is locked, blue once cleared.
-    pub fn light(&self, graph: &mut Graph) {
+    /// The glow of its frame, as area lights in the frame's colour: red while it is locked,
+    /// blue once cleared.
+    pub fn lights(&self, graph: &Graph) -> Vec<fyrox_gfx::AreaLight> {
         let colour = if self.cleared() {
             CLEARED_COLOUR
         } else {
             LOCKED_COLOUR
         };
-        for &lamp in &self.lamps {
-            if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(lamp) {
-                if lamp.base_light_ref().color() != colour {
-                    lamp.base_light_mut().set_color(colour);
-                }
-            }
-        }
+        let Ok(body) = graph.try_get_node(self.body) else {
+            return Vec::new();
+        };
+        let to_world = body.global_transform();
+        self.strips
+            .iter()
+            .map(|(corner, [u, v])| {
+                fyrox_gfx::AreaLight::new(
+                    to_world.transform_point(&Point3::from(*corner)).coords,
+                    [to_world.transform_vector(u), to_world.transform_vector(v)],
+                    STRIP_SPACING,
+                )
+                .with_colour(colour, STRIP_BRIGHTNESS)
+                .with_reach(STRIP_REACH)
+            })
+            .collect()
+    }
+
+    /// Where it is, in the world.
+    pub fn position(&self, graph: &Graph) -> Vector3<f32> {
+        graph
+            .try_get_node(self.body)
+            .map(|body| body.global_position())
+            .unwrap_or_default()
     }
 }
 
