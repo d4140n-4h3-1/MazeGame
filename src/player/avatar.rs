@@ -113,9 +113,10 @@ pub const DROID_MODEL: &str = "data/droid_full_deform.glb";
 pub(crate) const SCALE: f32 = 0.85;
 /// The droid's cycles by name, with the gait each is for. The crouch, for no gait, is for
 /// crouching and crawling at any of them.
-const CYCLES: [(&str, Option<Gait>); 4] = [
+const CYCLES: [(&str, Option<Gait>); 5] = [
     ("droid_walk_cycle", Some(Gait::Walking)),
     ("droid_run_cycle", Some(Gait::Jogging)),
+    ("droid_running_cycle", Some(Gait::Running)),
     ("droid_sprint_cycle", Some(Gait::Sprinting)),
     ("droid_crouch_cycle", None),
 ];
@@ -221,8 +222,8 @@ const COVER_WALK: &str = "droid_cover_walk";
 /// above it, as every gait is slower the lower the posture.
 const CROUCHING_RATES: [f32; 4] = [1.0, 1.3, 1.45, 1.6];
 const CRAWLING_RATES: [f32; 4] = [0.5, 0.65, 0.72, 0.8];
-/// How fast a run goes, as a share of the cycle it is played with: the sprint's, stepped out a
-/// good deal slower, between a jog and a sprint.
+/// How fast a run goes, as a share of the cycle it is played with when the droid has no run of
+/// its own: the sprint's, stepped out a good deal slower, between a jog and a sprint.
 const RUN_PACE: f32 = 0.7;
 /// The droid's hips, which its speed is measured by, and which way it faces goes by.
 const HIPS: &str = "DEF-spine";
@@ -1263,12 +1264,14 @@ fn choose(cycles: &[Option<Gait>], gait: Gait, crouched: bool, moving: bool) -> 
     }
 }
 
-/// The cycle for `gait` standing up: its own - for a run, which has none, the sprint's, played
+/// The cycle for `gait` standing up: its own - for a run without one, the sprint's, played
 /// slower ([`RUN_PACE`]) - or failing that the walk, or failing that any.
 fn standing_cycle(cycles: &[Option<Gait>], gait: Gait) -> Option<usize> {
     let find = |wanted: Gait| cycles.iter().position(|&c| c == Some(wanted));
     let own = match gait {
-        Gait::Running => find(Gait::Sprinting).or_else(|| find(Gait::Jogging)),
+        Gait::Running => find(Gait::Running)
+            .or_else(|| find(Gait::Sprinting))
+            .or_else(|| find(Gait::Jogging)),
         gait => find(gait),
     };
     own.or_else(|| find(Gait::Walking))
@@ -2577,14 +2580,17 @@ impl Avatar {
     }
 
     /// The fastest of its gaits the droid is going flat out at, going `speed` along the ground:
-    /// sprinting or running. None if it is going slower than either.
+    /// sprinting, running or jogging. None if it is going slower than any.
     fn flat_out(&self, speed: f32) -> Option<Gait> {
-        [Gait::Sprinting, Gait::Jogging].into_iter().find(|&gait| {
+        let flat_out = |gait: Gait| {
             self.cycles[..self.gaited]
                 .iter()
                 .find(|cycle| cycle.gait == Some(gait))
                 .is_some_and(|cycle| speed >= SKID_SPEED * cycle.speed)
-        })
+        };
+        [Gait::Sprinting, Gait::Running, Gait::Jogging]
+            .into_iter()
+            .find(|&gait| flat_out(gait))
     }
 
     /// Starts a skid if the droid is going flat out and the keys turn it sharply, or send it
@@ -2865,9 +2871,10 @@ impl Avatar {
 mod tests {
     use super::*;
 
-    const ALL: [Option<Gait>; 4] = [
+    const ALL: [Option<Gait>; 5] = [
         Some(Gait::Walking),
         Some(Gait::Jogging),
+        Some(Gait::Running),
         Some(Gait::Sprinting),
         None,
     ];
@@ -2880,15 +2887,26 @@ mod tests {
             "walking walks"
         );
         assert_eq!(choose(&ALL, Gait::Jogging, false, true), Some(1));
-        assert_eq!(choose(&ALL, Gait::Sprinting, false, true), Some(2));
+        assert_eq!(choose(&ALL, Gait::Running, false, true), Some(2));
+        assert_eq!(choose(&ALL, Gait::Sprinting, false, true), Some(3));
+    }
+
+    #[test]
+    fn a_run_without_its_own_cycle_borrows_the_sprint() {
+        let no_run = [
+            Some(Gait::Walking),
+            Some(Gait::Jogging),
+            Some(Gait::Sprinting),
+        ];
+        assert_eq!(choose(&no_run, Gait::Running, false, true), Some(2));
     }
 
     #[test]
     fn crouched_it_crouches_and_still_it_rests() {
-        assert_eq!(choose(&ALL, Gait::Sprinting, true, true), Some(3));
+        assert_eq!(choose(&ALL, Gait::Sprinting, true, true), Some(4));
         assert_eq!(
             choose(&ALL, Gait::Walking, true, false),
-            Some(3),
+            Some(4),
             "held crouched"
         );
         assert_eq!(

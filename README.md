@@ -105,6 +105,12 @@ shadows (its `raytracing` feature).
   full breath, to a sprint's 6. Held down, Shift sprints for as long as it is held, from any
   pace, and lets go back to it. Running is heard further off than jogging, if not as far as a
   sprint.
+- **The run has a stride of its own,** `droid_running_cycle`, in place of the sprint played
+  slower: a mid-foot landing, the hands half curled, the arms pumping between the jog's and the
+  sprint's. Every droid has it: a sentry runs after you once it has you, sprinting now and then,
+  and jogs to where it lost you. The other droids' colours are the player's droid recoloured by
+  `data/recolour_droids.py`, to be run again whenever the droid is exported afresh, so that
+  they have every animation it has.
 - **The alert, as in Metal Gear and Fallout,** is at the top in the middle, in its colour: ALERT
   in red, EVASION in amber and CAUTION in yellow, each counting down but ALERT, and ALERT and
   CAUTION blinking.

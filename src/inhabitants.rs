@@ -154,9 +154,10 @@ const TALK_REACH: f32 = 2.5;
 const TALK_CONE: f32 = 40.0 * std::f32::consts::PI / 180.0;
 /// Where a droid's face is above its feet, in meters, if its model has no head to go by.
 const FACE_HEIGHT: f32 = 1.6;
-/// Its running and sprinting paces, in meters per second, if the droid has no run or sprint to
-/// go by.
+/// Its jogging, running and sprinting paces, in meters per second, if the droid has no jog, run
+/// or sprint to go by.
 const FALLBACK_RUN: f32 = 2.0;
+const FALLBACK_RUNNING: f32 = 2.8;
 const FALLBACK_SPRINT: f32 = 3.5;
 /// How long a droid that has just turned hostile stands before it goes after the player, in
 /// seconds: long enough to finish its threat, and for the player to start running.
@@ -1192,9 +1193,9 @@ impl Inhabitants {
                     }
                 }
             }
-            // Running after the player, and to where it lost them.
-            let hurrying = droid.alert == Some(Alert::Alert)
-                || (droid.alert == Some(Alert::Evasion) && droid.searched <= 1);
+            // Running after the player, and jogging to where it lost them.
+            let after = droid.alert == Some(Alert::Alert);
+            let hurrying = after || (droid.alert == Some(Alert::Evasion) && droid.searched <= 1);
             // After the player, it sprints now and then, when it is not to be told.
             let chasing = droid.alert == Some(Alert::Alert) && droid.windup == 0.0 && !droid.down;
             (droid.sprint_in, droid.sprinting) =
@@ -1203,6 +1204,7 @@ impl Inhabitants {
             let gait = match (hurrying, droid.sprinting > 0.0) {
                 _ if droid.winded => Gait::Walking,
                 (true, true) => Gait::Sprinting,
+                (true, false) if after => Gait::Running,
                 (true, false) => Gait::Jogging,
                 (false, _) => Gait::Walking,
             };
@@ -1252,8 +1254,9 @@ impl Inhabitants {
                         droid.waiting = 0.0;
                         let fallback = match gait {
                             Gait::Sprinting => FALLBACK_SPRINT,
+                            Gait::Running => FALLBACK_RUNNING,
                             Gait::Walking => FALLBACK_PACE,
-                            _ => FALLBACK_RUN,
+                            Gait::Jogging => FALLBACK_RUN,
                         };
                         let pace = droid
                             .avatar
