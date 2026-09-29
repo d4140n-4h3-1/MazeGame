@@ -5,6 +5,7 @@
 //! credits and now and then a good deal more (see [`Credits::random`]) - which clearing its hack
 //! transfers to the player (see [`crate::computer`]).
 
+use serde::{Deserialize, Deserializer};
 use std::{fmt, ops::AddAssign};
 
 /// How many credits a computer can carry at most, in whole credits.
@@ -38,6 +39,29 @@ impl Credits {
         let whole = (chance.powi(3) * MOST) as u64;
         let cents = below(100) as u64;
         Self::new(whole, cents).max(Self(1))
+    }
+}
+
+impl Credits {
+    /// Takes `cost` out of it, if it has that much. Whether it did.
+    pub fn spend(&mut self, cost: Credits) -> bool {
+        let enough = self.0 >= cost.0;
+        if enough {
+            self.0 -= cost.0;
+        }
+        enough
+    }
+}
+
+/// From a number of credits as the files write it, such as `40` or `12.5`: to the nearest
+/// hundredth.
+impl<'de> Deserialize<'de> for Credits {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let credits = f64::deserialize(deserializer)?;
+        if !(credits >= 0.0 && credits.is_finite()) {
+            return Err(serde::de::Error::custom(format!("{credits} credits")));
+        }
+        Ok(Self((credits * 100.0).round() as u64))
     }
 }
 
@@ -84,6 +108,17 @@ mod tests {
         assert_eq!((wallet.whole(), wallet.cents()), (1, 0));
         wallet += Credits::new(2, 95);
         assert_eq!(wallet, Credits::new(3, 95));
+    }
+
+    #[test]
+    fn credits_are_spent_only_if_there_are_enough() {
+        let mut wallet = Credits::new(10, 0);
+        assert!(!wallet.spend(Credits::new(10, 1)));
+        assert_eq!(wallet, Credits::new(10, 0));
+        assert!(wallet.spend(Credits::new(2, 50)));
+        assert_eq!(wallet, Credits::new(7, 50));
+        assert_eq!(serde_json::from_str::<Credits>("12.5").unwrap(), Credits(1250));
+        assert!(serde_json::from_str::<Credits>("-1").is_err());
     }
 
     #[test]

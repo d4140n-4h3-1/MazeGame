@@ -10,6 +10,13 @@
 //! it. A reply can be a skill check, `[Speech 40%]`, that goes one way if it succeeds and another
 //! if it fails; a check is tried only once. A reply already given is shown dimmed.
 //!
+//! A check can also be tried with a bribe (see [`Bribe`]), offered under it as a reply of its own,
+//! `[Speech 75%] [40.00 CR]`: the same check, more likely to succeed, for credits paid whether it
+//! does or not. It is one try with the check: trying either takes both away. Without the credits
+//! it is shown dimmed, and cannot be picked. Only droids that know something worth paying for
+//! are offered bribes - not maintenance units, which do not know where the exit is - and drones
+//! cannot be talked to at all.
+//!
 //! Each line has a mood, which colours the whole panel, and the droid's eyes: green as usual, blue
 //! for success, yellow for a warning or a question, orange for agitation, red for hostility. A
 //! line says its own, or takes one from how the check that led to it went: blue if it succeeded,
@@ -33,6 +40,7 @@
 
 pub mod screen;
 
+use crate::credits::Credits;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 
@@ -58,6 +66,19 @@ pub struct Reply {
     /// The line a failed check leads to instead.
     #[serde(default)]
     pub fail: Option<String>,
+    /// The check tried with a bribe instead, if the droid takes one.
+    #[serde(default)]
+    pub bribe: Option<Bribe>,
+}
+
+/// A check tried with credits: what the player says instead, how many credits it costs, and the
+/// chance the check succeeds with them, in percent - higher than without. It goes where the
+/// check would, and the credits are paid either way.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Bribe {
+    pub say: String,
+    pub credits: Credits,
+    pub chance: u32,
 }
 
 /// How a droid feels saying a line, which colours the panel.
@@ -195,6 +216,19 @@ impl Script {
                             reply.say
                         ));
                     }
+                    match (&reply.check, &reply.bribe) {
+                        (None, Some(_)) => problems.push(format!(
+                            "{name}'s {key}: \"{}\" has a bribe but no check",
+                            reply.say
+                        )),
+                        (Some(check), Some(bribe)) if bribe.chance <= check.chance => {
+                            problems.push(format!(
+                                "{name}'s {key}: \"{}\" has a bribe no likelier to work",
+                                reply.say
+                            ))
+                        }
+                        _ => (),
+                    }
                 }
             }
         }
@@ -288,14 +322,18 @@ impl Conversation {
         script.characters.get(self.character)?.lines.get(&self.line)
     }
 
-    /// The replies there are to pick from, as indices into the line's replies: all but the checks
-    /// already tried. None for the line's end, when it has no replies.
-    fn offered(&self, line: &Line) -> Vec<Option<usize>> {
-        let offered: Vec<Option<usize>> = (0..line.replies.len())
+    /// The replies there are to pick from, as indices into the line's replies, each with whether
+    /// it is the reply's bribe: all but the checks already tried, each check's bribe after it.
+    /// None for the line's end, when it has no replies.
+    fn offered(&self, line: &Line) -> Vec<Option<(usize, bool)>> {
+        let offered: Vec<Option<(usize, bool)>> = (0..line.replies.len())
             .filter(|&i| {
                 line.replies[i].check.is_none() || !self.said.contains(&(self.line.clone(), i))
             })
-            .map(Some)
+            .flat_map(|i| {
+                let bribe = line.replies[i].check.is_some() && line.replies[i].bribe.is_some();
+                std::iter::once(Some((i, false))).chain(bribe.then_some(Some((i, true))))
+            })
             .collect();
         if offered.is_empty() {
             vec![None]
@@ -304,8 +342,8 @@ impl Conversation {
         }
     }
 
-    /// What there is to show, with `facts` filled in.
-    pub fn view(&self, script: &Script, facts: &Facts) -> View {
+    /// What there is to show, with `facts` filled in, for a player with `credits`.
+    pub fn view(&self, script: &Script, facts: &Facts, credits: Credits) -> View {
         let Some(line) = self.line(script) else {
             return View {
                 says: String::new(),
@@ -318,18 +356,33 @@ impl Conversation {
         let choices = self
             .offered(line)
             .into_iter()
-            .map(|index| {
-                let Some(index) = index else {
+            .map(|offered| {
+                let Some((index, bribed)) = offered else {
                     return leave();
                 };
                 let reply = &line.replies[index];
-                let say = facts.fill(&reply.say, false);
-                Choice {
-                    label: match &reply.check {
-                        Some(check) => format!("[{} {}%] {say}", check.skill, check.chance),
-                        None => say,
+                match (&reply.check, reply.bribe.as_ref().filter(|_| bribed)) {
+                    // Dimmed while the player cannot pay.
+                    (Some(check), Some(bribe)) => Choice {
+                        label: format!(
+                            "[{} {}%] [{}] {}",
+                            check.skill,
+                            bribe.chance,
+                            bribe.credits,
+                            facts.fill(&bribe.say, false)
+                        ),
+                        said: credits < bribe.credits,
                     },
-                    said: self.said.contains(&(self.line.clone(), index)),
+                    (check, _) => {
+                        let say = facts.fill(&reply.say, false);
+                        Choice {
+                            label: match check {
+                                Some(check) => format!("[{} {}%] {say}", check.skill, check.chance),
+                                None => say,
+                            },
+                            said: self.said.contains(&(self.line.clone(), index)),
+                        }
+                    }
                 }
             })
             .collect();
@@ -353,28 +406,44 @@ impl Conversation {
         self.line(script).is_some_and(|line| line.attacks)
     }
 
+    /// What the `choice`th of the replies on offer costs, if it is a bribe.
+    pub fn price(&self, script: &Script, choice: usize) -> Option<Credits> {
+        let line = self.line(script)?;
+        let (index, true) = (*self.offered(line).get(choice)?)? else {
+            return None;
+        };
+        Some(line.replies[index].bribe.as_ref()?.credits)
+    }
+
     /// Says the `choice`th of the replies on offer, rolling `roll` - from 0 to 99 - for its check
-    /// if it has one. False once the conversation is over.
-    pub fn choose(&mut self, script: &Script, choice: usize, roll: u32) -> bool {
+    /// if it has one, and paying for its bribe from `credits` if it is one; a bribe the player
+    /// cannot pay for is not said. False once the conversation is over.
+    pub fn choose(&mut self, script: &Script, choice: usize, roll: u32, credits: &mut Credits) -> bool {
         let Some(line) = self.line(script) else {
             return false;
         };
-        let Some(&Some(index)) = self.offered(line).get(choice) else {
+        let Some(&Some((index, bribed))) = self.offered(line).get(choice) else {
             // Past the end of what is on offer is nothing; walking away from a line with no
             // replies ends it.
             return choice >= self.offered(line).len();
         };
         let reply = &line.replies[index];
+        let bribe = reply.bribe.as_ref().filter(|_| bribed);
+        if bribe.is_some_and(|bribe| !credits.spend(bribe.credits)) {
+            return true;
+        }
         self.said.insert((self.line.clone(), index));
         self.note = None;
         let next = match &reply.check {
             Some(check) => {
-                let passed = roll < check.chance;
+                let chance = bribe.map_or(check.chance, |bribe| bribe.chance);
+                let passed = roll < chance;
+                let paid = bribe.map_or(String::new(), |bribe| format!(", {} paid", bribe.credits));
                 self.note = Some((
                     format!(
-                        "[{} {}%] {}",
+                        "[{} {}%] {}{paid}",
                         check.skill,
-                        check.chance,
+                        chance,
                         if passed { "Succeeded" } else { "Failed" }
                     ),
                     passed,
@@ -440,7 +509,7 @@ mod tests {
         let script = script();
         let view = Conversation::new(&script, 0)
             .unwrap()
-            .view(&script, &facts());
+            .view(&script, &facts(), Credits::default());
         assert_eq!(view.says, "Explorator codex quattuor septem.");
         assert_eq!(view.means, "Scout 47.");
         let labels: Vec<_> = view.choices.iter().map(|c| c.label.as_str()).collect();
@@ -459,44 +528,44 @@ mod tests {
         let script = script();
         let mut talk = Conversation::new(&script, 0).unwrap();
         assert!(
-            talk.choose(&script, 0, 50),
+            talk.choose(&script, 0, 50, &mut Credits::default()),
             "a roll of 50 fails a 50% check"
         );
-        let view = talk.view(&script, &facts());
+        let view = talk.view(&script, &facts(), Credits::default());
         assert_eq!(view.says, "Negativum.");
         assert_eq!(view.note.as_deref(), Some("[Speech 50%] Failed"));
-        assert!(talk.choose(&script, 0, 0));
-        let view = talk.view(&script, &facts());
+        assert!(talk.choose(&script, 0, 0, &mut Credits::default()));
+        let view = talk.view(&script, &facts(), Credits::default());
         assert_eq!(view.note, None);
         assert_eq!(view.choices.len(), 2, "the check is gone");
 
         let mut talk = Conversation::new(&script, 0).unwrap();
-        assert!(talk.choose(&script, 0, 49));
-        assert_eq!(talk.view(&script, &facts()).says, "Progreda ad sinistrum.");
+        assert!(talk.choose(&script, 0, 49, &mut Credits::default()));
+        assert_eq!(talk.view(&script, &facts(), Credits::default()).says, "Progreda ad sinistrum.");
     }
 
     #[test]
     fn a_line_has_its_own_mood_or_the_one_its_check_gives_it() {
         let script = script();
         let mut talk = Conversation::new(&script, 0).unwrap();
-        assert_eq!(talk.view(&script, &facts()).mood, Mood::Normal);
-        talk.choose(&script, 0, 99);
-        assert_eq!(talk.view(&script, &facts()).mood, Mood::Agitated, "failed");
-        talk.choose(&script, 0, 0);
+        assert_eq!(talk.view(&script, &facts(), Credits::default()).mood, Mood::Normal);
+        talk.choose(&script, 0, 99, &mut Credits::default());
+        assert_eq!(talk.view(&script, &facts(), Credits::default()).mood, Mood::Agitated, "failed");
+        talk.choose(&script, 0, 0, &mut Credits::default());
         assert_eq!(
-            talk.view(&script, &facts()).mood,
+            talk.view(&script, &facts(), Credits::default()).mood,
             Mood::Normal,
             "no check this time"
         );
         let mut talk = Conversation::new(&script, 0).unwrap();
-        talk.choose(&script, 0, 0);
+        talk.choose(&script, 0, 0, &mut Credits::default());
         assert_eq!(
-            talk.view(&script, &facts()).mood,
+            talk.view(&script, &facts(), Credits::default()).mood,
             Mood::Success,
             "succeeded"
         );
         talk.line = "cross".into();
-        assert_eq!(talk.view(&script, &facts()).mood, Mood::Hostile, "its own");
+        assert_eq!(talk.view(&script, &facts(), Credits::default()).mood, Mood::Hostile, "its own");
     }
 
     #[test]
@@ -512,8 +581,8 @@ mod tests {
     fn what_has_been_said_is_dimmed() {
         let script = script();
         let mut talk = Conversation::new(&script, 0).unwrap();
-        talk.choose(&script, 1, 0);
-        let view = talk.view(&script, &facts());
+        talk.choose(&script, 1, 0, &mut Credits::default());
+        let view = talk.view(&script, &facts(), Credits::default());
         assert!(view.choices[1].said && !view.choices[2].said);
     }
 
@@ -521,12 +590,12 @@ mod tests {
     fn goodbye_and_a_line_with_no_replies_end_it() {
         let script = script();
         let mut talk = Conversation::new(&script, 0).unwrap();
-        assert!(!talk.choose(&script, 2, 0), "goodbye");
+        assert!(!talk.choose(&script, 2, 0, &mut Credits::default()), "goodbye");
         let mut talk = Conversation::new(&script, 0).unwrap();
-        talk.choose(&script, 0, 0);
-        let view = talk.view(&script, &facts());
+        talk.choose(&script, 0, 0, &mut Credits::default());
+        let view = talk.view(&script, &facts(), Credits::default());
         assert_eq!(view.choices, [leave()]);
-        assert!(!talk.choose(&script, 0, 0), "leaving");
+        assert!(!talk.choose(&script, 0, 0, &mut Credits::default()), "leaving");
     }
 
     #[test]
@@ -546,5 +615,85 @@ mod tests {
     fn the_droids_conversations_load() {
         let script = Script::load(SCRIPT).unwrap();
         assert!(!script.characters.is_empty());
+    }
+
+    fn bribable() -> Script {
+        serde_json::from_str(
+            r#"{ "characters": [ { "name": "Defendator", "start": "hello", "lines": {
+                "hello": { "says": "Sta.", "means": "Halt.",
+                    "replies": [
+                        { "say": "I'm maintenance.", "check": { "skill": "Speech", "chance": 40 },
+                          "bribe": { "say": "I'm maintenance. Here.", "credits": 40, "chance": 75 },
+                          "to": "cleared", "fail": "suspect" },
+                        { "say": "Goodbye." } ] },
+                "cleared": { "says": "Progreda.", "means": "Proceed." },
+                "suspect": { "says": "Suspecto tu.", "means": "I suspect you.",
+                    "replies": [ { "say": "Back.", "to": "hello" } ] } } } ] }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_bribe_is_offered_under_its_check_and_dimmed_without_the_credits() {
+        let script = bribable();
+        let talk = Conversation::new(&script, 0).unwrap();
+        let view = talk.view(&script, &facts(), Credits::new(39, 99));
+        let labels: Vec<_> = view.choices.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "[Speech 40%] I'm maintenance.",
+                "[Speech 75%] [40.00 CR] I'm maintenance. Here.",
+                "Goodbye."
+            ]
+        );
+        assert!(view.choices[1].said, "dimmed: too poor");
+        assert!(!talk.view(&script, &facts(), Credits::new(40, 0)).choices[1].said);
+        assert_eq!(talk.price(&script, 1), Some(Credits::new(40, 0)));
+        assert_eq!(talk.price(&script, 0), None);
+    }
+
+    #[test]
+    fn a_bribe_is_a_likelier_check_paid_for_either_way_and_tried_only_once() {
+        let script = bribable();
+        // Too poor: nothing happens, and nothing is paid.
+        let mut talk = Conversation::new(&script, 0).unwrap();
+        let mut poor = Credits::new(10, 0);
+        assert!(talk.choose(&script, 1, 0, &mut poor));
+        assert_eq!(poor, Credits::new(10, 0));
+        assert_eq!(talk.view(&script, &facts(), poor).says, "Sta.");
+        // A roll the check alone would fail, and the bribe passes.
+        let mut wallet = Credits::new(50, 25);
+        assert!(talk.choose(&script, 1, 60, &mut wallet));
+        assert_eq!(wallet, Credits::new(10, 25));
+        let view = talk.view(&script, &facts(), wallet);
+        assert_eq!(view.says, "Progreda.");
+        assert_eq!(view.note.as_deref(), Some("[Speech 75%] Succeeded, 40.00 CR paid"));
+        // Failing, it is paid all the same; and the check and its bribe are both gone after.
+        let mut talk = Conversation::new(&script, 0).unwrap();
+        let mut wallet = Credits::new(40, 0);
+        assert!(talk.choose(&script, 1, 75, &mut wallet));
+        assert_eq!(wallet, Credits::default());
+        assert_eq!(talk.view(&script, &facts(), wallet).says, "Suspecto tu.");
+        talk.choose(&script, 0, 0, &mut wallet);
+        let labels: Vec<_> = talk
+            .view(&script, &facts(), wallet)
+            .choices
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert_eq!(labels, ["Goodbye."]);
+    }
+
+    #[test]
+    fn a_bribe_needs_a_check_and_better_odds_than_it() {
+        let mut script = bribable();
+        let reply = &mut script.characters[0].lines.get_mut("hello").unwrap().replies[0];
+        reply.bribe.as_mut().unwrap().chance = 40;
+        assert_eq!(script.problems().len(), 1, "no likelier");
+        let reply = &mut script.characters[0].lines.get_mut("hello").unwrap().replies[0];
+        reply.check = None;
+        reply.fail = None;
+        assert_eq!(script.problems().len(), 1, "no check");
     }
 }

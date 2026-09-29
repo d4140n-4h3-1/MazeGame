@@ -1401,7 +1401,7 @@ impl MazeGame {
             return;
         };
         let ui = ctx.user_interfaces.first();
-        let view = conversation.view(script, &facts);
+        let view = conversation.view(script, &facts, self.credits);
         self.dialogue.set_open(ui, true);
         self.dialogue.show(ui, &who, &view);
         self.dialogue.set_prompt(ui, None);
@@ -1439,7 +1439,7 @@ impl MazeGame {
         let Some(voice) = voices.voice(&script.characters[character].name) else {
             return;
         };
-        let view = talking.conversation.view(script, &talking.facts);
+        let view = talking.conversation.view(script, &talking.facts, self.credits);
         let sound = voices.speak(&view.says, voice, pitch(voices, code, view.mood));
         let (rate, reach) = (voices.sample_rate, sound.reach);
         let receiver = platform::in_background(move || synth::make(&sound, rate));
@@ -1498,8 +1498,21 @@ impl MazeGame {
         let (Some(talking), Some(script)) = (self.talking.as_mut(), self.script.as_ref()) else {
             return;
         };
-        if talking.conversation.choose(script, choice, roll) {
-            let view = talking.conversation.view(script, &talking.facts);
+        // A bribe the player cannot pay for is not said.
+        if talking
+            .conversation
+            .price(script, choice)
+            .is_some_and(|price| price > self.credits)
+        {
+            self.hud.show_note("Not enough credits".into());
+            return;
+        }
+        let before = self.credits;
+        if talking.conversation.choose(script, choice, roll, &mut self.credits) {
+            if self.credits != before {
+                Log::info(format!("Credits: bribe paid, {} left", self.credits));
+            }
+            let view = talking.conversation.view(script, &talking.facts, self.credits);
             self.dialogue
                 .show(ctx.user_interfaces.first(), &talking.who, &view);
             self.inhabitants

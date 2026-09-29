@@ -99,6 +99,14 @@ shadows (its `raytracing` feature).
 
 29 September 2026:
 
+- **Bribes.** A Speech check can now be tried with credits instead, offered under it: `[Speech 75%]
+  [40.00 CR] ...`. It is still a Speech check, only likelier to succeed, and the credits are paid
+  whether it works or not; trying the check or its bribe uses up both. Without the credits, the
+  bribe is dimmed and cannot be picked. Sentries take a bribe to let a "maintenance unit" through
+  (40% or 75% for 40 CR) and to believe you saw something behind you (30% or 65% for 25 CR), and
+  scouts to share their map to the exit (50% or 85% for 20 CR). Maintenance units cannot be
+  bribed - they do not know where the exit is - and drones cannot be talked to at all. Bribes are
+  set per check in `data/dialogue/droids.json`.
 - **A security drone patrols the maze.** It is put down well away from where you start and
   hovers along the corridors from one spot to the next, calm, its glow green, paying you no
   heed. It turns on you only when a scout or maintenance unit sounds the alarm, or when a bolt
