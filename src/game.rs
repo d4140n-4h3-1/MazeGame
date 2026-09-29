@@ -3,6 +3,7 @@
 use crate::{
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
     drone::{Drone, DroneLines, DRONE_LINES, DRONE_MODEL},
+    hearts::{self, Hearts, HEART_MODEL},
     notes::{self, Notes, NOTES},
     diagnostics::{self, FrameStats},
     dialogue::{
@@ -273,6 +274,17 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     drone_model: Option<ModelResource>,
+    /// The hearts floating in the corridors: their model as it loads and once it has, the hearts
+    /// themselves, and whether they have been put in this round's maze.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    heart_model: Option<ModelResource>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    hearts: Hearts,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    hearts_placed: bool,
     #[visit(skip)]
     #[reflect(hidden)]
     drone: Option<Drone>,
@@ -420,6 +432,7 @@ impl MazeGame {
         self.droid = Some(resources.request::<Model>(DROID_MODEL));
         self.computer_model = Some(resources.request::<Model>(COMPUTER_MODEL));
         self.drone_model = Some(resources.request::<Model>(DRONE_MODEL));
+        self.heart_model = Some(resources.request::<Model>(HEART_MODEL));
         match platform::var("MAZE_MODEL") {
             Some(path) => self.model = Some(resources.request::<Model>(path)),
             None => self.prefabs = Some(Prefabs::request(resources)),
@@ -515,6 +528,7 @@ impl MazeGame {
         self.start_cell = Some(start);
         self.computer_placed = false;
         self.drone_placed = false;
+        self.hearts_placed = false;
         let start_position = survey::cell_center(*origin, start.0, start.1);
         let exit_position = survey::cell_center(*origin, exit.0, exit.1);
 
@@ -1522,6 +1536,38 @@ impl MazeGame {
         }
     }
 
+    /// Scatters the hearts in the corridors once their model has loaded and a round is under way,
+    /// and keeps them floating.
+    fn set_up_hearts(&mut self, ctx: &mut PluginContext) {
+        if self.heart_model.as_ref().is_some_and(|model| model.is_failed_to_load()) {
+            Log::err(format!("Could not load {HEART_MODEL}; there are no hearts"));
+            self.heart_model = None;
+        }
+        let Some(model) = self.heart_model.clone().filter(|model| model.is_ok()) else {
+            return;
+        };
+        if !self.hearts_placed && self.phase == Phase::Playing {
+            self.rng();
+            if let (Some((grid, origin)), Some(start), Some(rng)) =
+                (self.level.grid.as_ref(), self.start_cell, self.rng.as_mut())
+            {
+                let floor = (0..grid.depth)
+                    .flat_map(|z| (0..grid.width).map(move |x| (x, z)))
+                    .filter(|&(x, z)| grid.is_walkable(x, z))
+                    .count();
+                let spots = hearts::spots(grid, start, hearts::count(floor), rng);
+                let scene = &mut ctx.scenes[self.scene];
+                self.hearts.place(&model, scene, (grid, *origin), &spots);
+                // Tried once a round, found room or not.
+                self.hearts_placed = true;
+            }
+        }
+        if !self.menu.is_open() {
+            self.hearts
+                .update(&mut ctx.scenes[self.scene].graph, ctx.dt);
+        }
+    }
+
     /// Starts using the computer, if the player is at it: the view goes in to its screen, and the
     /// keys are for typing.
     fn start_hacking(&mut self, ctx: &mut PluginContext) {
@@ -1708,6 +1754,7 @@ impl Plugin for MazeGame {
 
         self.set_up_computer(ctx);
         self.set_up_drone(ctx);
+        self.set_up_hearts(ctx);
 
         match self.phase {
             // While the menu is open nothing happens: no loading, no clock, no player.
@@ -1820,6 +1867,8 @@ impl Plugin for MazeGame {
             let player = self.player.position(&scene.graph);
             self.level.cull(&mut scene.graph, player);
             self.inhabitants.show(&mut scene.graph, &self.level);
+            let level = &self.level;
+            self.hearts.cull(&mut scene.graph, |at| level.can_see(at));
         }
 
         // The exit bobs so it catches the eye.
