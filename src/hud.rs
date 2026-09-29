@@ -1,17 +1,21 @@
 //! What is written on screen: a status line in the corner, a banner across the middle for the
 //! end of a round and for anything that went wrong, the droids' alert at the top in the middle,
-//! as in Metal Gear and Fallout, and the player's stamina in the bottom right corner.
+//! as in Metal Gear and Fallout, the player's stamina in the bottom left corner, and, with the
+//! pistol out, its ammo in the bottom right: the cyber pistol's is endless, shown as ∞.
 //!
 //! The alert is coloured by its phase - ALERT red, EVASION amber, CAUTION yellow - and ALERT and
 //! CAUTION blink; EVASION and CAUTION count down the seconds they have left. The stamina is a bar,
 //! green, yellow once it runs low, and red and blinking while the player is winded.
 
-use crate::inhabitants::Alert;
+use crate::{computer::FONT, inhabitants::Alert};
 use fyrox::{
-    core::{algebra::Vector2, color::Color, pool::Handle},
+    asset::untyped::ResourceKind,
+    core::{algebra::Vector2, color::Color, pool::Handle, uuid::Uuid},
     gui::{
         border::{Border, BorderBuilder},
         brush::Brush,
+        font::{Font, FontResource, FontStyles},
+        grid::{Column, GridBuilder, Row},
         screen::ScreenBuilder,
         stack_panel::StackPanelBuilder,
         text::{Text, TextBuilder, TextMessage},
@@ -46,6 +50,8 @@ pub enum Status {
         best: Option<f32>,
         /// How much breath is left, from 0 to 1, and whether the player has run out of it.
         breath: (f32, bool),
+        /// Whether the pistol is out.
+        armed: bool,
         mouse_captured: bool,
         /// How the droids hunting the player are going about it, if any are, and how many seconds
         /// that has left.
@@ -61,6 +67,9 @@ pub struct Hud {
     alert: Handle<Text>,
     stamina: Handle<UiNode>,
     stamina_fill: Handle<Border>,
+    /// The pistol's ammo, and whether it is showing.
+    ammo: Handle<UiNode>,
+    shown_ammo: bool,
     /// How long it has been blinking, in seconds, and what was last put on screen, so that each
     /// is only sent when it changes.
     blink: f32,
@@ -117,7 +126,7 @@ impl Hud {
         .build(ctx);
         let frame = BorderBuilder::new(
             WidgetBuilder::new()
-                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_horizontal_alignment(HorizontalAlignment::Left)
                 .with_width(BAR.0 + 6.0)
                 .with_height(BAR.1 + 6.0)
                 .with_foreground(Brush::Solid(Color::opaque(200, 200, 200)).into())
@@ -126,37 +135,82 @@ impl Hud {
         )
         .with_stroke_thickness(Thickness::uniform(1.0).into())
         .build(ctx);
-        let label = TextBuilder::new(
-            WidgetBuilder::new()
-                .with_horizontal_alignment(HorizontalAlignment::Right)
-                .with_margin(Thickness::bottom(3.0))
-                .with_foreground(Brush::Solid(Color::WHITE).into()),
-        )
-        .with_font_size(16.0.into())
-        .with_text("STAMINA")
-        .with_horizontal_text_alignment(HorizontalAlignment::Right)
-        .build(ctx);
+        let label = |ctx: &mut _, text: &str, alignment| {
+            TextBuilder::new(
+                WidgetBuilder::new()
+                    .with_horizontal_alignment(alignment)
+                    .with_margin(Thickness::bottom(3.0))
+                    .with_foreground(Brush::Solid(Color::WHITE).into()),
+            )
+            .with_font_size(16.0.into())
+            .with_text(text)
+            .build(ctx)
+        };
+        let stamina_label = label(ctx, "STAMINA", HorizontalAlignment::Left);
         let stamina = StackPanelBuilder::new(
             WidgetBuilder::new()
-                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .on_column(0)
+                .with_horizontal_alignment(HorizontalAlignment::Left)
                 .with_vertical_alignment(VerticalAlignment::Bottom)
-                .with_margin(Thickness::uniform(18.0))
                 .with_visibility(false)
-                .with_child(label)
+                .with_child(stamina_label)
                 .with_child(frame),
         )
         .with_orientation(Orientation::Vertical)
         .build(ctx)
         .to_base();
+        // The pistol's ammo: endless. In DejaVu Sans Mono, which has the sign for it.
+        let pistol_label = label(ctx, "CYBER PISTOL", HorizontalAlignment::Right);
+        let mut endless = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_foreground(Brush::Solid(Color::WHITE).into()),
+        )
+        .with_font_size(56.0.into())
+        .with_horizontal_text_alignment(HorizontalAlignment::Right)
+        .with_text("∞");
+        if let Ok(font) = Font::from_memory(FONT, 1024, FontStyles::default(), Vec::new()) {
+            endless = endless.with_font(FontResource::new_ok(
+                Uuid::new_v4(),
+                ResourceKind::Embedded,
+                font,
+            ));
+        }
+        let endless = endless.build(ctx);
+        let ammo = StackPanelBuilder::new(
+            WidgetBuilder::new()
+                .on_column(2)
+                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_vertical_alignment(VerticalAlignment::Bottom)
+                .with_visibility(false)
+                .with_child(pistol_label)
+                .with_child(endless),
+        )
+        .with_orientation(Orientation::Vertical)
+        .build(ctx)
+        .to_base();
+        // Along the bottom of the window: the stamina on the left, the ammo on the right.
+        let bottom = GridBuilder::new(
+            WidgetBuilder::new()
+                .with_vertical_alignment(VerticalAlignment::Bottom)
+                .with_margin(Thickness::uniform(18.0))
+                .with_child(stamina)
+                .with_child(ammo),
+        )
+        .add_row(Row::auto())
+        .add_column(Column::auto())
+        .add_column(Column::stretch())
+        .add_column(Column::auto())
+        .build(ctx);
         // The UI's root only gives its children the size they ask for, which for text is the text
         // itself, in the corner. A screen is the size of the window, so in one the banner is
-        // centered on the window, the alert at the top in the middle and the stamina in the bottom
-        // right corner.
+        // centered on the window, the alert at the top in the middle, the stamina in the bottom
+        // left corner and the ammo in the bottom right.
         ScreenBuilder::new(
             WidgetBuilder::new()
                 .with_child(banner)
                 .with_child(alert)
-                .with_child(stamina),
+                .with_child(bottom),
         )
         .build(ctx);
         Self {
@@ -165,6 +219,7 @@ impl Hud {
             alert,
             stamina,
             stamina_fill,
+            ammo,
             ..Default::default()
         }
     }
@@ -189,13 +244,14 @@ impl Hud {
         self.note_time = (self.note_time - dt).max(0.0);
         self.blink = (self.blink + dt) % BLINK;
         let blinking_on = self.blink < BLINK_ON;
-        let (text, alarm, breath) = match status {
-            Status::Loading => ("Loading the maze...".to_string(), None, None),
-            Status::Blank => (String::new(), None, None),
+        let (text, alarm, breath, armed) = match status {
+            Status::Loading => ("Loading the maze...".to_string(), None, None, false),
+            Status::Blank => (String::new(), None, None, false),
             Status::Round {
                 time,
                 best,
                 breath,
+                armed,
                 mouse_captured,
                 alarm,
             } => {
@@ -209,7 +265,7 @@ impl Hud {
                 if self.note_time > 0.0 {
                     text += &format!("\n{}", self.note);
                 }
-                (text, alarm, Some(breath))
+                (text, alarm, Some(breath), armed)
             }
         };
         ui.send(self.status, TextMessage::Text(text));
@@ -232,6 +288,11 @@ impl Hud {
                 ui.send(self.stamina_fill, WidgetMessage::Background(Brush::Solid(colour).into()));
             }
             self.shown_stamina = stamina;
+        }
+
+        if armed != self.shown_ammo {
+            ui.send(self.ammo, WidgetMessage::Visibility(armed));
+            self.shown_ammo = armed;
         }
     }
 }

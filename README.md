@@ -108,8 +108,10 @@ shadows (its `raytracing` feature).
 - **The alert, as in Metal Gear and Fallout,** is at the top in the middle, in its colour: ALERT
   in red, EVASION in amber and CAUTION in yellow, each counting down but ALERT, and ALERT and
   CAUTION blinking.
-- **Stamina** is a bar in the bottom right corner: green, yellow once it runs low, and red,
+- **Stamina** is a bar in the bottom left corner: green, yellow once it runs low, and red,
   blinking, while you are winded.
+- **The cyber pistol's ammo** shows in the bottom right corner while it is out: ∞, since it
+  never runs out.
 - **Drones speak System Latin,** as they start each of their animations, in lines from
   `data/dialogue/drone.json` - but as beeps, hums and buzzes, which no one would hear as speech:
   each vowel a beep on a note of its own, m, n, l and r a hum, the hissing letters a buzz and the
@@ -496,7 +498,7 @@ how a droid comes apart, and the computer's hack and where it goes.
 | `culling.rs`    | Hides the pieces and lamps that cannot be seen from where the player is.   |
 | `fixtures.rs`   | Light fixtures: the glass, the lamps, and everything that glows.           |
 | `inward.rs`     | Makes the tiles' surfaces visible from inside and out.                     |
-| `hud.rs`        | The status line, the banner, the alert at the top and the stamina bar.     |
+| `hud.rs`        | The status line, the banner, the alert at the top, the stamina bar and the pistol's ammo. |
 | `menu.rs`       | The pause menu.                                                            |
 | `computer.rs`   | The computer to hack: where it goes, the hack, and its terminal.           |
 | `ragdoll.rs`    | A droid gone limp: its bodies and joints, from `data/droid_motion.json`.   |

@@ -560,6 +560,7 @@ impl MazeGame {
                 time: self.round_time,
                 best: self.best_time,
                 breath: self.player.breath(),
+                armed: self.player.armed(),
                 // The menu and the conversation say what to do next, so the hint to click would
                 // only be in the way.
                 mouse_captured: self.mouse_captured

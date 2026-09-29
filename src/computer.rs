@@ -84,7 +84,7 @@ const SCREEN: &str = "computer_screen";
 const FRAME: &str = "computer_frame";
 /// The terminal's font: DejaVu Sans Mono (see data/fonts/DejaVuSansMono.LICENSE), carried in the
 /// game itself.
-static FONT: &[u8] = include_bytes!("../data/fonts/DejaVuSansMono.ttf");
+pub(crate) static FONT: &[u8] = include_bytes!("../data/fonts/DejaVuSansMono.ttf");
 
 /// The terminal panel, which covers the screen as the camera sees it: how many lines of height it
 /// has room for, the output with the box typed into and the keys under that; how many characters

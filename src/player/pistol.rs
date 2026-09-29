@@ -347,6 +347,11 @@ impl Player {
         std::mem::take(&mut self.bolts.struck)
     }
 
+    /// Whether the player has the pistol out, or wants it out.
+    pub fn armed(&self) -> bool {
+        self.armed
+    }
+
     /// Takes the pistol out, or puts it away.
     pub(super) fn toggle_pistol(&mut self) {
         self.armed = !self.armed;
