@@ -5,7 +5,8 @@
 //!
 //! The alert is coloured by its phase - ALERT red, EVASION amber, CAUTION yellow - and ALERT and
 //! CAUTION blink; EVASION and CAUTION count down the seconds they have left. The stamina is a bar,
-//! green, yellow once it runs low, and red and blinking while the player is winded.
+//! green, yellow once it runs low, and red and blinking while the player is winded. Sentries have
+//! bars like it over their heads (see [`Hud::show_breath_bars`]).
 
 use crate::{computer::FONT, inhabitants::Alert};
 use fyrox::{
@@ -75,6 +76,10 @@ pub struct Hud {
     blink: f32,
     shown_alert: Option<(String, Color)>,
     shown_stamina: Option<(f32, Color)>,
+    /// The bars over the sentries' heads - each a frame and what fills it - of which those not
+    /// needed are hidden; and where they go.
+    breath_bars: Vec<(Handle<UiNode>, Handle<Border>)>,
+    screen: Handle<UiNode>,
     /// A message shown for a moment, such as the view settings while they are being changed.
     note: String,
     note_time: f32,
@@ -206,13 +211,14 @@ impl Hud {
         // itself, in the corner. A screen is the size of the window, so in one the banner is
         // centered on the window, the alert at the top in the middle, the stamina in the bottom
         // left corner and the ammo in the bottom right.
-        ScreenBuilder::new(
+        let screen = ScreenBuilder::new(
             WidgetBuilder::new()
                 .with_child(banner)
                 .with_child(alert)
                 .with_child(bottom),
         )
-        .build(ctx);
+        .build(ctx)
+        .to_base();
         Self {
             status,
             banner,
@@ -220,6 +226,7 @@ impl Hud {
             stamina,
             stamina_fill,
             ammo,
+            screen,
             ..Default::default()
         }
     }
@@ -295,6 +302,82 @@ impl Hud {
             self.shown_ammo = armed;
         }
     }
+}
+
+/// A stamina bar over a droid's head: where the middle of its bottom edge is on screen, in
+/// pixels; how wide it is; and how much breath the droid has left, from 0 to 1, and whether it has
+/// run out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BreathBar {
+    pub at: Vector2<f32>,
+    pub width: f32,
+    pub left: f32,
+    pub winded: bool,
+}
+
+impl Hud {
+    /// Shows `bars` over the droids' heads, looking as the player's does, and hides the rest.
+    pub fn show_breath_bars(&mut self, ui: &mut UserInterface, bars: &[BreathBar]) {
+        let blinking_on = self.blink < BLINK_ON;
+        while self.breath_bars.len() < bars.len() {
+            let bar = breath_bar(ui);
+            ui.send(bar.0, WidgetMessage::LinkWith(self.screen));
+            self.breath_bars.push(bar);
+        }
+        for (n, &(frame, fill)) in self.breath_bars.iter().enumerate() {
+            let Some(bar) = bars.get(n) else {
+                ui.send(frame, WidgetMessage::Visibility(false));
+                continue;
+            };
+            let width = bar.width.clamp(BREATH_BAR_WIDTH.0, BREATH_BAR_WIDTH.1);
+            let height = (width * BAR.1 / BAR.0 * 2.0).max(4.0);
+            let (left, colour) = stamina_shown(bar.left, bar.winded, blinking_on);
+            ui.send(frame, WidgetMessage::Visibility(true));
+            ui.send(frame, WidgetMessage::Width(width + 4.0));
+            ui.send(frame, WidgetMessage::Height(height + 4.0));
+            ui.send(
+                frame,
+                WidgetMessage::Margin(Thickness {
+                    left: bar.at.x - 0.5 * width - 2.0,
+                    top: bar.at.y - height - 4.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                }),
+            );
+            ui.send(fill, WidgetMessage::Width(width * left));
+            ui.send(fill, WidgetMessage::Height(height));
+            ui.send(fill, WidgetMessage::Background(Brush::Solid(colour).into()));
+        }
+    }
+}
+
+/// How wide a bar over a droid's head can get on screen, in pixels, from least to most.
+const BREATH_BAR_WIDTH: (f32, f32) = (40.0, 140.0);
+
+/// A stamina bar for over a droid's head, hidden: its frame, and what fills it.
+fn breath_bar(ui: &mut UserInterface) -> (Handle<UiNode>, Handle<Border>) {
+    let ctx = &mut ui.build_ctx();
+    let fill = BorderBuilder::new(
+        WidgetBuilder::new()
+            .with_horizontal_alignment(HorizontalAlignment::Left)
+            .with_margin(Thickness::uniform(2.0))
+            .with_background(Brush::Solid(STAMINA_GREEN).into()),
+    )
+    .with_stroke_thickness(Thickness::zero().into())
+    .build(ctx);
+    let frame = BorderBuilder::new(
+        WidgetBuilder::new()
+            .with_horizontal_alignment(HorizontalAlignment::Left)
+            .with_vertical_alignment(VerticalAlignment::Top)
+            .with_visibility(false)
+            .with_foreground(Brush::Solid(Color::opaque(200, 200, 200)).into())
+            .with_background(Brush::Solid(Color::from_rgba(0, 0, 0, 120)).into())
+            .with_child(fill),
+    )
+    .with_stroke_thickness(Thickness::uniform(1.0).into())
+    .build(ctx)
+    .to_base();
+    (frame, fill)
 }
 
 /// What the alert says and in what colour, `left` seconds from the end of `alert`, with what

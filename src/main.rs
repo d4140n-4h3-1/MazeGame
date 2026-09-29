@@ -41,7 +41,6 @@ mod player;
 mod ragdoll;
 mod survey;
 mod tiles;
-mod winded;
 
 use fyrox::{
     engine::{executor::Executor, GraphicsContextParams},

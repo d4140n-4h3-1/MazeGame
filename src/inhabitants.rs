@@ -26,8 +26,8 @@
 //!
 //! - **Alert**: it can see the player, and after a first moment runs at them, breaking into a
 //!   sprint now and then (see [`SPRINT_EVERY`]), on breath spent and got back as the player's
-//!   is: out of it, it walks until enough is back, sweat drops over its head saying so (see
-//!   [`crate::winded`]). If it gets close enough to touch them, it
+//!   is: out of it, it walks until enough is back. A bar over its head shows how much it has
+//!   left, as the player's does (see [`Inhabitants::breath`]). If it gets close enough to touch them, it
 //!   has caught them.
 //! - **Evasion**: it has lost them. It runs to where they were going when it last saw them, and
 //!   looks about; then walks to one spot after another nearby, looking about at each, until
@@ -267,6 +267,16 @@ pub struct News {
     pub alarmed: Vec<usize>,
 }
 
+/// How much breath a droid has left, for its stamina bar: where its feet and face are, how much
+/// of its most it has left, from 0 to 1, and whether it has run out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Breath {
+    pub feet: Vector3<f32>,
+    pub face: Vector3<f32>,
+    pub left: f32,
+    pub winded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Inhabitant {
     body: Handle<Node>,
@@ -329,6 +339,10 @@ struct Inhabitant {
     /// can only walk until enough is back.
     stamina: f32,
     winded: bool,
+    /// How much breath it has at most: 1, or a sentry's more.
+    most: f32,
+    /// Whether it is a sentry.
+    sentry: bool,
     /// How many of the pistol's bolts have hit it while hostile.
     hits: u32,
     /// Whether it has been stopped, and stays where it went down.
@@ -995,6 +1009,8 @@ impl Inhabitants {
                 sprinting: 0.0,
                 stamina: SENTRY_STAMINA,
                 winded: false,
+                most: SENTRY_STAMINA,
+                sentry: false,
                 hits: 0,
                 down: false,
                 ragdoll: None,
@@ -1190,10 +1206,12 @@ impl Inhabitants {
             };
             let moving = droid.speed > 0.1 && !droid.down;
             let breathing = if moving { gait } else { Gait::Walking };
-            let (most, recovery) = match sentry(droid.character) {
+            droid.sentry = sentry(droid.character);
+            let (most, recovery) = match droid.sentry {
                 true => (SENTRY_STAMINA, SENTRY_RECOVERY),
                 false => (1.0, 1.0),
             };
+            droid.most = most;
             droid.stamina = droid.stamina.min(most);
             (droid.stamina, droid.winded) =
                 breath::breathe(droid.stamina, droid.winded, breathing, dt, most, recovery);
@@ -1535,13 +1553,21 @@ impl Inhabitants {
         Some((alert, left))
     }
 
-    /// The droids out of breath, as indices, and where their faces are.
-    pub fn winded(&self, graph: &Graph) -> Vec<(usize, Vector3<f32>)> {
+    /// How much breath each sentry that is hostile, or has spent some, has left.
+    pub fn breath(&self, graph: &Graph) -> Vec<Breath> {
         self.droids
             .iter()
             .enumerate()
-            .filter(|(_, droid)| droid.winded && !droid.down && !droid.gone)
-            .filter_map(|(n, _)| Some((n, self.face(graph, n)?)))
+            .filter(|(_, droid)| droid.sentry && !droid.down && !droid.gone)
+            .filter(|(_, droid)| droid.alert.is_some() || droid.stamina < droid.most)
+            .filter_map(|(n, droid)| {
+                Some(Breath {
+                    feet: droid.feet,
+                    face: self.face(graph, n)?,
+                    left: droid.stamina / droid.most,
+                    winded: droid.winded,
+                })
+            })
             .collect()
     }
 

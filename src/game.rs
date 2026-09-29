@@ -26,7 +26,6 @@ use crate::{
     player::{Player, DROID_MODEL},
     survey,
     tiles::{self, Measured, Prefabs},
-    winded::Winded,
 };
 use fyrox::{
     core::{
@@ -144,6 +143,12 @@ fn pitch(voices: &Voices, code: u32, mood: Mood) -> f32 {
     (1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0)) * voices.mood_pitch(mood)
 }
 
+/// The stamina bars over the sentries' heads: how far above the face, and how wide, in meters, and
+/// how far off, in meters, they are still shown.
+const BREATH_BAR_ABOVE: f32 = 0.3;
+const BREATH_BAR_WIDTH: f32 = 0.6;
+const BREATH_BAR_REACH: f32 = 25.0;
+
 /// Whether droids of the `character`th kind in `script` are sentries: the kind that goes after
 /// the player itself when provoked, rather than sounding the alarm.
 fn is_sentry(script: &Script, character: usize) -> bool {
@@ -185,10 +190,6 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     moving: fyrox_gfx::MovingThings,
-    /// The sweat drops over the droids out of breath.
-    #[visit(skip)]
-    #[reflect(hidden)]
-    winded: Winded,
     /// The glowing frames of the computers, for the effects to light with.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -371,7 +372,6 @@ impl MazeGame {
         Self {
             moving,
             area_lights,
-            winded: Winded::make(),
             ..Default::default()
         }
     }
@@ -561,7 +561,6 @@ impl MazeGame {
         // longest route, often at an opening in the outer wall, and facing the sky is no start.
         let into_maze = survey::open_direction(grid, *origin, start);
         // Everyone is put down afresh for the new round, away from where the player starts.
-        self.winded.clear(&mut scene.graph);
         self.inhabitants.clear(&mut scene.graph);
         self.player.teleport(
             &mut scene.graph,
@@ -597,6 +596,7 @@ impl MazeGame {
             },
         };
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
+        self.show_breath_bars(ctx);
     }
 
     /// Puts the current view settings on screen for a few seconds.
@@ -714,7 +714,6 @@ impl MazeGame {
         self.barks.clear();
         if self.prefabs.is_some() {
             // Out of the way first: the new maze's survey would take them for walls.
-            self.winded.clear(&mut ctx.scenes[self.scene].graph);
             self.inhabitants.clear(&mut ctx.scenes[self.scene].graph);
             self.level.clear(&mut ctx.scenes[self.scene]);
             self.set_banner(ctx, "");
@@ -943,9 +942,6 @@ impl MazeGame {
             heard,
             alarmed,
         } = self.update_inhabitants(ctx);
-        let graph = &mut ctx.scenes[self.scene].graph;
-        let winded = self.inhabitants.winded(graph);
-        self.winded.update(graph, &winded, ctx.dt);
         for (n, alert) in alerts {
             // The eyes show the phase: red after the player, orange searching, yellow wary, and
             // their own colour once it is calm again.
@@ -1148,6 +1144,41 @@ impl MazeGame {
             self.talkable = talkable;
         }
         self.at_computer = at_computer;
+    }
+
+    /// Puts a stamina bar over the head of each sentry the player can see that is after them or
+    /// has spent some of its breath, the size it would be there, as the player's is on screen.
+    fn show_breath_bars(&mut self, ctx: &mut PluginContext) {
+        let ui = ctx.user_interfaces.first_mut();
+        let playing = matches!(self.phase, Phase::Playing | Phase::Won | Phase::Deleted);
+        if !playing || self.menu.is_open() || self.talking.is_some() {
+            self.hud.show_breath_bars(ui, &[]);
+            return;
+        }
+        let size = ui.screen_size();
+        let graph = &ctx.scenes[self.scene].graph;
+        let player = self.player.feet(graph);
+        let bars: Vec<hud::BreathBar> = self
+            .inhabitants
+            .breath(graph)
+            .into_iter()
+            .filter(|breath| (breath.feet - player).norm() < BREATH_BAR_REACH)
+            .filter(|breath| self.player.can_see(graph, breath.feet))
+            .filter_map(|breath| {
+                let above = breath.face + Vector3::new(0.0, BREATH_BAR_ABOVE, 0.0);
+                let at = self.player.on_screen(graph, above, size)?;
+                // How many pixels a meter is, there.
+                let higher = self.player.on_screen(graph, above + Vector3::y(), size)?;
+                let per_meter = (at - higher).norm();
+                Some(hud::BreathBar {
+                    at,
+                    width: BREATH_BAR_WIDTH * per_meter,
+                    left: breath.left,
+                    winded: breath.winded,
+                })
+            })
+            .collect();
+        self.hud.show_breath_bars(ui, &bars);
     }
 
     /// What the `n`th inhabitant is called on screen: what kind of droid it is, and its code.
