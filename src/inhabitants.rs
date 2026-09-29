@@ -24,7 +24,8 @@
 //! droid hunts the player the way Metal Gear's guards do, through its [`Alert`] phases:
 //!
 //! - **Alert**: it can see the player, and after a first moment runs at them. If it gets close
-//!   enough, it has caught them.
+//!   enough, it has caught them. A sentry need not: one that keeps them in sight for
+//!   [`LOCK_ON`] seconds stops them from wherever it stands.
 //! - **Evasion**: it has lost them. It runs to where they were going when it last saw them, and
 //!   looks about; then walks to one spot after another nearby, looking about at each, until
 //!   [`EVASION`] seconds are up.
@@ -198,6 +199,9 @@ const CHASE_REACH: f32 = 200.0;
 /// their bodies touching - and how far above or below.
 const CATCH: f32 = 0.9;
 const CATCH_HEIGHT: f32 = 1.0;
+/// How long, in seconds, a sentry on Alert has to keep the player in sight to stop them from
+/// where it stands: long enough to duck out of sight, not to outrun it.
+pub const LOCK_ON: f32 = 1.5;
 /// How many of the pistol's bolts it takes to stop a hostile droid.
 pub const HITS: u32 = 3;
 /// How long, in seconds, a droid that has been stopped lies there before it is gone.
@@ -270,8 +274,10 @@ struct Inhabitant {
     talking: bool,
     /// How it is going about the player, once it has turned on them.
     alert: Option<Alert>,
-    /// Whether, being hostile, it can see the player, as of this frame.
+    /// Whether, being hostile, it can see the player, as of this frame - itself, or through
+    /// another sentry it sees after them; and whether itself.
     sees_player: bool,
+    has_player_in_sight: bool,
     /// Where it last saw the player's feet, and which way they were going then, roughly.
     lost_at: Vector3<f32>,
     lost_going: Vector3<f32>,
@@ -295,6 +301,9 @@ struct Inhabitant {
     replan: f32,
     /// How long, having just turned hostile, it stands before going after the player, in seconds.
     windup: f32,
+    /// How long, as a sentry on Alert, it has kept the player in sight without a break, in
+    /// seconds.
+    lock: f32,
     /// How many of the pistol's bolts have hit it while hostile.
     hits: u32,
     /// Whether it has been stopped, and stays where it went down.
@@ -661,6 +670,14 @@ fn stage_after(warned: u8, patience: f32) -> f32 {
     }
 }
 
+/// How long a sentry has kept the player in sight, `lock` seconds until now, after another `dt`
+/// in which it could `aim` at them - on Alert, done standing, and seeing them itself - or not;
+/// and whether that is long enough to stop them.
+fn lock_on(lock: f32, aim: bool, dt: f32) -> (f32, bool) {
+    let lock = if aim { lock + dt } else { 0.0 };
+    (lock, lock >= LOCK_ON)
+}
+
 /// The phase a droid in `alert` goes into, seeing the player or not, with `left` seconds left of
 /// searching or of being wary: none, once it is calm again.
 fn next_alert(alert: Alert, sees: bool, left: f32) -> Option<Alert> {
@@ -894,6 +911,7 @@ impl Inhabitants {
                 talking: false,
                 alert: None,
                 sees_player: false,
+                has_player_in_sight: false,
                 lost_at: feet,
                 lost_going: Vector3::zeros(),
                 search_left: 0.0,
@@ -906,6 +924,7 @@ impl Inhabitants {
                 unaimed: 0.0,
                 replan: 0.0,
                 windup: 0.0,
+                lock: 0.0,
                 hits: 0,
                 down: false,
                 ragdoll: None,
@@ -918,7 +937,8 @@ impl Inhabitants {
 
     /// Moves everyone along for another `dt`, over `grid` whose corner is at `origin`, making
     /// way for each other and - unless they are after them - for the `player`'s feet. Whether
-    /// anyone caught the player, and whose phase changed.
+    /// anyone caught the player - or, being a sentry as `sentry` says of its kind, stopped them
+    /// from afar - and whose phase changed.
     pub fn update(
         &mut self,
         graph: &mut Graph,
@@ -926,6 +946,7 @@ impl Inhabitants {
         player: Vector3<f32>,
         rng: &mut Rng,
         dt: f32,
+        sentry: impl Fn(usize) -> bool,
     ) -> News {
         let mut caught = None;
         let mut alerts = std::mem::take(&mut self.alerts);
@@ -1159,6 +1180,18 @@ impl Inhabitants {
             {
                 caught = caught.or(Some(me));
             }
+            // A sentry that has kept them in sight long enough stops them from where it is.
+            let aim = sentry(droid.character)
+                && droid.alert == Some(Alert::Alert)
+                && droid.windup == 0.0
+                && droid.has_player_in_sight
+                && !droid.down
+                && !droid.talking;
+            let (lock, stopped) = lock_on(droid.lock, aim, dt);
+            droid.lock = lock;
+            if stopped {
+                caught = caught.or(Some(me));
+            }
 
             if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(droid.body) {
                 body.set_next_kinematic_translation(droid.feet + Vector3::new(0.0, MIDDLE, 0.0));
@@ -1221,6 +1254,7 @@ impl Inhabitants {
                 }
                 _ => false,
             };
+            droid.has_player_in_sight = droid.sees_player;
         }
     }
 
@@ -1769,6 +1803,22 @@ mod tests {
         // On Alert it keeps track of them wherever they go, as long as they are not too far off.
         assert!(sees(Alert::Alert, 0.0, -20.0, Posture::Crawling));
         assert!(!sees(Alert::Alert, 0.0, SIGHT + 1.0, standing));
+    }
+
+    #[test]
+    fn a_sentry_stops_the_player_kept_in_sight_long_enough() {
+        let dt = 0.1;
+        let (mut lock, mut stopped, mut frames) = (0.0, false, 0);
+        while !stopped {
+            (lock, stopped) = lock_on(lock, true, dt);
+            frames += 1;
+            assert!(frames < 100, "never stops them");
+        }
+        assert!((frames as f32 * dt - LOCK_ON).abs() < dt + 1.0e-4, "after {frames} frames");
+        // Out of sight for a moment, it starts over.
+        let (lock, stopped) = lock_on(LOCK_ON - dt, false, dt);
+        assert_eq!((lock, stopped), (0.0, false));
+        assert!(!lock_on(lock, true, dt).1);
     }
 
     #[test]

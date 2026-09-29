@@ -811,8 +811,14 @@ impl MazeGame {
             .join_chases(graph, self.lights_off, |character| {
                 script.is_some_and(|script| is_sentry(script, character))
             });
-        self.inhabitants
-            .update(&mut scene.graph, (grid, *origin), player, rng, ctx.dt)
+        self.inhabitants.update(
+            &mut scene.graph,
+            (grid, *origin),
+            player,
+            rng,
+            ctx.dt,
+            |character| script.is_some_and(|script| is_sentry(script, character)),
+        )
     }
 
     /// Tells the droids what the player's bolts have hit, and says so when one goes down.
