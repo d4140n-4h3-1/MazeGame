@@ -110,7 +110,7 @@ pub(crate) const SCALE: f32 = 0.85;
 /// crouching and crawling at any of them.
 const CYCLES: [(&str, Option<Gait>); 4] = [
     ("droid_walk_cycle", Some(Gait::Walking)),
-    ("droid_run_cycle", Some(Gait::Running)),
+    ("droid_run_cycle", Some(Gait::Jogging)),
     ("droid_sprint_cycle", Some(Gait::Sprinting)),
     ("droid_crouch_cycle", None),
 ];
@@ -146,7 +146,7 @@ const STRAFES: [[&str; 7]; 3] = [
     ],
 ];
 /// The gait each row of [`STRAFES`] is for, like [`CYCLES`].
-const STRAFE_GAITS: [Option<Gait>; 3] = [Some(Gait::Walking), Some(Gait::Running), None];
+const STRAFE_GAITS: [Option<Gait>; 3] = [Some(Gait::Walking), Some(Gait::Jogging), None];
 /// How much nearer the way it is going another step has to be, in radians, for the droid to
 /// change to it strafing, so that going just about halfway between two it does not keep changing.
 const STRAFE_MARGIN: f32 = 10.0 * std::f32::consts::PI / 180.0;
@@ -211,11 +211,14 @@ const IDLE: &str = "droid_idle_cycle";
 /// Its idle and its walk in cover, up against a wall, if it has them.
 const COVER_IDLE: &str = "droid_cover_idle";
 const COVER_WALK: &str = "droid_cover_walk";
-/// How fast the crouch is played for each gait - walking, running, sprinting - crouched, and
+/// How fast the crouch is played for each gait - walking, jogging, running, sprinting - crouched, and
 /// down on the floor crawling, as a multiple of how it was made. Each is slower than the one
 /// above it, as every gait is slower the lower the posture.
-const CROUCHING_RATES: [f32; 3] = [1.0, 1.3, 1.6];
-const CRAWLING_RATES: [f32; 3] = [0.5, 0.65, 0.8];
+const CROUCHING_RATES: [f32; 4] = [1.0, 1.3, 1.45, 1.6];
+const CRAWLING_RATES: [f32; 4] = [0.5, 0.65, 0.72, 0.8];
+/// How fast a run goes, as a share of the cycle it is played with: the sprint's, stepped out a
+/// good deal slower, between a jog and a sprint.
+const RUN_PACE: f32 = 0.7;
 /// The droid's hips, which its speed is measured by, and which way it faces goes by.
 const HIPS: &str = "DEF-spine";
 /// Its feet, one of which is planted on the floor at a time, walking.
@@ -1248,11 +1251,15 @@ fn choose(cycles: &[Option<Gait>], gait: Gait, crouched: bool, moving: bool) -> 
     }
 }
 
-/// The cycle for `gait` standing up: its own, or failing that the walk, or failing that any.
+/// The cycle for `gait` standing up: its own - for a run, which has none, the sprint's, played
+/// slower ([`RUN_PACE`]) - or failing that the walk, or failing that any.
 fn standing_cycle(cycles: &[Option<Gait>], gait: Gait) -> Option<usize> {
     let find = |wanted: Gait| cycles.iter().position(|&c| c == Some(wanted));
-    find(gait)
-        .or_else(|| find(Gait::Walking))
+    let own = match gait {
+        Gait::Running => find(Gait::Sprinting).or_else(|| find(Gait::Jogging)),
+        gait => find(gait),
+    };
+    own.or_else(|| find(Gait::Walking))
         .or_else(|| cycles.iter().position(Option::is_some))
 }
 
@@ -1262,11 +1269,7 @@ fn crouch_rate(posture: Posture, gait: Gait) -> f32 {
         Posture::Crawling => CRAWLING_RATES,
         _ => CROUCHING_RATES,
     };
-    match gait {
-        Gait::Walking => rates[0],
-        Gait::Running => rates[1],
-        Gait::Sprinting => rates[2],
-    }
+    rates[gait.rank()]
 }
 
 /// Where `animation`'s pose puts `node`, as far as the pose says.
@@ -1889,7 +1892,12 @@ impl Avatar {
     pub(crate) fn pace(&self, posture: Posture, gait: Gait) -> Option<f32> {
         let gaits = self.gaits();
         let (index, rate) = match posture {
-            Posture::Standing => (standing_cycle(&gaits, gait)?, 1.0),
+            Posture::Standing => {
+                let index = standing_cycle(&gaits, gait)?;
+                // A run is played with another gait's cycle, slower.
+                let borrowed = gait == Gait::Running && self.cycles[index].gait != Some(gait);
+                (index, if borrowed { RUN_PACE } else { 1.0 })
+            }
             _ => (
                 gaits.iter().position(Option::is_none)?,
                 crouch_rate(posture, gait),
@@ -2509,7 +2517,7 @@ impl Avatar {
     /// The fastest of its gaits the droid is going flat out at, going `speed` along the ground:
     /// sprinting or running. None if it is going slower than either.
     fn flat_out(&self, speed: f32) -> Option<Gait> {
-        [Gait::Sprinting, Gait::Running].into_iter().find(|&gait| {
+        [Gait::Sprinting, Gait::Jogging].into_iter().find(|&gait| {
             self.cycles[..self.gaited]
                 .iter()
                 .find(|cycle| cycle.gait == Some(gait))
@@ -2797,7 +2805,7 @@ mod tests {
 
     const ALL: [Option<Gait>; 4] = [
         Some(Gait::Walking),
-        Some(Gait::Running),
+        Some(Gait::Jogging),
         Some(Gait::Sprinting),
         None,
     ];
@@ -2809,7 +2817,7 @@ mod tests {
             Some(0),
             "walking walks"
         );
-        assert_eq!(choose(&ALL, Gait::Running, false, true), Some(1));
+        assert_eq!(choose(&ALL, Gait::Jogging, false, true), Some(1));
         assert_eq!(choose(&ALL, Gait::Sprinting, false, true), Some(2));
     }
 
@@ -2822,7 +2830,7 @@ mod tests {
             "held crouched"
         );
         assert_eq!(
-            choose(&ALL, Gait::Running, false, false),
+            choose(&ALL, Gait::Jogging, false, false),
             None,
             "standing at rest"
         );
@@ -2890,7 +2898,7 @@ mod tests {
     #[test]
     fn short_of_a_sprint_it_never_skids() {
         use std::f32::consts::{FRAC_PI_2, PI};
-        for gait in [Gait::Walking, Gait::Running] {
+        for gait in [Gait::Walking, Gait::Jogging] {
             assert_eq!(skid_for(gait, 0.0, PI, true), None, "{gait:?} round");
             assert_eq!(
                 skid_for(gait, 0.0, FRAC_PI_2, true),
@@ -3384,7 +3392,7 @@ mod tests {
 
     #[test]
     fn a_missing_cycle_falls_back_to_the_walk() {
-        let no_sprint = [Some(Gait::Walking), Some(Gait::Running)];
+        let no_sprint = [Some(Gait::Walking), Some(Gait::Jogging)];
         assert_eq!(choose(&no_sprint, Gait::Sprinting, false, true), Some(0));
         assert_eq!(
             choose(&no_sprint, Gait::Walking, true, true),
@@ -3395,7 +3403,7 @@ mod tests {
 
     #[test]
     fn the_crouch_goes_faster_for_quicker_gaits_and_slower_on_the_floor() {
-        let gaits = [Gait::Walking, Gait::Running, Gait::Sprinting];
+        let gaits = [Gait::Walking, Gait::Jogging, Gait::Sprinting];
         for pair in gaits.windows(2) {
             for posture in [Posture::Crouching, Posture::Crawling] {
                 assert!(crouch_rate(posture, pair[1]) > crouch_rate(posture, pair[0]));

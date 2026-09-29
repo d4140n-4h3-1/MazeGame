@@ -2,7 +2,7 @@
 
 use crate::{
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
-    drone::{Drone, DRONE_MODEL},
+    drone::{Drone, DroneLines, DRONE_LINES, DRONE_MODEL},
     notes::{self, Notes, NOTES},
     diagnostics::{self, FrameStats},
     dialogue::{
@@ -11,6 +11,7 @@ use crate::{
     },
     formants::{
         self,
+        chirps::{Chirps, DRONE_VOICE},
         speech::{Voices, VOICES},
         synth,
     },
@@ -278,6 +279,17 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     drone_placed: bool,
+    /// How drones sound and what they say, how many lines it has said, and the one being made
+    /// into sound to say, if any.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_voice: Option<(Chirps, DroneLines)>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_said: usize,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_saying: Option<Making>,
     /// Which the player is using, or last used, whose terminal shows.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -553,11 +565,7 @@ impl MazeGame {
                 mouse_captured: self.mouse_captured
                     || self.menu.is_open()
                     || self.talking.is_some(),
-                alarm: self.inhabitants.alarm().map(|(alert, left)| match alert {
-                    Alert::Alert => "ALERT".to_string(),
-                    Alert::Evasion => format!("EVASION {:.0}", left.max(0.0).ceil()),
-                    Alert::Caution => format!("CAUTION {:.0}", left.max(0.0).ceil()),
-                }),
+                alarm: self.inhabitants.alarm(),
             },
         };
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
@@ -737,7 +745,12 @@ impl MazeGame {
                         ));
                     }
                     let model = own.filter(|model| model.is_ok()).unwrap_or(droid);
-                    Livery::new(model.clone(), hostile)
+                    let recoloured = self
+                        .script
+                        .as_ref()
+                        .and_then(|script| script.characters.get(n))
+                        .is_some_and(|c| c.hostile_colours);
+                    Livery::new(model.clone(), hostile.filter(|_| recoloured))
                 })
                 .collect(),
         )
@@ -1474,7 +1487,38 @@ impl MazeGame {
                 self.drone_placed = true;
             }
         }
-        drone.update(graph);
+        let started = drone.update(graph);
+        // Speaking as it starts an animation, in beeps made in the background, from its body.
+        if let (Some(name), Some((chirps, lines))) = (started, &self.drone_voice) {
+            if let Some(said) = lines.line(name, self.drone_said) {
+                self.drone_said += 1;
+                let sound = chirps.say(&said.says, 1.0);
+                let (rate, reach) = (chirps.sample_rate, sound.reach);
+                let receiver = platform::in_background(move || synth::make(&sound, rate));
+                self.drone_saying = Some(Making(receiver, reach));
+            }
+        }
+        if let (Some(Making(receiver, reach)), Some((chirps, _))) =
+            (&self.drone_saying, &self.drone_voice)
+        {
+            match receiver.try_recv() {
+                Ok(samples) => {
+                    if let Some(buffer) = formants::playable(samples, chirps.sample_rate) {
+                        let sound = SoundBuilder::new(BaseBuilder::new())
+                            .with_buffer(Some(buffer))
+                            .with_radius(*reach)
+                            .with_play_once(true)
+                            .with_status(SoundStatus::Playing)
+                            .build(graph);
+                        // Along with it, wherever it goes.
+                        graph.link_nodes(sound, drone.body());
+                    }
+                    self.drone_saying = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => (),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.drone_saying = None,
+            }
+        }
     }
 
     /// Starts using the computer, if the player is at it: the view goes in to its screen, and the
@@ -1607,12 +1651,21 @@ impl Plugin for MazeGame {
                 .map(|path| path.map(|path| resources.request::<Model>(path)))
                 .collect()
         });
-        self.hostile_model = Some(resources.request::<Model>(HOSTILE_MODEL));
+        // Only loaded for a kind that changes into its colours.
+        let recoloured = self
+            .script
+            .as_ref()
+            .is_some_and(|script| script.characters.iter().any(|c| c.hostile_colours));
+        self.hostile_model = recoloured.then(|| resources.request::<Model>(HOSTILE_MODEL));
         self.notes = Notes::load(NOTES)
             .inspect_err(|error| Log::err(format!("Maze: the computers hold no notes: {error}")))
             .ok();
         self.voices = Voices::load(VOICES)
             .inspect_err(|error| Log::err(format!("Maze: the droids are silent: {error}")))
+            .ok();
+        self.drone_voice = Chirps::load(DRONE_VOICE)
+            .and_then(|chirps| Ok((chirps, DroneLines::load(DRONE_LINES)?)))
+            .inspect_err(|error| Log::err(format!("Maze: the drones are silent: {error}")))
             .ok();
         let restart = if self.prefabs.is_some() {
             "New maze"

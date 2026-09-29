@@ -10,6 +10,9 @@
 //! It lights what is round it too, green, as brightly as it glows: a lamp just in front of its
 //! eye, whose shadows are traced as every light's are. Not inside it, where the drone's own shell
 //! and eye, which are traced with the rest of the scene, would shut the light in.
+//!
+//! It speaks System Latin as it starts each animation, as [`DRONE_LINES`] has it - said as beeps,
+//! hums and buzzes (see [`crate::formants::chirps`]), which no one would take for speech.
 
 use crate::{
     fixtures::{glow_strength, EMISSION_STRENGTH},
@@ -40,9 +43,39 @@ use fyrox::{
         Scene,
     },
 };
+use serde::Deserialize;
+use std::collections::HashMap;
 
-/// The drone's model.
+/// The drone's model, and what drones say.
 pub const DRONE_MODEL: &str = "data/drone.glb";
+pub const DRONE_LINES: &str = "data/dialogue/drone.json";
+
+/// A line a drone says: in System Latin, and what that means in English.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Said {
+    pub says: String,
+    pub means: String,
+}
+
+/// What drones say, by the animation they say it as they start.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct DroneLines {
+    pub lines: HashMap<String, Vec<Said>>,
+}
+
+impl DroneLines {
+    /// The lines in the file at `path`.
+    pub fn load(path: &str) -> Result<Self, String> {
+        let text = crate::platform::read_to_string(path)?;
+        serde_json::from_str(&text).map_err(|error| format!("{path}: {error}"))
+    }
+
+    /// The `n`th line, going round, for the animation called `name`; None for one with none.
+    pub fn line(&self, name: &str, n: usize) -> Option<&Said> {
+        let lines = self.lines.get(name)?;
+        lines.get(n % lines.len().max(1))
+    }
+}
 /// How much the model is scaled: as made it is 6.5 m across its rings, and 1.3 m in the game.
 const SCALE: f32 = 0.2;
 /// How high it hovers, in meters above the floor; and how far in front of the player it goes,
@@ -243,6 +276,11 @@ impl Drone {
             .map(|&(_, handle)| handle)
     }
 
+    /// What the animations move about: where it speaks from.
+    pub fn body(&self) -> Handle<Node> {
+        self.body
+    }
+
     /// Goes on to the next of [`SHOWN`] from the start.
     fn next(&mut self, graph: &mut Graph) {
         let before = self.playing();
@@ -264,11 +302,12 @@ impl Drone {
     }
 
     /// Glows along with the animation it is playing, and goes on to the next once it has played
-    /// it through as many times as it is to. The engine plays the animation itself.
-    pub fn update(&mut self, graph: &mut Graph) {
+    /// it through as many times as it is to. The engine plays the animation itself. The name of
+    /// the animation it has just started, if it has, for it to speak as it does.
+    pub fn update(&mut self, graph: &mut Graph) -> Option<&'static str> {
         let Some(handle) = self.playing() else {
             self.next(graph);
-            return;
+            return Some(SHOWN[self.shown].0);
         };
         let time = graph
             .try_get_of_type::<AnimationPlayer>(self.player)
@@ -276,14 +315,14 @@ impl Drone {
             .and_then(|player| player.animations().try_get(handle).ok())
             .map(|animation| animation.time_position());
         let Some(time) = time else {
-            return;
+            return None;
         };
         // It has come round to the start again.
         if time < self.last {
             self.played += 1;
             if self.played >= SHOWN[self.shown].1 {
                 self.next(graph);
-                return;
+                return Some(SHOWN[self.shown].0);
             }
         }
         self.last = time;
@@ -302,6 +341,7 @@ impl Drone {
         if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(self.lamp) {
             lamp.base_light_mut().set_intensity(LAMP_BRIGHTNESS * glow(SHOWN[self.shown].0, time * FPS));
         }
+        None
     }
 }
 
@@ -379,5 +419,18 @@ mod tests {
         assert_eq!(glow("drone_death", 21.0), 4.0);
         assert_eq!(glow("drone_death", 40.0), 0.0);
         assert_eq!(glow("drone_death", 60.0), 0.0);
+    }
+
+    #[test]
+    fn it_has_something_to_say_as_it_starts_each_animation() {
+        let lines = DroneLines::load(DRONE_LINES).expect("the drones' lines");
+        for (name, _) in SHOWN {
+            let said = lines.line(name, 0).unwrap_or_else(|| panic!("nothing for {name}"));
+            assert!(!said.says.is_empty() && !said.means.is_empty());
+        }
+        // Going round its lines in turn.
+        let patrol = lines.lines["drone_patrol"].len();
+        assert_eq!(lines.line("drone_patrol", patrol), lines.line("drone_patrol", 0));
+        assert_eq!(lines.line("nothing", 0), None);
     }
 }

@@ -1,5 +1,5 @@
 //! What the player makes heard, for the droids hunting them to hear (see
-//! [`crate::inhabitants`]): footfalls running and sprinting, landing from a fall, and the pistol
+//! [`crate::inhabitants`]): footfalls jogging, running and sprinting, landing from a fall, and the pistol
 //! - its shot where it is fired, and its bolt where it hits, which can draw a droid away from
 //! the player. Walking, crouched or crawling, the player makes no sound.
 //!
@@ -8,8 +8,9 @@
 use super::{posture::Gait, posture::Posture, Player};
 use fyrox::core::algebra::Vector3;
 
-/// How far off footfalls carry, running and sprinting, in meters.
-const RUN_NOISE: f32 = 5.0;
+/// How far off footfalls carry, jogging, running and sprinting, in meters.
+const JOG_NOISE: f32 = 5.0;
+const RUN_NOISE: f32 = 7.0;
 const SPRINT_NOISE: f32 = 10.0;
 /// How far off landing from a fall carries, in meters, and how fast the body has to be falling,
 /// in meters per second, for it to make any.
@@ -31,12 +32,13 @@ pub(super) struct Noises {
     next_footfall: f32,
 }
 
-/// How far off footfalls carry at `gait` in `posture`: nowhere, but for running and sprinting
-/// on their feet.
+/// How far off footfalls carry at `gait` in `posture`: nowhere, but for jogging, running and
+/// sprinting on their feet.
 fn footfall(posture: Posture, gait: Gait) -> f32 {
     match (posture, gait) {
         (Posture::Standing, Gait::Sprinting) => SPRINT_NOISE,
         (Posture::Standing, Gait::Running) => RUN_NOISE,
+        (Posture::Standing, Gait::Jogging) => JOG_NOISE,
         _ => 0.0,
     }
 }
@@ -81,15 +83,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_running_and_sprinting_on_their_feet_are_heard() {
+    fn only_jogging_running_and_sprinting_on_their_feet_are_heard() {
         assert_eq!(footfall(Posture::Standing, Gait::Walking), 0.0);
-        let (sprint, run) = (
+        let (sprint, run, jog) = (
             footfall(Posture::Standing, Gait::Sprinting),
             footfall(Posture::Standing, Gait::Running),
+            footfall(Posture::Standing, Gait::Jogging),
         );
-        assert!(sprint > run && run > 0.0);
+        assert!(sprint > run && run > jog && jog > 0.0);
         assert_eq!(footfall(Posture::Crouching, Gait::Sprinting), 0.0);
-        assert_eq!(footfall(Posture::Crawling, Gait::Running), 0.0);
+        assert_eq!(footfall(Posture::Crawling, Gait::Jogging), 0.0);
     }
 
     #[test]

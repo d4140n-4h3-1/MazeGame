@@ -386,12 +386,12 @@ mod tests {
     }
 
     #[test]
-    fn drawn_it_strafes_and_a_sprint_only_runs() {
+    fn drawn_it_strafes_and_a_sprint_only_jogs() {
         use crate::player::posture::Gait;
         let mut player = Player::default();
-        player.on_key(fyrox::keyboard::KeyCode::ShiftLeft, true);
+        crate::player::hold_shift(&mut player);
         player.pull_trigger();
-        assert_eq!(player.gait(), Gait::Running);
+        assert_eq!(player.gait(), Gait::Jogging);
         assert!(player.strafing());
     }
 }

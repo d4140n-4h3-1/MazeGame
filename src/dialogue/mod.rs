@@ -144,6 +144,10 @@ pub struct Character {
     /// The model it is made from; the player's droid's, without.
     #[serde(default)]
     pub model: Option<String>,
+    /// Whether it changes into the hostile droid's colours while it is after the player. Sentries
+    /// keep their own; the colours are for another kind of droid.
+    #[serde(default)]
+    pub hostile_colours: bool,
 }
 
 /// Everyone's conversations, as the file has them.

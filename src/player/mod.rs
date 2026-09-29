@@ -5,8 +5,9 @@
 //! Crouching and crawling shrink the body from the top, so the feet stay on the floor, and lower
 //! the eyes with it.
 //!
-//! The player walks, runs or sprints. Caps Lock goes between walking and running, and stays
-//! where it is put; Shift sprints while it is held, from either. Speed is not picked up or put
+//! The player walks, jogs, runs or sprints. Caps Lock goes between walking and jogging, and a tap
+//! of Shift between walking and running, each staying where it is put; Shift held down sprints
+//! for as long as it is held, from any of them. Speed is not picked up or put
 //! down at once: the body accelerates into it and slows out of it - see `ramp` in [`movement`] -
 //! and off the ground there is barely anything to push against, so a jump mostly keeps the way it
 //! was going.
@@ -17,12 +18,13 @@
 //! [`cover`].
 //!
 //! Holding the right mouse button strafes: the droid keeps facing ahead whichever way it goes -
-//! see [`avatar`]. A sprint slows to a run while it does, and picks up again when it is let go.
+//! see [`avatar`]. A run or a sprint slows to a jog while it does, and picks up again when it is
+//! let go.
 //!
 //! R draws the pistol and holsters it again, and the left mouse button draws it and then fires
 //! it - see [`pistol`]. What its bolts hit, the game hears of from [`Player::struck`].
 //!
-//! A sprint costs breath, and runs out: see [`Player::breathe`]. Out of breath, the player is
+//! A run costs breath, and a sprint more of it: see [`Player::breathe`]. Out of breath, the player is
 //! down to a walk until they have got some of it back.
 //!
 //! The head is not carried perfectly level. Seen through the droid's eyes, it rises and falls in
@@ -31,7 +33,7 @@
 //!
 //! F switches the flashlight on and off; it starts off.
 //!
-//! Running, sprinting, landing hard and the pistol are heard: see [`noise`].
+//! Jogging, running, sprinting, landing hard and the pistol are heard: see [`noise`].
 //!
 //! What the player hears, they hear from where the camera is, facing the way it faces.
 //!
@@ -107,9 +109,9 @@ pub struct Player {
     flashlight: Handle<Node>,
     /// Whether the flashlight is on. It stays as the player left it from one round to the next.
     flashlight_on: bool,
-    /// Whether Caps Lock has put the player into a run. Like the flashlight, it stays as the
-    /// player left it from one round to the next.
-    running: bool,
+    /// The pace Caps Lock and a tap of Shift have put the player into: walking, jogging or
+    /// running. Like the flashlight, it stays as the player left it from one round to the next.
+    pace: posture::Gait,
     /// How much breath is left, from 1 down to 0.
     stamina: f32,
     /// Whether the player has run themselves out and is walking it off.
@@ -191,7 +193,7 @@ impl Default for Player {
             camera: Default::default(),
             flashlight: Default::default(),
             flashlight_on: false,
-            running: false,
+            pace: posture::Gait::Walking,
             stamina: 1.0,
             winded: false,
             grounded: false,
@@ -369,6 +371,7 @@ impl Player {
             self.land();
             self.thud(self.feet(graph));
         }
+        self.hold_keys(dt);
         let keys = &self.keys;
         let pushing = can_move && (keys.forward || keys.back || keys.left || keys.right);
         self.breathe(dt, pushing);
@@ -492,6 +495,15 @@ impl Player {
             .find(|hit| hit.collider != self.collider)
             .map(|hit| ((hit.position.coords - from).norm(), hit.collider))
     }
+}
+
+/// Holds Shift down long enough to sprint, with a few key-repeat presses along the way.
+#[cfg(test)]
+fn hold_shift(player: &mut Player) {
+    for _ in 0..4 {
+        player.on_key(fyrox::keyboard::KeyCode::ShiftLeft, true);
+    }
+    player.hold_keys(posture::SPRINT_HOLD);
 }
 
 /// Presses and releases a key, with a few key-repeat presses while it is down.

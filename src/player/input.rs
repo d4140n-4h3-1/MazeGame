@@ -1,7 +1,11 @@
 //! The keys the player moves with, and the toggles among them: Caps Lock, C, Z, F, V, Tab and R
-//! each act once per press, however long the key is held.
+//! each act once per press, however long the key is held. Shift acts by how long it is held: a
+//! tap switches running on or off, and held down it sprints.
 
-use super::Player;
+use super::{
+    posture::{Gait, SPRINT_HOLD},
+    Player,
+};
 use fyrox::keyboard::KeyCode;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -10,7 +14,8 @@ pub(super) struct Keys {
     pub(super) back: bool,
     pub(super) left: bool,
     pub(super) right: bool,
-    pub(super) sprint: bool,
+    /// How long Shift has been held down, in seconds; None while it is up.
+    pub(super) shift_held: Option<f32>,
     /// Whether Caps Lock is down, so that key repeat while it is held does not toggle again.
     gait_toggle: bool,
     pub(super) jump: bool,
@@ -41,10 +46,20 @@ impl Player {
             KeyCode::KeyS | KeyCode::ArrowDown => self.keys.back = pressed,
             KeyCode::KeyA | KeyCode::ArrowLeft => self.keys.left = pressed,
             KeyCode::KeyD | KeyCode::ArrowRight => self.keys.right = pressed,
-            KeyCode::ShiftLeft | KeyCode::ShiftRight => self.keys.sprint = pressed,
+            KeyCode::ShiftLeft | KeyCode::ShiftRight => match (pressed, self.keys.shift_held) {
+                (true, None) => self.keys.shift_held = Some(0.0),
+                // Let go before it sprinted: a tap, which switches running on or off.
+                (false, Some(held)) => {
+                    if held < SPRINT_HOLD {
+                        self.pace = switched(self.pace, Gait::Running);
+                    }
+                    self.keys.shift_held = None;
+                }
+                _ => (),
+            },
             KeyCode::CapsLock => {
                 if pressed && !self.keys.gait_toggle {
-                    self.running = !self.running;
+                    self.pace = switched(self.pace, Gait::Jogging);
                 }
                 self.keys.gait_toggle = pressed;
             }
@@ -90,6 +105,13 @@ impl Player {
         }
     }
 
+    /// Counts another `dt` seconds of Shift being held down, if it is.
+    pub(super) fn hold_keys(&mut self, dt: f32) {
+        if let Some(held) = self.keys.shift_held.as_mut() {
+            *held += dt;
+        }
+    }
+
     /// Holds the right mouse button down, or lets it go: while it is down, the droid strafes,
     /// facing ahead whichever way it goes.
     pub fn set_strafing(&mut self, held: bool) {
@@ -102,13 +124,20 @@ impl Player {
     }
 }
 
+/// The pace a toggle for `to` leaves the player in, from `pace`: `to`, or back to a walk if they
+/// were at it already.
+fn switched(pace: Gait, to: Gait) -> Gait {
+    if pace == to {
+        Gait::Walking
+    } else {
+        to
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::player::{
-        posture::{Gait, Posture},
-        press,
-    };
+    use crate::player::{hold_shift, posture::Posture, press};
 
     #[test]
     fn c_toggles_crouching() {
@@ -169,54 +198,76 @@ mod tests {
     }
 
     #[test]
-    fn caps_lock_goes_between_walking_and_running_once_per_press() {
+    fn caps_lock_goes_between_walking_and_jogging_once_per_press() {
         let mut player = Player::default();
         assert_eq!(player.gait(), Gait::Walking, "walking to start with");
         press(&mut player, KeyCode::CapsLock);
-        assert_eq!(player.gait(), Gait::Running);
+        assert_eq!(player.gait(), Gait::Jogging);
         press(&mut player, KeyCode::CapsLock);
         assert_eq!(player.gait(), Gait::Walking, "back to a walk");
     }
 
     #[test]
-    fn shift_sprints_from_a_walk_or_a_run_and_leaves_the_gait_as_it_was() {
+    fn a_tap_of_shift_goes_between_walking_and_running() {
+        let mut player = Player::default();
+        press(&mut player, KeyCode::ShiftLeft);
+        assert_eq!(player.gait(), Gait::Running);
+        press(&mut player, KeyCode::ShiftLeft);
+        assert_eq!(player.gait(), Gait::Walking, "back to a walk");
+        // From a jog, a tap runs, and Caps Lock from a run jogs.
+        press(&mut player, KeyCode::CapsLock);
+        press(&mut player, KeyCode::ShiftLeft);
+        assert_eq!(player.gait(), Gait::Running);
+        press(&mut player, KeyCode::CapsLock);
+        assert_eq!(player.gait(), Gait::Jogging);
+    }
+
+    #[test]
+    fn shift_held_sprints_from_any_pace_and_leaves_it_as_it_was() {
         let mut player = Player::default();
         player.on_key(KeyCode::ShiftLeft, true);
+        assert_eq!(player.gait(), Gait::Walking, "not yet held long enough");
+        player.hold_keys(SPRINT_HOLD);
         assert_eq!(player.gait(), Gait::Sprinting, "sprinting from a walk");
         player.on_key(KeyCode::ShiftLeft, false);
-        assert_eq!(player.gait(), Gait::Walking);
+        assert_eq!(player.gait(), Gait::Walking, "a sprint is not a tap");
 
-        press(&mut player, KeyCode::CapsLock);
-        player.on_key(KeyCode::ShiftLeft, true);
-        assert_eq!(player.gait(), Gait::Sprinting, "sprinting from a run");
-        player.on_key(KeyCode::ShiftLeft, false);
-        assert_eq!(
-            player.gait(),
-            Gait::Running,
-            "running again once Shift is let go"
-        );
+        for pace in [KeyCode::CapsLock, KeyCode::ShiftLeft] {
+            let mut player = Player::default();
+            press(&mut player, pace);
+            let before = player.gait();
+            hold_shift(&mut player);
+            assert_eq!(player.gait(), Gait::Sprinting, "sprinting from {before:?}");
+            player.on_key(KeyCode::ShiftLeft, false);
+            assert_eq!(player.gait(), before, "back once Shift is let go");
+        }
     }
 
     #[test]
-    fn strafing_a_sprint_slows_to_a_run_until_it_is_let_go() {
+    fn strafing_anything_faster_than_a_walk_is_a_jog() {
         let mut player = Player::default();
-        player.on_key(KeyCode::ShiftLeft, true);
+        hold_shift(&mut player);
         player.set_strafing(true);
-        assert_eq!(player.gait(), Gait::Running, "Shift only runs, strafing");
+        assert_eq!(player.gait(), Gait::Jogging, "a sprint jogs, strafing");
         player.set_strafing(false);
         assert_eq!(player.gait(), Gait::Sprinting, "Shift is still held");
+
+        let mut player = Player::default();
+        press(&mut player, KeyCode::ShiftLeft);
+        player.set_strafing(true);
+        assert_eq!(player.gait(), Gait::Jogging, "a run jogs, strafing");
     }
 
     #[test]
-    fn the_gait_survives_the_window_losing_focus() {
+    fn the_pace_survives_the_window_losing_focus() {
         let mut player = Player::default();
         press(&mut player, KeyCode::CapsLock);
-        player.on_key(KeyCode::ShiftLeft, true);
+        hold_shift(&mut player);
         player.release_keys();
         assert_eq!(
             player.gait(),
-            Gait::Running,
-            "still running, and Shift is no longer held"
+            Gait::Jogging,
+            "still jogging, and Shift is no longer held"
         );
     }
 }

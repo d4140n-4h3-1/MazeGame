@@ -23,7 +23,7 @@ browser with WebGL 2 is all it needs.
   as in Fallout 3. They speak System Latin. Fail to fool a sentry and it hunts you down, Metal
   Gear style: break its line of sight and it searches for you; other sentries that see the
   chase join in; the pistol can stop it.
-- Movement with walking, running and a breath-limited sprint, crouching, crawling,
+- Movement with walking, jogging, and a run and a sprint that cost stamina, crouching, crawling,
   jumping, taking cover and leaning round corners, and looking behind.
 - Ray-traced shadows from every lamp, refractive glass, floor reflections and ambient occlusion.
 - Only what can be seen from where you stand is drawn and lit, so big mazes stay fast.
@@ -96,6 +96,30 @@ reflections, a budget that keeps shadow maps for the nearest lamps only, and the
 shadows (its `raytracing` feature).
 
 ### The game
+
+29 September 2026:
+
+- **Jog, run and sprint.** Caps Lock still goes between walking and jogging. A tap of Shift now
+  goes between walking and running, a pace between a jog and a sprint - the sprint's stride,
+  stepped out slower - which costs stamina, if far less than a sprint: 20 seconds of it on a
+  full breath, to a sprint's 6. Held down, Shift sprints for as long as it is held, from any
+  pace, and lets go back to it. Running is heard further off than jogging, if not as far as a
+  sprint.
+- **The alert, as in Metal Gear and Fallout,** is at the top in the middle, in its colour: ALERT
+  in red, EVASION in amber and CAUTION in yellow, each counting down but ALERT, and ALERT and
+  CAUTION blinking.
+- **Stamina** is a bar in the bottom right corner: green, yellow once it runs low, and red,
+  blinking, while you are winded.
+- **Drones speak System Latin,** as they start each of their animations, in lines from
+  `data/dialogue/drone.json` - but as beeps, hums and buzzes, which no one would hear as speech:
+  each vowel a beep on a note of its own, m, n, l and r a hum, the hissing letters a buzz and the
+  stops a click (`data/sounds/drone_voice.json`).
+- **Sentries keep their own colours** while they are after you. The hostile droid's colours,
+  `data/droid_hostile.glb`, are for another kind of droid, one given `hostile_colours` in
+  `data/dialogue/droids.json`; until there is one, the model is not even loaded.
+- **Shadows of what moves follow it** with ray tracing too: droids, their guns and the drone
+  cast their shadows from where they are, droids in the pose they are drawn in, as they do with
+  shadow maps.
 
 26 September 2026:
 
@@ -365,8 +389,9 @@ Pages.
 | ---------------- | ------------------------------------------------------------- |
 | W A S D, arrows  | Move                                                          |
 | Mouse            | Look around                                                   |
-| Caps Lock        | Walk or run; it stays as you left it                          |
-| Shift (hold)     | Sprint. Costs breath, and running out leaves you walking      |
+| Caps Lock        | Walk or jog; it stays as you left it                          |
+| Shift (tap)      | Walk or run; it stays as you left it. Running costs stamina   |
+| Shift (hold)     | Sprint while held. Costs stamina faster than running; running out leaves you walking |
 | Space            | Jump: tap for a low jump, hold for a high one                 |
 | C                | Crouch, or stand back up                                      |
 | Z                | Crawl, or stand back up                                       |
@@ -376,7 +401,7 @@ Pages.
 | F                | Flashlight on or off (it starts off)                          |
 | V                | Third person (behind the droid) or first person               |
 | Middle mouse (hold) | Swing the camera round the droid to see it from any side    |
-| Right mouse (hold) | Strafe: keep facing ahead whichever way you go; Shift only runs |
+| Right mouse (hold) | Strafe: keep facing ahead whichever way you go; anything faster than a walk is a jog |
 | R                | Draw the pistol, or holster it                                |
 | Left mouse       | Draw the pistol; once it is drawn, fire                       |
 | Right mouse, drawn | Raise the pistol to aim, rather than hold it at the ready   |
@@ -471,14 +496,14 @@ how a droid comes apart, and the computer's hack and where it goes.
 | `culling.rs`    | Hides the pieces and lamps that cannot be seen from where the player is.   |
 | `fixtures.rs`   | Light fixtures: the glass, the lamps, and everything that glows.           |
 | `inward.rs`     | Makes the tiles' surfaces visible from inside and out.                     |
-| `hud.rs`        | The status line and the banner.                                            |
+| `hud.rs`        | The status line, the banner, the alert at the top and the stamina bar.     |
 | `menu.rs`       | The pause menu.                                                            |
 | `computer.rs`   | The computer to hack: where it goes, the hack, and its terminal.           |
 | `ragdoll.rs`    | A droid gone limp: its bodies and joints, from `data/droid_motion.json`.   |
 | `dismember.rs`  | Breaking a droid apart: its pieces and broken ends, and the voxels that spill. |
 | `dialogue/`     | Talking to the droids: their conversations from `data/dialogue/`, and the panel they are shown in. |
 | `diagnostics.rs`| The Vulkan check and the rendering statistics.                             |
-| `formants/`     | Sounds made from formants: the file format, the synthesizer that makes the pistol's sounds from `data/sounds/`, and the droids' speech. |
+| `formants/`     | Sounds made from formants: the file format, the synthesizer that makes the pistol's sounds from `data/sounds/`, the droids' speech, and the drones' beeps (`chirps`). |
 | `player/`       | The player, one file per part: posture, movement, breath, head, lean, input, view, the droid (`avatar`), the camera behind it (`third_person`) and its close-up when talking (`talk`). |
 
 The tile models, the droid (`droid_full_deform.glb`) and the computer (`computer.glb`) are in

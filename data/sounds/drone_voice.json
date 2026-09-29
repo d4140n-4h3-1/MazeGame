@@ -1,0 +1,20 @@
+{
+  "about": "The drones' voice: System Latin said as a machine says it, made from formants each time a drone speaks - see src/formants/chirps.rs. Each vowel is a beep on its note in 'notes', in Hz, 'beep' seconds long; m, n, l and r are a 'hum', the hissing letters (s, f, v, z, h, x) a 'buzz', and the stops (p, t, k, b, d, g, c, q) a 'click'. Each of those has a 'pitch' and a 'formant' - where it rings or rasps - in Hz, a 'length' in seconds, and how much 'noise' goes with its buzz, from 0. 'gaps' are the silences between letters, words and sentences, in seconds; a question chirps up at its end by 'rise', a part of its last note. 'volume' is how loud it is at its loudest, from 0 to 1, and 'reach' how far off, in meters, it is heard at full volume.",
+  "sample_rate": 44100,
+  "notes": {
+    "a": 1320.0,
+    "e": 1760.0,
+    "i": 2093.0,
+    "o": 988.0,
+    "u": 784.0,
+    "y": 1568.0
+  },
+  "beep": 0.055,
+  "hum": { "pitch": 110.0, "formant": 330.0, "length": 0.07, "noise": 0.0 },
+  "buzz": { "pitch": 55.0, "formant": 2400.0, "length": 0.06, "noise": 0.4 },
+  "click": { "pitch": 100.0, "formant": 3500.0, "length": 0.012, "noise": 1.0 },
+  "gaps": { "letter": 0.012, "word": 0.09, "stop": 0.3 },
+  "rise": 0.5,
+  "volume": 0.5,
+  "reach": 6.0
+}

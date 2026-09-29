@@ -4,8 +4,9 @@
 //! [`generate`] and [`tiles`]). The player starts at one end of the longest route through it and a
 //! glowing exit waits at the other end; the clock runs until the player reaches it.
 //!
-//! Controls: WASD to move, Caps Lock to go between walking and running, Shift to sprint while
-//! it is held - which costs breath, and leaves the player walking once it runs out - Space to
+//! Controls: WASD to move, Caps Lock to go between walking and jogging, a tap of Shift between
+//! walking and running and Shift held to sprint - running and sprinting cost stamina, and running
+//! out of it leaves the player walking - Space to
 //! jump, mouse to look, C to crouch, Z to crawl (each toggles), hold Q to look behind, Tab to
 //! take cover against a wall - A and D slide along it, and lean round its corner at the edge - F
 //! for the flashlight, V for third or first person, hold the right mouse button to strafe, R to

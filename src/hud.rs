@@ -1,20 +1,40 @@
-//! What is written on screen: a status line in the corner, and a banner across the middle for
-//! the end of a round and for anything that went wrong.
+//! What is written on screen: a status line in the corner, a banner across the middle for the
+//! end of a round and for anything that went wrong, the droids' alert at the top in the middle,
+//! as in Metal Gear and Fallout, and the player's stamina in the bottom right corner.
+//!
+//! The alert is coloured by its phase - ALERT red, EVASION amber, CAUTION yellow - and ALERT and
+//! CAUTION blink; EVASION and CAUTION count down the seconds they have left. The stamina is a bar,
+//! green, yellow once it runs low, and red and blinking while the player is winded.
 
+use crate::inhabitants::Alert;
 use fyrox::{
     core::{algebra::Vector2, color::Color, pool::Handle},
     gui::{
+        border::{Border, BorderBuilder},
         brush::Brush,
         screen::ScreenBuilder,
+        stack_panel::StackPanelBuilder,
         text::{Text, TextBuilder, TextMessage},
-        widget::WidgetBuilder,
-        HorizontalAlignment, Thickness, UserInterface, VerticalAlignment,
+        widget::{WidgetBuilder, WidgetMessage},
+        HorizontalAlignment, Orientation, Thickness, UiNode, UserInterface, VerticalAlignment,
     },
     plugin::PluginContext,
 };
 
 /// How long a note stays on screen, in seconds.
 const NOTE_TIME: f32 = 3.0;
+/// How often what blinks goes round, in seconds, and how much of that it is showing.
+const BLINK: f32 = 0.6;
+const BLINK_ON: f32 = 0.4;
+/// The alert's colour in each phase.
+const ALERT_RED: Color = Color::opaque(255, 45, 45);
+const EVASION_AMBER: Color = Color::opaque(255, 150, 30);
+const CAUTION_YELLOW: Color = Color::opaque(255, 225, 40);
+/// The stamina bar: how big it is inside its frame, in pixels, and its colours - with plenty left,
+/// running low, and winded - and below how much it counts as running low.
+const BAR: (f32, f32) = (180.0, 10.0);
+const STAMINA_GREEN: Color = Color::opaque(90, 230, 120);
+const STAMINA_LOW: f32 = 0.35;
 
 /// What the status line is about.
 pub enum Status {
@@ -27,8 +47,9 @@ pub enum Status {
         /// How much breath is left, from 0 to 1, and whether the player has run out of it.
         breath: (f32, bool),
         mouse_captured: bool,
-        /// How the droids hunting the player are going about it, if any are.
-        alarm: Option<String>,
+        /// How the droids hunting the player are going about it, if any are, and how many seconds
+        /// that has left.
+        alarm: Option<(Alert, f32)>,
     },
 }
 
@@ -36,6 +57,15 @@ pub enum Status {
 pub struct Hud {
     status: Handle<Text>,
     banner: Handle<Text>,
+    /// The alert at the top, and the stamina bar - its panel and what fills it.
+    alert: Handle<Text>,
+    stamina: Handle<UiNode>,
+    stamina_fill: Handle<Border>,
+    /// How long it has been blinking, in seconds, and what was last put on screen, so that each
+    /// is only sent when it changes.
+    blink: f32,
+    shown_alert: Option<(String, Color)>,
+    shown_stamina: Option<(f32, Color)>,
     /// A message shown for a moment, such as the view settings while they are being changed.
     note: String,
     note_time: f32,
@@ -63,13 +93,78 @@ impl Hud {
         .with_horizontal_text_alignment(HorizontalAlignment::Center)
         .with_vertical_text_alignment(VerticalAlignment::Center)
         .build(&mut ui.build_ctx());
+        let ctx = &mut ui.build_ctx();
+        let alert = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Center)
+                .with_vertical_alignment(VerticalAlignment::Top)
+                // Under the status line, which starts in the same row.
+                .with_margin(Thickness::top(44.0))
+                .with_visibility(false),
+        )
+        .with_font_size(34.0.into())
+        .with_horizontal_text_alignment(HorizontalAlignment::Center)
+        .build(ctx);
+        let stamina_fill = BorderBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Left)
+                .with_margin(Thickness::uniform(3.0))
+                .with_width(BAR.0)
+                .with_height(BAR.1)
+                .with_background(Brush::Solid(STAMINA_GREEN).into()),
+        )
+        .with_stroke_thickness(Thickness::zero().into())
+        .build(ctx);
+        let frame = BorderBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_width(BAR.0 + 6.0)
+                .with_height(BAR.1 + 6.0)
+                .with_foreground(Brush::Solid(Color::opaque(200, 200, 200)).into())
+                .with_background(Brush::Solid(Color::from_rgba(0, 0, 0, 120)).into())
+                .with_child(stamina_fill),
+        )
+        .with_stroke_thickness(Thickness::uniform(1.0).into())
+        .build(ctx);
+        let label = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_margin(Thickness::bottom(3.0))
+                .with_foreground(Brush::Solid(Color::WHITE).into()),
+        )
+        .with_font_size(16.0.into())
+        .with_text("STAMINA")
+        .with_horizontal_text_alignment(HorizontalAlignment::Right)
+        .build(ctx);
+        let stamina = StackPanelBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_vertical_alignment(VerticalAlignment::Bottom)
+                .with_margin(Thickness::uniform(18.0))
+                .with_visibility(false)
+                .with_child(label)
+                .with_child(frame),
+        )
+        .with_orientation(Orientation::Vertical)
+        .build(ctx)
+        .to_base();
         // The UI's root only gives its children the size they ask for, which for text is the text
         // itself, in the corner. A screen is the size of the window, so in one the banner is
-        // centered on the window.
-        ScreenBuilder::new(WidgetBuilder::new().with_child(banner)).build(&mut ui.build_ctx());
+        // centered on the window, the alert at the top in the middle and the stamina in the bottom
+        // right corner.
+        ScreenBuilder::new(
+            WidgetBuilder::new()
+                .with_child(banner)
+                .with_child(alert)
+                .with_child(stamina),
+        )
+        .build(ctx);
         Self {
             status,
             banner,
+            alert,
+            stamina,
+            stamina_fill,
             ..Default::default()
         }
     }
@@ -88,33 +183,25 @@ impl Hud {
         &self.note
     }
 
-    /// Rewrites the status line, `dt` seconds after the last time.
+    /// Rewrites the status line, and puts up the alert and the stamina, `dt` seconds after the
+    /// last time.
     pub fn update(&mut self, ui: &UserInterface, dt: f32, status: Status) {
         self.note_time = (self.note_time - dt).max(0.0);
-        let text = match status {
-            Status::Loading => "Loading the maze...".to_string(),
-            Status::Blank => String::new(),
+        self.blink = (self.blink + dt) % BLINK;
+        let blinking_on = self.blink < BLINK_ON;
+        let (text, alarm, breath) = match status {
+            Status::Loading => ("Loading the maze...".to_string(), None, None),
+            Status::Blank => (String::new(), None, None),
             Status::Round {
                 time,
                 best,
-                breath: (breath, winded),
+                breath,
                 mouse_captured,
                 alarm,
             } => {
                 let mut text = format!("Time {}", format_time(time));
-                if let Some(alarm) = alarm {
-                    text += &format!("    {alarm}");
-                }
                 if let Some(best) = best {
                     text += &format!("    Best {}", format_time(best));
-                }
-                // Only worth the room it takes once some of it has been spent.
-                if breath < 1.0 {
-                    text += &format!(
-                        "    {} {}",
-                        if winded { "Winded" } else { "Breath" },
-                        breath_bar(breath)
-                    );
                 }
                 if !mouse_captured {
                     text += "    (click to look around)";
@@ -122,18 +209,55 @@ impl Hud {
                 if self.note_time > 0.0 {
                     text += &format!("\n{}", self.note);
                 }
-                text
+                (text, alarm, Some(breath))
             }
         };
         ui.send(self.status, TextMessage::Text(text));
+
+        let alert = alarm.and_then(|(alert, left)| alert_shown(alert, left, blinking_on));
+        if alert != self.shown_alert {
+            ui.send(self.alert, WidgetMessage::Visibility(alert.is_some()));
+            if let Some((text, colour)) = &alert {
+                ui.send(self.alert, TextMessage::Text(text.clone()));
+                ui.send(self.alert, WidgetMessage::Foreground(Brush::Solid(*colour).into()));
+            }
+            self.shown_alert = alert;
+        }
+
+        let stamina = breath.map(|(left, winded)| stamina_shown(left, winded, blinking_on));
+        if stamina != self.shown_stamina {
+            ui.send(self.stamina, WidgetMessage::Visibility(stamina.is_some()));
+            if let Some((left, colour)) = stamina {
+                ui.send(self.stamina_fill, WidgetMessage::Width(BAR.0 * left));
+                ui.send(self.stamina_fill, WidgetMessage::Background(Brush::Solid(colour).into()));
+            }
+            self.shown_stamina = stamina;
+        }
     }
 }
 
-/// How much breath is left, drawn as a bar of ten. Rounded down, so that a bar with anything
-/// left in it means there is something left to spend.
-fn breath_bar(breath: f32) -> String {
-    let filled = (breath.clamp(0.0, 1.0) * 10.0).floor() as usize;
-    format!("[{}{}]", "|".repeat(filled), ".".repeat(10 - filled))
+/// What the alert says and in what colour, `left` seconds from the end of `alert`, with what
+/// blinks showing or not: None while ALERT and CAUTION blink off.
+fn alert_shown(alert: Alert, left: f32, blinking_on: bool) -> Option<(String, Color)> {
+    let seconds = left.max(0.0).ceil();
+    match alert {
+        Alert::Alert => blinking_on.then(|| ("ALERT".to_string(), ALERT_RED)),
+        Alert::Evasion => Some((format!("EVASION  {seconds:.0}"), EVASION_AMBER)),
+        Alert::Caution => blinking_on.then(|| (format!("CAUTION  {seconds:.0}"), CAUTION_YELLOW)),
+    }
+}
+
+/// How full the stamina bar is and its colour, with `left` of it, winded or not, and with what
+/// blinks showing or not. The bar only goes dark, blinking, while winded.
+fn stamina_shown(left: f32, winded: bool, blinking_on: bool) -> (f32, Color) {
+    let left = (left.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    let colour = match (winded, left < STAMINA_LOW) {
+        (true, _) if blinking_on => ALERT_RED,
+        (true, _) => Color::opaque(110, 20, 20),
+        (false, true) => CAUTION_YELLOW,
+        (false, false) => STAMINA_GREEN,
+    };
+    (left, colour)
 }
 
 pub fn format_time(seconds: f32) -> String {
@@ -144,4 +268,34 @@ pub fn format_time(seconds: f32) -> String {
         whole % 60,
         ((seconds.fract()) * 10.0) as u32
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alert_and_caution_blink_and_evasion_counts_down_steadily() {
+        assert_eq!(alert_shown(Alert::Alert, 0.0, true), Some(("ALERT".into(), ALERT_RED)));
+        assert_eq!(alert_shown(Alert::Alert, 0.0, false), None);
+        assert_eq!(
+            alert_shown(Alert::Evasion, 11.2, false),
+            Some(("EVASION  12".into(), EVASION_AMBER)),
+            "EVASION does not blink"
+        );
+        assert_eq!(
+            alert_shown(Alert::Caution, 29.9, true),
+            Some(("CAUTION  30".into(), CAUTION_YELLOW))
+        );
+        assert_eq!(alert_shown(Alert::Caution, 29.9, false), None);
+    }
+
+    #[test]
+    fn the_stamina_bar_warns_as_it_runs_low_and_blinks_when_winded() {
+        assert_eq!(stamina_shown(1.0, false, true), (1.0, STAMINA_GREEN));
+        assert_eq!(stamina_shown(0.2, false, true).1, CAUTION_YELLOW);
+        assert_eq!(stamina_shown(0.1, true, true).1, ALERT_RED);
+        assert_ne!(stamina_shown(0.1, true, false).1, ALERT_RED, "blinking");
+        assert_eq!(stamina_shown(1.4, false, true).0, 1.0, "never past full");
+    }
 }

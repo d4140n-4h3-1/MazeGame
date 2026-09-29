@@ -30,7 +30,12 @@ const CARRIED: &[(&str, &str)] = &[
         "data/droid_motion.json",
         include_str!("../data/droid_motion.json"),
     ),
+    ("data/dialogue/drone.json", include_str!("../data/dialogue/drone.json")),
     ("data/notes.json", include_str!("../data/notes.json")),
+    (
+        "data/sounds/drone_voice.json",
+        include_str!("../data/sounds/drone_voice.json"),
+    ),
     (
         "data/sounds/computer_formants.json",
         include_str!("../data/sounds/computer_formants.json"),

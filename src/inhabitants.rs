@@ -1119,7 +1119,7 @@ impl Inhabitants {
                         let pace = match hurrying {
                             true => droid
                                 .avatar
-                                .pace(Posture::Standing, Gait::Running)
+                                .pace(Posture::Standing, Gait::Jogging)
                                 .unwrap_or(FALLBACK_RUN),
                             false => droid
                                 .avatar
@@ -1171,7 +1171,7 @@ impl Inhabitants {
                     false => Posture::Standing,
                 },
                 gait: match hurrying {
-                    true => Gait::Running,
+                    true => Gait::Jogging,
                     false => Gait::Walking,
                 },
                 grounded: true,

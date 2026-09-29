@@ -7,6 +7,7 @@
 //! Everything that changes over a sound - the pitch, how much buzz and noise there is, how loud
 //! it is, where each formant sits - is a [`Curve`]: points in time, joined by straight lines.
 
+pub mod chirps;
 pub mod speech;
 pub mod synth;
 

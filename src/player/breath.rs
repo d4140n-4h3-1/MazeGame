@@ -1,13 +1,15 @@
-//! Breath: a sprint spends it, and anything less gets it back.
+//! Breath: a run spends it, a sprint a good deal faster, and a jog or a walk gets it back.
 
 use super::{posture::Gait, Player};
 
-/// How long a sprint lasts on a full breath, in seconds, and how long it takes to get all of it
-/// back at a walk or a standstill. Getting it back is the slower half by a good way.
+/// How long a sprint lasts on a full breath, in seconds, and a run - which costs it too, but much
+/// more slowly; and how long it takes to get all of it back at a walk or a standstill. Getting
+/// it back is the slower half by a good way.
 const SPRINT_TIME: f32 = 6.0;
+const RUN_TIME: f32 = 20.0;
 const RECOVER_TIME: f32 = 12.0;
-/// The share of the usual recovery the player gets while running rather than walking.
-const RECOVER_RUNNING: f32 = 0.5;
+/// The share of the usual recovery the player gets while jogging rather than walking.
+const RECOVER_JOGGING: f32 = 0.5;
 /// How much breath has to come back before the player can sprint again, out of 1. Being winded
 /// costs more than the moment it takes to draw one breath.
 const RECOVERED: f32 = 0.35;
@@ -19,18 +21,24 @@ impl Player {
         (self.stamina, self.winded)
     }
 
-    /// Spends breath on a sprint and gets it back the rest of the time. Running it out leaves the
+    /// Spends breath on a run or a sprint and gets it back the rest of the time. Running it out leaves the
     /// player winded, and walking - which is all [`Player::gait`] will then let them do - until
     /// enough of it is back.
     pub(super) fn breathe(&mut self, dt: f32, moving: bool) {
-        if moving && self.gait() == Gait::Sprinting {
-            self.stamina = (self.stamina - dt / SPRINT_TIME).max(0.0);
+        let gait = if moving { self.gait() } else { Gait::Walking };
+        let spend = match gait {
+            Gait::Sprinting => Some(SPRINT_TIME),
+            Gait::Running => Some(RUN_TIME),
+            _ => None,
+        };
+        if let Some(lasts) = spend {
+            self.stamina = (self.stamina - dt / lasts).max(0.0);
             self.winded |= self.stamina == 0.0;
             return;
         }
-        // Still hard work, just not as hard: a run gets the breath back more slowly than a walk.
-        let rate = if moving && self.gait() == Gait::Running {
-            RECOVER_RUNNING
+        // Still work, just not hard work: a jog gets the breath back more slowly than a walk.
+        let rate = if gait == Gait::Jogging {
+            RECOVER_JOGGING
         } else {
             1.0
         };
@@ -42,7 +50,7 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::player::{posture::Posture, press};
+    use crate::player::{hold_shift, posture::Posture, press};
     use fyrox::keyboard::KeyCode;
 
     /// Breathes for `seconds`, and returns how much breath is left.
@@ -56,7 +64,7 @@ mod tests {
 
     fn sprinting() -> Player {
         let mut player = Player::default();
-        player.on_key(KeyCode::ShiftLeft, true);
+        hold_shift(&mut player);
         player
     }
 
@@ -113,17 +121,38 @@ mod tests {
     }
 
     #[test]
-    fn breath_comes_back_more_slowly_at_a_run_than_at_a_walk() {
-        let spent = |running: bool| {
+    fn breath_comes_back_more_slowly_at_a_jog_than_at_a_walk() {
+        let spent = |pace: Gait| {
             let mut player = Player {
                 stamina: 0.0,
-                running,
+                pace,
                 ..Default::default()
             };
             breathe_for(&mut player, 1.0, true)
         };
-        assert!(spent(true) < spent(false));
-        assert!((spent(true) / spent(false) - RECOVER_RUNNING).abs() < 1e-3);
+        let (jog, walk) = (spent(Gait::Jogging), spent(Gait::Walking));
+        assert!(jog < walk);
+        assert!((jog / walk - RECOVER_JOGGING).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_run_spends_breath_but_less_than_a_sprint() {
+        let left = |pace: Gait, sprint: bool| {
+            let mut player = Player {
+                pace,
+                ..Default::default()
+            };
+            if sprint {
+                hold_shift(&mut player);
+            }
+            breathe_for(&mut player, 3.0, true)
+        };
+        let run = left(Gait::Running, false);
+        let sprint = left(Gait::Walking, true);
+        assert!(run < 1.0, "a run costs breath");
+        assert!(sprint < run, "a sprint costs more: {sprint} against {run}");
+        assert!(((1.0 - run) - 3.0 / RUN_TIME).abs() < 0.01);
+        assert!(((1.0 - sprint) - 3.0 / SPRINT_TIME).abs() < 0.01, "a sprint costs as it did");
     }
 
     #[test]
@@ -145,6 +174,6 @@ mod tests {
             "Shift and the latch are the player's own"
         );
         player.on_key(KeyCode::ShiftLeft, false);
-        assert_eq!(player.gait(), Gait::Running, "still latched into a run");
+        assert_eq!(player.gait(), Gait::Jogging, "still latched into a jog");
     }
 }

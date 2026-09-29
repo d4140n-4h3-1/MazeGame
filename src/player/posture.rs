@@ -1,5 +1,5 @@
 //! How the player holds themselves - standing, crouching or crawling - and how fast they go in
-//! each: walking, running or sprinting.
+//! each: walking, jogging, running or sprinting.
 
 use super::{Player, FEET};
 use fyrox::{
@@ -7,14 +7,16 @@ use fyrox::{
     scene::{collider::ColliderShape, graph::Graph},
 };
 
-/// How fast each posture moves, in meters per second: walking, running and sprinting. Every
-/// posture does all three, and each posture is slower than the one above it at every gait.
+/// How fast each posture moves, in meters per second: walking, jogging, running and sprinting.
+/// Every posture does all four, and each posture is slower than the one above it at every gait.
 ///
 /// These are only for when the droid has not loaded. With it, the droid's feet set the speeds -
 /// see [`Avatar::pace`](super::avatar::Avatar::pace) - and these are roughly what they come to.
-const STANDING_SPEEDS: (f32, f32, f32) = (0.6, 2.0, 4.1);
-const CROUCHING_SPEEDS: (f32, f32, f32) = (0.55, 0.75, 0.95);
-const CRAWLING_SPEEDS: (f32, f32, f32) = (0.3, 0.4, 0.45);
+const STANDING_SPEEDS: [f32; 4] = [0.6, 2.0, 2.9, 4.1];
+const CROUCHING_SPEEDS: [f32; 4] = [0.55, 0.75, 0.85, 0.95];
+const CRAWLING_SPEEDS: [f32; 4] = [0.3, 0.4, 0.42, 0.45];
+/// How long Shift has to be held, in seconds, to sprint rather than to switch running on or off.
+pub(super) const SPRINT_HOLD: f32 = 0.25;
 /// How hard each posture can change how fast it is going, in meters per second squared.
 /// Standing, that is next to no time to a walk and half a second to a sprint; crouched
 /// or down on the floor there is much less to push off with.
@@ -73,16 +75,12 @@ impl Posture {
     }
 
     pub(super) fn speed(self, gait: Gait) -> f32 {
-        let (walk, run, sprint) = match self {
+        let speeds = match self {
             Posture::Standing => STANDING_SPEEDS,
             Posture::Crouching => CROUCHING_SPEEDS,
             Posture::Crawling => CRAWLING_SPEEDS,
         };
-        match gait {
-            Gait::Walking => walk,
-            Gait::Running => run,
-            Gait::Sprinting => sprint,
-        }
+        speeds[gait.rank()]
     }
 
     pub(super) fn acceleration(self) -> f32 {
@@ -99,8 +97,21 @@ impl Posture {
 pub(crate) enum Gait {
     #[default]
     Walking,
+    Jogging,
     Running,
     Sprinting,
+}
+
+impl Gait {
+    /// Where it comes from slowest to fastest, from 0.
+    pub(crate) fn rank(self) -> usize {
+        match self {
+            Gait::Walking => 0,
+            Gait::Jogging => 1,
+            Gait::Running => 2,
+            Gait::Sprinting => 3,
+        }
+    }
 }
 
 impl Player {
@@ -109,20 +120,20 @@ impl Player {
         self.posture
     }
 
-    /// How fast the player is going: sprinting while Shift is held, and otherwise whichever of
-    /// walking and running Caps Lock last left them in. Strafing, or with the pistol out, Shift
-    /// only runs. Out of breath, or edging along a wall in cover, they only walk.
+    /// How fast the player is going: sprinting while Shift is held down, and otherwise whichever
+    /// of walking, jogging and running Caps Lock and a tap of Shift last left them in. Strafing,
+    /// or with the pistol out, anything faster than a walk is a jog. Out of breath, or edging
+    /// along a wall in cover, they only walk.
     pub(super) fn gait(&self) -> Gait {
-        match (
-            self.winded || self.in_cover(),
-            self.keys.sprint,
-            self.running,
-        ) {
-            (true, _, _) => Gait::Walking,
-            (false, true, _) if self.strafing() => Gait::Running,
-            (false, true, _) => Gait::Sprinting,
-            (false, false, true) => Gait::Running,
-            (false, false, false) => Gait::Walking,
+        if self.winded || self.in_cover() {
+            return Gait::Walking;
+        }
+        let sprinting = self.keys.shift_held.is_some_and(|held| held >= SPRINT_HOLD);
+        let gait = if sprinting { Gait::Sprinting } else { self.pace };
+        match gait {
+            Gait::Walking => Gait::Walking,
+            _ if self.strafing() => Gait::Jogging,
+            gait => gait,
         }
     }
 
@@ -163,7 +174,7 @@ mod tests {
     #[test]
     fn each_gait_is_faster_in_every_posture_and_lower_is_slower() {
         let postures = [Posture::Standing, Posture::Crouching, Posture::Crawling];
-        let gaits = [Gait::Walking, Gait::Running, Gait::Sprinting];
+        let gaits = [Gait::Walking, Gait::Jogging, Gait::Running, Gait::Sprinting];
         for posture in postures {
             for pair in gaits.windows(2) {
                 assert!(
