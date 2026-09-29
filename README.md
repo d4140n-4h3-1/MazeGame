@@ -112,11 +112,13 @@ shadows (its `raytracing` feature).
   blinking, while you are winded.
 - **The cyber pistol's ammo** shows in the bottom right corner while it is out: ∞, since it
   never runs out.
-- **Hearts float in the corridors.** A few health items - three in a small maze, up to six in a
-  big one - are scattered afresh each maze on open floor away from the start and from each
-  other, each floating at chest height, slowly spinning and bobbing. For now they only float
+- **Hearts float in the corridors.** A few health items - three in a small maze, up to twelve in
+  a big one, the first 8 to 20 m from the start - are scattered afresh each maze on open floor
+  away from the start and from each other, each floating at chest height, slowly spinning and bobbing. For now they only float
   there: there is no health for them to give back yet. The model is `data/health.glb`, exported
-  from `health.blend`.
+  from `health.blend` without texture coordinates (it has none, and a constant set of them
+  leaves it unlit); its see-through outer layer is made refractive glass in the game, since the
+  engine draws a glTF model's surfaces solid whatever their alpha.
 - **Drones speak System Latin,** as they start each of their animations, in lines from
   `data/dialogue/drone.json` - but as beeps, hums and buzzes, which no one would hear as speech:
   each vowel a beep on a note of its own, m, n, l and r a hum, the hissing letters a buzz and the
