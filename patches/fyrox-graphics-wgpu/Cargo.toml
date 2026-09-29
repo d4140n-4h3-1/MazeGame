@@ -1,7 +1,11 @@
-# A copy of the engine fork's fyrox-graphics-wgpu at b463456, with one fix: in a browser, the
-# depth copy (src/depth_copy.rs) reads the G-buffer's depth through a sampler that does not
-# filter. Without it WebGL reads every depth as 0, so distant lamps light nothing and the glass
-# is never drawn. Cargo.toml's [patch] builds with this copy; drop both once the fork has the fix.
+# A copy of the engine fork's fyrox-graphics-wgpu at b463456, with two changes:
+# - in a browser, the depth copy (src/depth_copy.rs) reads the G-buffer's depth through a sampler
+#   that does not filter. Without it WebGL reads every depth as 0, so distant lamps light nothing
+#   and the glass is never drawn;
+# - a ray traced scene (src/raytracing.rs) holds what moves as well as what stands still, the
+#   first given again every frame with set_moving_geometry, which fyrox-gfx uses so that droids'
+#   shadows follow them.
+# Cargo.toml's [patch] builds with this copy; drop both once the fork has these.
 [package]
 name = "fyrox-graphics-wgpu"
 version = "2.0.0-rc.1"

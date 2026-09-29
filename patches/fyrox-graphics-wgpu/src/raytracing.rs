@@ -21,21 +21,97 @@ use fyrox_graphics::{
 };
 use wgpu::util::DeviceExt;
 
-/// Scene geometry in a form the ray tracing hardware can trace against.
-pub struct RayTracedScene {
+/// Triangles in an acceleration structure of their own, with the buffers it was built from.
+struct Geometry {
     /// Kept alive: the acceleration structure is built from these.
     _vertices: wgpu::Buffer,
     _indices: wgpu::Buffer,
-    _blas: wgpu::Blas,
-    tlas: wgpu::Tlas,
+    blas: wgpu::Blas,
     triangle_count: u32,
 }
 
+/// Scene geometry in a form the ray tracing hardware can trace against: what stands still, built
+/// once, and what moves, built again whenever it is given ([`WgpuGraphicsServer::set_moving_geometry`]),
+/// both traced as one.
+pub struct RayTracedScene {
+    still: Geometry,
+    moving: Option<Geometry>,
+    tlas: wgpu::Tlas,
+}
+
 impl RayTracedScene {
-    /// How many triangles were put into the structure.
+    /// How many triangles were put into the structure, standing still and moving.
     pub fn triangle_count(&self) -> u32 {
-        self.triangle_count
+        self.still.triangle_count + self.moving.as_ref().map_or(0, |moving| moving.triangle_count)
     }
+}
+
+/// The geometry is already in world space, so each instance sits at the origin.
+const IDENTITY: [f32; 12] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+
+/// Records the building of an acceleration structure for `vertices` and `indices` (see
+/// [`WgpuGraphicsServer::build_ray_traced_scene`]); None if there is not a triangle in them.
+fn build_geometry(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    vertices: &[f32],
+    indices: &[u32],
+    flags: wgpu::AccelerationStructureFlags,
+) -> Option<Geometry> {
+    if vertices.is_empty() || indices.len() < 3 {
+        return None;
+    }
+    let vertex_count = (vertices.len() / 3) as u32;
+    let index_count = (indices.len() - indices.len() % 3) as u32;
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("RayTracedVertices"),
+        contents: bytemuck::cast_slice(vertices),
+        usage: wgpu::BufferUsages::BLAS_INPUT | wgpu::BufferUsages::COPY_DST,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("RayTracedIndices"),
+        contents: bytemuck::cast_slice(&indices[..index_count as usize]),
+        usage: wgpu::BufferUsages::BLAS_INPUT | wgpu::BufferUsages::COPY_DST,
+    });
+    let size = wgpu::BlasTriangleGeometrySizeDescriptor {
+        vertex_format: wgpu::VertexFormat::Float32x3,
+        vertex_count,
+        index_format: Some(wgpu::IndexFormat::Uint32),
+        index_count: Some(index_count),
+        flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
+    };
+    let blas = device.create_blas(
+        &wgpu::CreateBlasDescriptor {
+            label: Some("RayTracedGeometry"),
+            flags,
+            update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+        },
+        wgpu::BlasGeometrySizeDescriptors::Triangles {
+            descriptors: vec![size.clone()],
+        },
+    );
+    encoder.build_acceleration_structures(
+        [&wgpu::BlasBuildEntry {
+            blas: &blas,
+            geometry: wgpu::BlasGeometries::TriangleGeometries(vec![wgpu::BlasTriangleGeometry {
+                size: &size,
+                vertex_buffer: &vertex_buffer,
+                first_vertex: 0,
+                vertex_stride: 12,
+                index_buffer: Some(&index_buffer),
+                first_index: Some(0),
+                transform_buffer: None,
+                transform_buffer_offset: None,
+            }]),
+        }],
+        std::iter::empty::<&wgpu::Tlas>(),
+    );
+    Some(Geometry {
+        _vertices: vertex_buffer,
+        _indices: index_buffer,
+        blas,
+        triangle_count: index_count / 3,
+    })
 }
 
 /// The light a shadow ray is traced towards.
@@ -234,93 +310,76 @@ fn mask_texture(
 
 impl WgpuGraphicsServer {
     /// Puts triangles into an acceleration structure. Positions are in world space, three floats
-    /// each; every three indices make a triangle. Returns [`None`] without ray tracing hardware.
+    /// each; every three indices make a triangle. They stand still; what moves is given each
+    /// frame with [`Self::set_moving_geometry`]. Returns [`None`] without ray tracing hardware.
     pub fn build_ray_traced_scene(
         &self,
         vertices: &[f32],
         indices: &[u32],
     ) -> Result<Option<RayTracedScene>, FrameworkError> {
-        if !self.ray_tracing || vertices.is_empty() || indices.len() < 3 {
+        if !self.ray_tracing {
             return Ok(None);
         }
-
         let device = &self.state.device;
-        let vertex_count = (vertices.len() / 3) as u32;
-        let index_count = indices.len() as u32;
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("RayTracedVertices"),
-            contents: bytemuck::cast_slice(vertices),
-            usage: wgpu::BufferUsages::BLAS_INPUT | wgpu::BufferUsages::COPY_DST,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("RayTracedIndices"),
-            contents: bytemuck::cast_slice(indices),
-            usage: wgpu::BufferUsages::BLAS_INPUT | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let size = wgpu::BlasTriangleGeometrySizeDescriptor {
-            vertex_format: wgpu::VertexFormat::Float32x3,
-            vertex_count,
-            index_format: Some(wgpu::IndexFormat::Uint32),
-            index_count: Some(index_count),
-            flags: wgpu::AccelerationStructureGeometryFlags::OPAQUE,
-        };
-        let blas = device.create_blas(
-            &wgpu::CreateBlasDescriptor {
-                label: Some("RayTracedGeometry"),
-                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
-                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-            },
-            wgpu::BlasGeometrySizeDescriptors::Triangles {
-                descriptors: vec![size.clone()],
-            },
-        );
-
-        let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
-            label: Some("RayTracedScene"),
-            max_instances: 1,
-            flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
-            update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-        });
-        // The geometry is already in world space, so the instance sits at the origin.
-        tlas[0] = Some(wgpu::TlasInstance::new(
-            &blas,
-            [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            0,
-            0xff,
-        ));
-
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("BuildRayTracedScene"),
         });
-        encoder.build_acceleration_structures(
-            [&wgpu::BlasBuildEntry {
-                blas: &blas,
-                geometry: wgpu::BlasGeometries::TriangleGeometries(vec![
-                    wgpu::BlasTriangleGeometry {
-                        size: &size,
-                        vertex_buffer: &vertex_buffer,
-                        first_vertex: 0,
-                        vertex_stride: 12,
-                        index_buffer: Some(&index_buffer),
-                        first_index: Some(0),
-                        transform_buffer: None,
-                        transform_buffer_offset: None,
-                    },
-                ]),
-            }],
-            [&tlas],
-        );
+        let Some(still) = build_geometry(
+            device,
+            &mut encoder,
+            vertices,
+            indices,
+            wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+        ) else {
+            return Ok(None);
+        };
+        // Room for what moves beside it.
+        let mut tlas = device.create_tlas(&wgpu::CreateTlasDescriptor {
+            label: Some("RayTracedScene"),
+            max_instances: 2,
+            flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+            update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+        });
+        tlas[0] = Some(wgpu::TlasInstance::new(&still.blas, IDENTITY, 0, 0xff));
+        encoder.build_acceleration_structures(std::iter::empty::<&wgpu::BlasBuildEntry>(), [&tlas]);
         self.state.queue.submit([encoder.finish()]);
-
         Ok(Some(RayTracedScene {
-            _vertices: vertex_buffer,
-            _indices: index_buffer,
-            _blas: blas,
+            still,
+            moving: None,
             tlas,
-            triangle_count: index_count / 3,
         }))
+    }
+
+    /// Puts what moves into `scene`, in place of what was there before: triangles as for
+    /// [`Self::build_ray_traced_scene`], wherever they are this frame. Built for speed rather
+    /// than for tracing, since it is built again every time; none takes it all out.
+    pub fn set_moving_geometry(
+        &self,
+        scene: &mut RayTracedScene,
+        vertices: &[f32],
+        indices: &[u32],
+    ) -> Result<(), FrameworkError> {
+        if scene.moving.is_none() && indices.len() < 3 {
+            return Ok(());
+        }
+        let device = &self.state.device;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("MovingRayTracedGeometry"),
+        });
+        scene.moving = build_geometry(
+            device,
+            &mut encoder,
+            vertices,
+            indices,
+            wgpu::AccelerationStructureFlags::PREFER_FAST_BUILD,
+        );
+        scene.tlas[1] = scene
+            .moving
+            .as_ref()
+            .map(|moving| wgpu::TlasInstance::new(&moving.blas, IDENTITY, 0, 0xff));
+        encoder.build_acceleration_structures(std::iter::empty::<&wgpu::BlasBuildEntry>(), [&scene.tlas]);
+        self.state.queue.submit([encoder.finish()]);
+        Ok(())
     }
 
     /// Creates the passes that trace shadow rays, or [`None`] without ray tracing hardware.
