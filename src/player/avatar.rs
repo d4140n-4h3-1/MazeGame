@@ -93,6 +93,11 @@ use fyrox::{
     resource::model::{ModelResource, ModelResourceExtension},
     scene::{
         animation::{Animation, AnimationContainer, AnimationPlayer},
+        base::BaseBuilder,
+        light::{
+            point::{PointLight, PointLightBuilder},
+            BaseLightBuilder,
+        },
         graph::Graph,
         mesh::Mesh,
         node::Node,
@@ -239,6 +244,12 @@ const SHOULDERS: [&str; 2] = ["DEF-upper_arm.L", "DEF-upper_arm.R"];
 /// How far above the head bone, in the model's own units up the bone, the middle of the face is:
 /// the bone sits at the bottom of the head, 0.22 below the top of the model.
 const FACE_ABOVE_HEAD: f32 = 0.11;
+/// The glow of its eyes on what is just in front of them, in their colour: how far in front of
+/// the face it comes from, in meters, how bright it is - a good deal dimmer than a lamp - and
+/// how far it reaches.
+const EYE_LAMP_OUT: f32 = 0.12;
+const EYE_BRIGHTNESS: f32 = 0.25;
+const EYE_REACH: f32 = 1.2;
 /// How long the face and shoulders take to square up to straight ahead as the droid starts
 /// strafing, or to let go as it stops, in seconds.
 const SQUARE_FADE: f32 = 0.2;
@@ -1191,8 +1202,9 @@ pub(crate) struct Avatar {
     shot: Option<(Vector3<f32>, Vector3<f32>)>,
     /// Its pistol's screen, which flashes as the trigger is pulled, if it has a pistol.
     flash: Option<Flash>,
-    /// Its eyes, if they glow.
+    /// Its eyes, if they glow, and the glow they cast.
     eyes: Option<Eyes>,
+    eye_lamp: Handle<Node>,
     /// The shell and the core of the ball at the muzzle, each with whether it tumbles the
     /// opposite way round to how [`SPIN`] has it; and how long they have been tumbling, in
     /// seconds.
@@ -1467,6 +1479,23 @@ impl Avatar {
             .map(|&bone| (bone, graph[bone].parent()))
             .collect();
         let eyes = find(EYES).and_then(|eyes| claim_eyes(graph, eyes));
+        // Under the root, so it shows, goes and is put away with the droid; not scattering into a
+        // haze in the air. Its reach is made up for the root's scale, which lights take on.
+        let eye_lamp = match &eyes {
+            Some(_) => {
+                let lamp = PointLightBuilder::new(
+                    BaseLightBuilder::new(BaseBuilder::new())
+                        .with_intensity(EYE_BRIGHTNESS)
+                        .with_scatter_enabled(false),
+                )
+                .with_radius(EYE_REACH / SCALE)
+                .build(graph)
+                .to_base();
+                graph.link_nodes(lamp, root);
+                lamp
+            }
+            None => Handle::NONE,
+        };
         let dismember = Dismember::new(graph, root);
         // The screen and the shell as see-through green glass - the model's own see-through
         // shell comes in solid, and would hide the core. Only the screen itself: the crosshair on
@@ -1869,6 +1898,7 @@ impl Avatar {
             shot: None,
             flash,
             eyes,
+            eye_lamp,
             spinning,
             spun: 0.0,
             aims,
@@ -2162,6 +2192,37 @@ impl Avatar {
         }
     }
 
+    /// Puts the glow of its eyes just in front of its face, as of the last frame, in the colour
+    /// they glow.
+    fn light_eyes(&self, graph: &mut Graph) {
+        let (Some(eyes), Some(face)) = (&self.eyes, self.face_at(graph)) else {
+            return;
+        };
+        let colour = match property(&eyes.material.data_ref(), DIFFUSE_COLOR) {
+            Some(MaterialProperty::Color(colour)) => colour,
+            _ => Color::WHITE,
+        };
+        // The way it faces: the body's, turned by its heading.
+        let body = graph[self.root].parent();
+        let ahead = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.heading) * Vector3::z();
+        let ahead = graph
+            .try_get(body)
+            .map_or(ahead, |body| body.global_transform().transform_vector(&ahead));
+        let at = face + ahead.try_normalize(1.0e-6).unwrap_or_else(Vector3::z) * EYE_LAMP_OUT;
+        let Some(to_root) = graph[self.root].global_transform().try_inverse() else {
+            return;
+        };
+        let local = to_root.transform_point(&Point3::from(at)).coords;
+        if let Ok(lamp) = graph.try_get_mut(self.eye_lamp) {
+            lamp.local_transform_mut().set_position(local);
+        }
+        if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(self.eye_lamp) {
+            if lamp.base_light_ref().color() != colour {
+                lamp.base_light_mut().set_color(colour);
+            }
+        }
+    }
+
     /// Turns the model's root to face the droid's heading.
     fn face(&self, graph: &mut Graph) {
         graph[self.root].local_transform_mut().set_rotation(
@@ -2349,6 +2410,7 @@ impl Avatar {
 
     /// Poses the droid for what the body is doing, turning it to face the way it is going.
     pub(crate) fn animate(&mut self, graph: &mut Graph, going: Going, dt: f32) {
+        self.light_eyes(graph);
         self.travel = None;
         self.arm(graph, going, dt);
         self.squaring = going.strafing;

@@ -95,6 +95,11 @@ fn held(aim: f32) -> (Vector3<f32>, UnitQuaternion<f32>) {
 }
 
 impl Viewmodel {
+    /// The copy of the pistol, and its muzzle.
+    pub(super) fn pistol_nodes(&self) -> Option<(Handle<Node>, Handle<Node>)> {
+        Some((self.pistol, self.muzzle))
+    }
+
     /// A copy of `avatar`'s pistol, carried by `camera`, out of sight until it is drawn. None if
     /// the droid has no pistol.
     pub(super) fn new(graph: &mut Graph, avatar: &Avatar, camera: Handle<Node>) -> Option<Self> {

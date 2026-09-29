@@ -63,6 +63,10 @@ use fyrox::{
             Mesh,
         },
         node::Node,
+        light::{
+            point::{PointLight, PointLightBuilder},
+            BaseLightBuilder,
+        },
         rigidbody::{RigidBodyBuilder, RigidBodyType},
         sound::{SoundBufferResource, SoundBuilder, Status},
         transform::TransformBuilder,
@@ -119,6 +123,11 @@ const DRAWN_BEFORE_SHOWN: u32 = 2;
 const LOCKED_COLOUR: Color = Color::opaque(255, 28, 28);
 const CLEARED_COLOUR: Color = Color::opaque(40, 110, 255);
 const FRAME_GLOW: f32 = 2.0;
+/// Its lamp, lighting what is in front of it in its frame's colour, as it glows: how far in front
+/// of the screen it is and how high, in meters, how bright it is, and how far it reaches.
+const LAMP_OUT: f32 = 0.35;
+const LAMP_BRIGHTNESS: f32 = 0.5;
+const LAMP_REACH: f32 = 2.5;
 
 /// The room the monitor and keyboard take up against the wall, in meters: half as wide as they
 /// are, half as high, and half as far out from the wall; and how high the middle of that is.
@@ -959,6 +968,8 @@ pub struct Computer {
     /// its frame's glow.
     body: Handle<Node>,
     collider: Handle<Collider>,
+    /// Its lamp, in front of the screen, in the frame's colour.
+    lamp: Handle<Node>,
     frame: MaterialResource,
     /// What its screen glows with.
     glass: MaterialResource,
@@ -1051,10 +1062,31 @@ impl Computer {
         )
         .with_shape(ColliderShape::cuboid(BULK_HALF.x, BULK_HALF.y, BULK_HALF.z))
         .build(graph);
+        // Not scattering into a haze in the air: the frame is what glows.
+        let lamp = PointLightBuilder::new(
+            BaseLightBuilder::new(
+                BaseBuilder::new().with_local_transform(
+                    TransformBuilder::new()
+                        .with_local_position(Vector3::new(
+                            0.0,
+                            BULK_HEIGHT,
+                            2.0 * BULK_HALF.z + LAMP_OUT,
+                        ))
+                        .build(),
+                ),
+            )
+            .with_color(LOCKED_COLOUR)
+            .with_intensity(LAMP_BRIGHTNESS)
+            .with_scatter_enabled(false),
+        )
+        .with_radius(LAMP_REACH)
+        .build(graph)
+        .to_base();
         let body = RigidBodyBuilder::new(
             BaseBuilder::new()
                 .with_name("computer")
                 .with_child(collider)
+                .with_child(lamp)
                 .with_local_transform(
                     TransformBuilder::new()
                         .with_local_position(Vector3::new(0.0, -1000.0, 0.0))
@@ -1068,6 +1100,7 @@ impl Computer {
         Some(Self {
             body,
             collider,
+            lamp,
             glass: glass.clone(),
             frame,
             screen,
@@ -1301,6 +1334,20 @@ impl Computer {
             frame.set_property("diffuseColor", colour);
         }
         self.lit = Some(stage);
+    }
+
+    /// Has its lamp shine in its frame's colour: red while it is locked, blue once cleared.
+    pub fn light(&self, graph: &mut Graph) {
+        let colour = if self.cleared() {
+            CLEARED_COLOUR
+        } else {
+            LOCKED_COLOUR
+        };
+        if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(self.lamp) {
+            if lamp.base_light_ref().color() != colour {
+                lamp.base_light_mut().set_color(colour);
+            }
+        }
     }
 }
 

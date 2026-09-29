@@ -59,6 +59,10 @@ const BOLT_LENGTH: f32 = 0.5;
 const BOLT_WIDTH: f32 = 0.05;
 /// The bolt's colour - the green of the ball at the muzzle - and how brightly it glows by itself.
 const BOLT_COLOR: Color = Color::opaque(40, 255, 60);
+/// The glow of the ball at the muzzle, lighting what is round it while the pistol is out: how
+/// bright it is, and how far it reaches, in meters.
+const MUZZLE_BRIGHTNESS: f32 = 0.6;
+const MUZZLE_REACH: f32 = 1.5;
 const BOLT_GLOW: f32 = 10.0;
 /// How far the flash a bolt carries lights, in meters, and how brightly.
 const FLASH_REACH: f32 = 5.0;
@@ -257,6 +261,20 @@ impl Bolts {
     }
 }
 
+/// The muzzle's glow, put out until the pistol is drawn. Not scattering into a haze in the air:
+/// the ball at the muzzle is what glows.
+pub(super) fn muzzle_lamp(graph: &mut Graph) -> Handle<Node> {
+    PointLightBuilder::new(
+        BaseLightBuilder::new(BaseBuilder::new().with_visibility(false))
+            .with_color(BOLT_COLOR)
+            .with_intensity(MUZZLE_BRIGHTNESS)
+            .with_scatter_enabled(false),
+    )
+    .with_radius(MUZZLE_REACH)
+    .build(graph)
+    .to_base()
+}
+
 impl Player {
     /// Fires a bolt from the muzzle the way the gun pointed, if the droid let a shot go this
     /// frame; and flies every bolt in the air on for another `dt`.
@@ -345,6 +363,38 @@ impl Player {
     /// What the pistol's bolts have hit since this was last asked, each once for every bolt.
     pub fn struck(&mut self) -> Vec<Strike> {
         std::mem::take(&mut self.bolts.struck)
+    }
+
+    /// Puts the muzzle's glow where the muzzle is that can be seen - the pistol held in first
+    /// person, or the droid's - as of the last frame, or puts it out while neither is.
+    pub(super) fn light_muzzle(&self, graph: &mut Graph) {
+        let showing = |pistol: Handle<Node>| {
+            graph
+                .try_get(pistol)
+                .is_ok_and(|node| node.global_visibility())
+        };
+        let from_view = self
+            .viewmodel
+            .as_ref()
+            .and_then(|view| view.pistol_nodes())
+            .filter(|&(pistol, _)| showing(pistol));
+        let from_droid = self
+            .avatar
+            .as_ref()
+            .and_then(|avatar| avatar.pistol_nodes())
+            .filter(|&(pistol, _)| showing(pistol));
+        let muzzle = from_view
+            .or(from_droid)
+            .and_then(|(_, muzzle)| graph.try_get(muzzle).ok())
+            .map(|muzzle| muzzle.global_position());
+        if let Ok(lamp) = graph.try_get_mut(self.pistol_lamp) {
+            if let Some(at) = muzzle {
+                lamp.local_transform_mut().set_position(at);
+            }
+            if lamp.visibility() != muzzle.is_some() {
+                lamp.set_visibility(muzzle.is_some());
+            }
+        }
     }
 
     /// Whether the player has the pistol out, or wants it out.

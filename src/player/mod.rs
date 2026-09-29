@@ -107,6 +107,8 @@ pub struct Player {
     collider: Handle<Collider>,
     camera: Handle<Camera>,
     flashlight: Handle<Node>,
+    /// The green glow of the pistol's muzzle, lighting what is round it while the pistol is out.
+    pistol_lamp: Handle<Node>,
     /// Whether the flashlight is on. It stays as the player left it from one round to the next.
     flashlight_on: bool,
     /// The pace Caps Lock and a tap of Shift have put the player into: walking, jogging or
@@ -192,6 +194,7 @@ impl Default for Player {
             collider: Default::default(),
             camera: Default::default(),
             flashlight: Default::default(),
+            pistol_lamp: Default::default(),
             flashlight_on: false,
             pace: posture::Gait::Walking,
             stamina: 1.0,
@@ -306,6 +309,7 @@ impl Player {
             collider,
             camera,
             flashlight,
+            pistol_lamp: pistol::muzzle_lamp(graph),
             bolts: pistol::Bolts::new(graph),
             ..Default::default()
         }
@@ -382,6 +386,7 @@ impl Player {
                 flashlight.set_visibility(self.flashlight_on);
             }
         }
+        self.light_muzzle(graph);
         self.face_speaker(graph, dt);
         let rotation = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.yaw);
         let right = rotation * -Vector3::x();

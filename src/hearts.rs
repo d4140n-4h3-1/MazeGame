@@ -6,6 +6,10 @@
 //! for solid whatever their alpha, so a see-through one - the heart's outer layer - is made glass
 //! here, of its own colour ([`Hearts::glaze`]), as the ceiling's panes are.
 //!
+//! As it glows, each lights what is round it too, red, from a lamp in its middle, whose shadows
+//! are traced as every light's are. The heart itself casts none, or it would shut its own light
+//! in.
+//!
 //! A few are scattered afresh each maze ([`count`]), each on open floor away from the start and
 //! from the others ([`spots`]) - the first a little way from the start, so there is one to come
 //! across early.
@@ -27,7 +31,9 @@ use fyrox::{
     material::{Material, MaterialProperty, MaterialResource},
     resource::model::{ModelResource, ModelResourceExtension},
     scene::{
+        base::BaseBuilder,
         graph::Graph,
+        light::{point::PointLightBuilder, BaseLightBuilder},
         mesh::{
             buffer::{VertexAttributeUsage, VertexReadTrait},
             Mesh,
@@ -48,6 +54,10 @@ const HOVER: f32 = 1.1;
 const BOB: f32 = 0.05;
 const BOB_TIME: f32 = 2.0;
 const TURN_TIME: f32 = 4.0;
+/// Its lamp: its colour, how bright it is, and how far it reaches, in meters.
+const LAMP_COLOUR: Color = Color::opaque(255, 40, 40);
+const LAMP_BRIGHTNESS: f32 = 1.0;
+const LAMP_REACH: f32 = 2.5;
 /// How many hearts a maze gets: one for so many cells of floor, between the fewest and the most.
 const FLOOR_PER_HEART: usize = 5000;
 const FEWEST: usize = 3;
@@ -125,9 +135,9 @@ pub fn spots(grid: &WalkGrid, start: (usize, usize), count: usize, rng: &mut Rng
 /// The hearts in the scene.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Hearts {
-    /// Each heart, where it floats - above the middle of its cell - and how far into its bob and
-    /// its turn it started, as a part of each.
-    hearts: Vec<(Handle<Node>, Vector3<f32>, f32)>,
+    /// Each heart and its lamp, where it floats - above the middle of its cell - and how far into
+    /// its bob and its turn it started, as a part of each.
+    hearts: Vec<(Handle<Node>, Handle<Node>, Vector3<f32>, f32)>,
     /// How big the model is made, to be [`SIZE`] across.
     scale: f32,
     /// The glass its see-through surfaces are made of, shared by every heart.
@@ -153,11 +163,27 @@ impl Hearts {
                 self.scale = scale_for(&scene.graph, root);
             }
             self.glaze(&mut scene.graph, root);
+            let meshes: Vec<Handle<Node>> = scene.graph.traverse_handle_iter(root).collect();
+            for node in meshes {
+                if scene.graph[node].cast::<Mesh>().is_some() {
+                    scene.graph[node].set_cast_shadows(false);
+                }
+            }
+            // Not scattering into a haze in the air: the heart is what glows.
+            let lamp = PointLightBuilder::new(
+                BaseLightBuilder::new(BaseBuilder::new())
+                    .with_color(LAMP_COLOUR)
+                    .with_intensity(LAMP_BRIGHTNESS)
+                    .with_scatter_enabled(false),
+            )
+            .with_radius(LAMP_REACH)
+            .build(&mut scene.graph)
+            .to_base();
             let at = survey::cell_center(origin, x, z);
             let at = Vector3::new(at.x, grid.floor(x, z) + HOVER, at.z);
             // Each out of step with the others.
             let phase = n as f32 * 0.37 % 1.0;
-            self.hearts.push((root, at, phase));
+            self.hearts.push((root, lamp, at, phase));
         }
         Log::info(format!("Hearts: {} in the maze", self.hearts.len()));
         self.update(&mut scene.graph, 0.0);
@@ -200,9 +226,11 @@ impl Hearts {
 
     /// Takes them all out of `graph`.
     pub fn clear(&mut self, graph: &mut Graph) {
-        for (root, ..) in self.hearts.drain(..) {
-            if graph.is_valid_handle(root) {
-                graph.remove_node(root);
+        for (root, lamp, ..) in self.hearts.drain(..) {
+            for node in [root, lamp] {
+                if graph.is_valid_handle(node) {
+                    graph.remove_node(node);
+                }
             }
         }
     }
@@ -210,24 +238,31 @@ impl Hearts {
     /// Bobs and turns each another `dt` seconds on.
     pub fn update(&mut self, graph: &mut Graph, dt: f32) {
         self.time += dt;
-        for &(root, at, phase) in &self.hearts {
-            let Ok(node) = graph.try_get_mut(root) else {
-                continue;
-            };
+        for &(root, lamp, at, phase) in &self.hearts {
             let bob = BOB * ((self.time / BOB_TIME + phase) * std::f32::consts::TAU).sin();
             let turn = (self.time / TURN_TIME + phase) * std::f32::consts::TAU;
-            node.local_transform_mut()
-                .set_position(at + Vector3::new(0.0, bob, 0.0))
-                .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), turn))
-                .set_scale(Vector3::repeat(self.scale));
+            let here = at + Vector3::new(0.0, bob, 0.0);
+            if let Ok(node) = graph.try_get_mut(root) {
+                node.local_transform_mut()
+                    .set_position(here)
+                    .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), turn))
+                    .set_scale(Vector3::repeat(self.scale));
+            }
+            if let Ok(node) = graph.try_get_mut(lamp) {
+                node.local_transform_mut().set_position(here);
+            }
         }
     }
 
     /// Shows only the hearts `can_see` says could be seen from where the player is.
     pub fn cull(&self, graph: &mut Graph, can_see: impl Fn(Vector3<f32>) -> bool) {
-        for &(root, at, _) in &self.hearts {
-            if let Ok(node) = graph.try_get_mut(root) {
-                node.set_visibility(can_see(at));
+        for &(root, lamp, at, _) in &self.hearts {
+            // Its lamp too: a light is only worked out while it is showing, and it lights no
+            // further than the heart can be seen from.
+            for node in [root, lamp] {
+                if let Ok(node) = graph.try_get_mut(node) {
+                    node.set_visibility(can_see(at));
+                }
             }
         }
     }

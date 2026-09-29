@@ -119,6 +119,11 @@ shadows (its `raytracing` feature).
   from `health.blend` without texture coordinates (it has none, and a constant set of them
   leaves it unlit); its see-through outer layer is made refractive glass in the game, since the
   engine draws a glTF model's surfaces solid whatever their alpha.
+- **What glows lights what is round it,** with ray-traced shadows like every other light: each
+  heart in red, each computer in its frame's colour (red while locked, blue once cleared), the
+  cyber pistol's muzzle in green while it is out, and every droid's eyes - dimly - in the
+  colour they glow. The engine lights nothing from a glowing surface itself, so each has a small
+  lamp of its own, as the drone does.
 - **Drones speak System Latin,** as they start each of their animations, in lines from
   `data/dialogue/drone.json` - but as beeps, hums and buzzes, which no one would hear as speech:
   each vowel a beep on a note of its own, m, n, l and r a hum, the hissing letters a buzz and the

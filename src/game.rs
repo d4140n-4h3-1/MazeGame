@@ -1436,8 +1436,10 @@ impl MazeGame {
             }
         }
         if !self.menu.is_open() {
+            let graph = &mut ctx.scenes[self.scene].graph;
             for computer in &mut self.computers {
                 computer.update(ctx.dt);
+                computer.light(graph);
             }
         }
         // The terminal of the one the player is using, or last used.
