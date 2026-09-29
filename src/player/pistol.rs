@@ -441,12 +441,12 @@ mod tests {
     }
 
     #[test]
-    fn drawn_it_strafes_and_a_sprint_only_jogs() {
+    fn drawn_it_strafes_and_a_sprint_only_runs() {
         use crate::player::posture::Gait;
         let mut player = Player::default();
         crate::player::hold_shift(&mut player);
         player.pull_trigger();
-        assert_eq!(player.gait(), Gait::Jogging);
+        assert_eq!(player.gait(), Gait::Running);
         assert!(player.strafing());
     }
 }

@@ -108,7 +108,10 @@ shadows (its `raytracing` feature).
 - **The run has a stride of its own,** `droid_running_cycle`, in place of the sprint played
   slower: a mid-foot landing, the hands half curled, the arms pumping between the jog's and the
   sprint's. Every droid has it: a sentry runs after you once it has you, sprinting now and then,
-  and jogs to where it lost you. The other droids' colours are the player's droid recoloured by
+  and jogs to where it lost you. The run has its own strafes, skids and jumps too: running flat
+  out, a droid now skids round, cuts across and slides to a stop as it does sprinting, if in a
+  shorter slide, and strafing - or with the pistol out - a sprint slows to a run rather than a
+  jog. The other droids' colours are the player's droid recoloured by
   `data/recolour_droids.py`, to be run again whenever the droid is exported afresh, so that
   they have every animation it has.
 - **The alert, as in Metal Gear and Fallout,** is at the top in the middle, in its colour: ALERT

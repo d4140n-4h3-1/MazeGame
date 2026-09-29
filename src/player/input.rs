@@ -244,18 +244,18 @@ mod tests {
     }
 
     #[test]
-    fn strafing_anything_faster_than_a_walk_is_a_jog() {
+    fn strafing_a_sprint_is_a_run() {
         let mut player = Player::default();
         hold_shift(&mut player);
         player.set_strafing(true);
-        assert_eq!(player.gait(), Gait::Jogging, "a sprint jogs, strafing");
+        assert_eq!(player.gait(), Gait::Running, "a sprint runs, strafing");
         player.set_strafing(false);
         assert_eq!(player.gait(), Gait::Sprinting, "Shift is still held");
 
         let mut player = Player::default();
         press(&mut player, KeyCode::ShiftLeft);
         player.set_strafing(true);
-        assert_eq!(player.gait(), Gait::Jogging, "a run jogs, strafing");
+        assert_eq!(player.gait(), Gait::Running, "a run runs on, strafing");
     }
 
     #[test]

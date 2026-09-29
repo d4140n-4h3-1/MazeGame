@@ -22,16 +22,17 @@
 //! Strafing, with the right mouse button held or the pistol drawn, it keeps facing ahead instead,
 //! its face and shoulders square to straight ahead however its hips turn, and steps whichever
 //! way the body goes: forward, or sideways, back and along each diagonal in its strafes, walking,
-//! running - the player's sprint slows to a run strafing - or crouched, crawling too. Whichever of those is nearest the way it is
+//! jogging, running - the player's sprint slows to a run strafing - or crouched, crawling too. Whichever of those is nearest the way it is
 //! going, it turns only by what is left over, a few degrees. Without a strafe back it plays its
 //! cycle backwards, and without the others it turns as far as it has to, up to side on.
 //!
-//! Sprinting flat out, and only then, the droid skids; running, it just turns and slows down.
+//! Sprinting or running flat out, and only then, the droid skids, with the skids for that gait;
+//! jogging, it just turns and slows down.
 //! Turning round - from going forward to going back, say - it digs its feet in, slides, swings
 //! round whichever way is shorter and runs out the other way through the run. Turning a quarter
 //! of the way round, it cuts across. Letting go of the keys, it slides to a standstill and idles.
 //! Whether it is sprinting goes by how fast it is going rather than the keys, so letting go of
-//! Shift with the rest still stops out of the sprint.
+//! Shift with the rest still stops out of the sprint, or the run.
 //!
 //! The skids are made on the spot; [`MOTION`] has where each takes the droid and how far round,
 //! frame by frame. The skid carries the body along that path, as far as it goes for how fast
@@ -42,7 +43,8 @@
 //!
 //! Jumping, the droid pushes off, flies with its legs tucked and takes the landing in its knees,
 //! standing or on the move as it is going at the time: from standing still it springs straight
-//! up and lands on the spot, and on the move it leaps in its stride and lands running. Every jump
+//! up and lands on the spot, and on the move it leaps in its stride and lands running - with a
+//! jump of its own for jogging, and another for running or sprinting. Every jump
 //! starts as a high one, and turns into a low one if the jump is cut short. The push off starts
 //! from its lowest point, since the body leaves the ground the moment the key goes down. Falling
 //! off an edge it flies the same way, once it has been in the air long enough to be more than a
@@ -120,9 +122,9 @@ const CYCLES: [(&str, Option<Gait>); 5] = [
     ("droid_sprint_cycle", Some(Gait::Sprinting)),
     ("droid_crouch_cycle", None),
 ];
-/// The droid's strafes, walking, running and crouched, each to its left and to its right,
-/// forward to its left and to its right, back, and back to its left and to its right.
-const STRAFES: [[&str; 7]; 3] = [
+/// The droid's strafes, walking, jogging, running and crouched, each to its left and to its
+/// right, forward to its left and to its right, back, and back to its left and to its right.
+const STRAFES: [[&str; 7]; 4] = [
     [
         "droid_strafe_walk_L",
         "droid_strafe_walk_R",
@@ -142,6 +144,15 @@ const STRAFES: [[&str; 7]; 3] = [
         "droid_strafe_run_BR",
     ],
     [
+        "droid_strafe_running_L",
+        "droid_strafe_running_R",
+        "droid_strafe_running_FL",
+        "droid_strafe_running_FR",
+        "droid_strafe_running_B",
+        "droid_strafe_running_BL",
+        "droid_strafe_running_BR",
+    ],
+    [
         "droid_strafe_crouch_L",
         "droid_strafe_crouch_R",
         "droid_strafe_crouch_FL",
@@ -152,19 +163,36 @@ const STRAFES: [[&str; 7]; 3] = [
     ],
 ];
 /// The gait each row of [`STRAFES`] is for, like [`CYCLES`].
-const STRAFE_GAITS: [Option<Gait>; 3] = [Some(Gait::Walking), Some(Gait::Jogging), None];
+const STRAFE_GAITS: [Option<Gait>; 4] = [
+    Some(Gait::Walking),
+    Some(Gait::Jogging),
+    Some(Gait::Running),
+    None,
+];
 /// How much nearer the way it is going another step has to be, in radians, for the droid to
 /// change to it strafing, so that going just about halfway between two it does not keep changing.
 const STRAFE_MARGIN: f32 = 10.0 * std::f32::consts::PI / 180.0;
 /// Where the droid's animations take it and how far round, frame by frame, as they were made:
 /// the skids, made on the spot, go by it.
 pub const MOTION: &str = "data/droid_motion.json";
-/// The droid's skids round out of a sprint, to its left and to its right.
-const TURNS: [&str; 2] = ["droid_skid_sprint_turn_L", "droid_skid_sprint_turn_R"];
-/// Its quarter turns cut across out of a sprint, to its left and to its right.
-const CUTS: [&str; 2] = ["droid_skid_sprint_turn90_L", "droid_skid_sprint_turn90_R"];
-/// Its slide to a standstill out of a sprint.
-const STOP: &str = "droid_skid_sprint_stop";
+/// The droid's skids out of one gait: round, to its left and to its right; quarter turns cut
+/// across, to its left and to its right; and its slide to a standstill.
+struct Skids {
+    turns: [&'static str; 2],
+    cuts: [&'static str; 2],
+    stop: &'static str,
+}
+/// Its skids out of a sprint, and out of a run.
+const SPRINT_SKIDS: Skids = Skids {
+    turns: ["droid_skid_sprint_turn_L", "droid_skid_sprint_turn_R"],
+    cuts: ["droid_skid_sprint_turn90_L", "droid_skid_sprint_turn90_R"],
+    stop: "droid_skid_sprint_stop",
+};
+const RUNNING_SKIDS: Skids = Skids {
+    turns: ["droid_skid_running_turn_L", "droid_skid_running_turn_R"],
+    cuts: ["droid_skid_running_turn90_L", "droid_skid_running_turn90_R"],
+    stop: "droid_skid_running_stop",
+};
 /// How far round the keys have to swing the droid, in radians, for it to skid round: from ahead
 /// to straight back, or to either of the diagonals behind.
 const SKID_ANGLE: f32 = 0.75 * std::f32::consts::PI - 1.0e-3;
@@ -172,9 +200,9 @@ const SKID_ANGLE: f32 = 0.75 * std::f32::consts::PI - 1.0e-3;
 const CUT_ANGLE: f32 = 0.5 * std::f32::consts::PI - 1.0e-3;
 /// How near a gait's full pace the droid has to be going to skid out of it, as a share of it.
 const SKID_SPEED: f32 = 0.75;
-/// The droid's jumps, standing still and on the move, each low and high: pushing off, in the air,
-/// and landing.
-const LEAPS: [[[&str; 3]; 2]; 2] = [
+/// The droid's jumps standing still, jogging and running, each low and high: pushing off, in the
+/// air, and landing.
+const LEAPS: [[[&str; 3]; 2]; 3] = [
     [
         [
             "droid_jump_stand_short_start",
@@ -197,6 +225,18 @@ const LEAPS: [[[&str; 3]; 2]; 2] = [
             "droid_jump_run_high_start",
             "droid_jump_run_high_loop",
             "droid_jump_run_high_land",
+        ],
+    ],
+    [
+        [
+            "droid_jump_running_short_start",
+            "droid_jump_running_short_loop",
+            "droid_jump_running_short_land",
+        ],
+        [
+            "droid_jump_running_high_start",
+            "droid_jump_running_high_loop",
+            "droid_jump_running_high_land",
         ],
     ],
 ];
@@ -1010,19 +1050,21 @@ enum SkidKind {
 
 /// The skid, by name, the droid goes into flat out at `gait`, from facing `from` towards `to`, in
 /// radians, left positive, with the keys sending it anywhere or not. None for going on as it is,
-/// as it always does short of a sprint.
+/// as it always does short of a run.
 fn skid_for(gait: Gait, from: f32, to: f32, pushing: bool) -> Option<(SkidKind, &'static str)> {
-    if gait != Gait::Sprinting {
-        return None;
-    }
+    let skids = match gait {
+        Gait::Sprinting => SPRINT_SKIDS,
+        Gait::Running => RUNNING_SKIDS,
+        _ => return None,
+    };
     let left = wrap(to - from);
     let side = usize::from(left < 0.0);
     if !pushing {
-        Some((SkidKind::Stop, STOP))
+        Some((SkidKind::Stop, skids.stop))
     } else if left.abs() >= SKID_ANGLE {
-        Some((SkidKind::Round, TURNS[side]))
+        Some((SkidKind::Round, skids.turns[side]))
     } else if left.abs() >= CUT_ANGLE {
-        Some((SkidKind::Cut, CUTS[side]))
+        Some((SkidKind::Cut, skids.cuts[side]))
     } else {
         None
     }
@@ -1136,9 +1178,9 @@ pub(crate) struct Avatar {
     /// the droid has them.
     cover_idle: Option<Handle<Animation>>,
     cover_walk: Option<usize>,
-    /// Its strafes walking, running and crouched, each way, as indexes into `cycles`, as far as
-    /// it has them: like [`STRAFES`].
-    strafes: [[Option<usize>; 7]; 3],
+    /// Its strafes walking, jogging, running and crouched, each way, as indexes into `cycles`, as
+    /// far as it has them: like [`STRAFES`].
+    strafes: [[Option<usize>; 7]; 4],
     /// Which way it is stepping, strafing on the move.
     stepping: Option<Step>,
     /// Whether it was in cover as of the last frame.
@@ -1146,8 +1188,9 @@ pub(crate) struct Avatar {
     /// Its skids by name, as far as it has them.
     skids: FxHashMap<&'static str, Skid>,
     skidding: Option<Skidding>,
-    /// Its jumps standing still and on the move, each low and high, as far as it has them.
-    leaps: [[Option<Leap>; 2]; 2],
+    /// Its jumps standing still, jogging and running, each low and high, as far as it has them:
+    /// like [`LEAPS`].
+    leaps: [[Option<Leap>; 2]; 3],
     leaping: Option<Leaping>,
     /// How long it has been in the air, in seconds.
     airborne: f32,
@@ -1624,7 +1667,7 @@ impl Avatar {
                 });
                 Some(cycles.len() - 1)
             });
-        let strafes: [[Option<usize>; 7]; 3] = std::array::from_fn(|row| {
+        let strafes: [[Option<usize>; 7]; 4] = std::array::from_fn(|row| {
             STRAFES[row].map(|name| {
                 let Some((handle, animation)) = container.find_by_name_mut(name) else {
                     warn(format!("Droid: it has no {name}"));
@@ -1701,7 +1744,14 @@ impl Avatar {
             })
         });
         let mut skids = FxHashMap::default();
-        for &name in TURNS.iter().chain(&CUTS).chain([&STOP]) {
+        let names = [SPRINT_SKIDS, RUNNING_SKIDS].into_iter().flat_map(|skids| {
+            skids
+                .turns
+                .into_iter()
+                .chain(skids.cuts)
+                .chain([skids.stop])
+        });
+        for name in names {
             let Some((handle, animation)) = container.find_by_name_mut(name) else {
                 warn(format!("Droid: it has no {name}"));
                 continue;
@@ -2539,12 +2589,13 @@ impl Avatar {
     /// it has no strafe for that.
     fn steps(&self, going: Going) -> Vec<(f32, Step)> {
         let mut steps = vec![(0.0, Step::Ahead)];
-        // Crawling in the crouched ones, and sprinting in the run's; the walk's and the run's
-        // each stand in for the other.
+        // Crawling in the crouched ones, and sprinting in the run's; standing, each gait's stand
+        // in for the others, the nearest first.
         let rows: &[usize] = match (going.posture, going.gait) {
-            (Posture::Standing, Gait::Walking) => &[0, 1],
-            (Posture::Standing, _) => &[1, 0],
-            _ => &[2],
+            (Posture::Standing, Gait::Walking) => &[0, 1, 2],
+            (Posture::Standing, Gait::Jogging) => &[1, 0, 2],
+            (Posture::Standing, _) => &[2, 1, 0],
+            _ => &[3],
         };
         for side in 0..STRAFES[0].len() {
             if let Some(strafe) = rows.iter().find_map(|&row| self.strafes[row][side]) {
@@ -2691,17 +2742,19 @@ impl Avatar {
         true
     }
 
-    /// The jump the droid has for going `moving` or not, `high` or low, as `leaps` indexes it:
-    /// that one, or failing that the other height, or failing that any at all.
+    /// The jump the droid has for going `moving` - standing still, jogging or running, as `leaps`
+    /// indexes it - `high` or low: that one, or failing that the other height, or failing that
+    /// the nearest way of going it has one for.
     fn leap_for(&self, moving: usize, high: usize) -> Option<(usize, usize)> {
-        [
-            (moving, high),
-            (moving, 1 - high),
-            (1 - moving, high),
-            (1 - moving, 1 - high),
-        ]
-        .into_iter()
-        .find(|&(m, h)| self.leaps[m][h].is_some())
+        let nearest: [usize; 3] = match moving {
+            0 => [0, 1, 2],
+            1 => [1, 2, 0],
+            _ => [2, 1, 0],
+        };
+        nearest
+            .into_iter()
+            .flat_map(|m| [(m, high), (m, 1 - high)])
+            .find(|&(m, h)| self.leaps[m][h].is_some())
     }
 
     /// The animation for `phase` of `leap`, and for pushing off, the time it pushes off at.
@@ -2735,7 +2788,12 @@ impl Avatar {
     /// Plays whatever part of a jump the droid is in for another `dt`, starting one as it pushes
     /// off or falls, and going from one part to the next. False while it is in none.
     fn leap(&mut self, graph: &mut Graph, going: Going, dt: f32) -> bool {
-        let moving = usize::from(going.speed >= LEAP_MOVING);
+        // Standing still, jogging - or walking - and running, or sprinting.
+        let moving = match going.gait {
+            _ if going.speed < LEAP_MOVING => 0,
+            Gait::Running | Gait::Sprinting => 2,
+            _ => 1,
+        };
         if going.jumped {
             // High until it turns out to be low.
             if let Some(leap) = self.leap_for(moving, 1) {
@@ -2812,7 +2870,7 @@ impl Avatar {
         // Landing on the spot and then setting off, or on the move and then stopping, or
         // crouching, the landing is cut short.
         if leaping.phase == Phase::Landing
-            && (going.posture != Posture::Standing || moving != leaping.leap.0)
+            && (going.posture != Posture::Standing || (moving == 0) != (leaping.leap.0 == 0))
         {
             self.end_leap(graph);
             return false;
@@ -2950,18 +3008,22 @@ mod tests {
         );
         assert_eq!(
             sprinting(0.0, FRAC_PI_2),
-            Some((SkidKind::Cut, CUTS[0])),
+            Some((SkidKind::Cut, SPRINT_SKIDS.cuts[0])),
             "W to A"
         );
         assert_eq!(
             sprinting(FRAC_PI_4, -FRAC_PI_4),
-            Some((SkidKind::Cut, CUTS[1])),
+            Some((SkidKind::Cut, SPRINT_SKIDS.cuts[1])),
             "W+A to W+D"
         );
-        assert_eq!(sprinting(0.0, 3.0 * FRAC_PI_4), round(TURNS[0]), "W to S+A");
+        assert_eq!(
+            sprinting(0.0, 3.0 * FRAC_PI_4),
+            round(SPRINT_SKIDS.turns[0]),
+            "W to S+A"
+        );
         assert_eq!(
             sprinting(0.0, -3.0 * FRAC_PI_4),
-            round(TURNS[1]),
+            round(SPRINT_SKIDS.turns[1]),
             "W to S+D"
         );
         assert!(
@@ -2971,12 +3033,30 @@ mod tests {
         // Facing back-left, going forward-left is round to the right.
         assert_eq!(
             sprinting(3.0 * FRAC_PI_4, -FRAC_PI_4 + 0.1),
-            round(TURNS[1])
+            round(SPRINT_SKIDS.turns[1])
         );
     }
 
     #[test]
-    fn short_of_a_sprint_it_never_skids() {
+    fn running_it_skids_with_its_own() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let running = |to: f32, pushing| skid_for(Gait::Running, 0.0, to, pushing);
+        assert_eq!(
+            running(PI - 0.1, true),
+            Some((SkidKind::Round, RUNNING_SKIDS.turns[0]))
+        );
+        assert_eq!(
+            running(-FRAC_PI_2, true),
+            Some((SkidKind::Cut, RUNNING_SKIDS.cuts[1]))
+        );
+        assert_eq!(
+            running(0.0, false),
+            Some((SkidKind::Stop, RUNNING_SKIDS.stop))
+        );
+    }
+
+    #[test]
+    fn short_of_a_run_it_never_skids() {
         use std::f32::consts::{FRAC_PI_2, PI};
         for gait in [Gait::Walking, Gait::Jogging] {
             assert_eq!(skid_for(gait, 0.0, PI, true), None, "{gait:?} round");
@@ -2994,7 +3074,7 @@ mod tests {
         for to in [0.0, 1.0, 3.0] {
             assert_eq!(
                 skid_for(Gait::Sprinting, 0.0, to, false),
-                Some((SkidKind::Stop, STOP))
+                Some((SkidKind::Stop, SPRINT_SKIDS.stop))
             );
         }
     }

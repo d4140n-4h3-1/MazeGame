@@ -122,7 +122,7 @@ impl Player {
 
     /// How fast the player is going: sprinting while Shift is held down, and otherwise whichever
     /// of walking, jogging and running Caps Lock and a tap of Shift last left them in. Strafing,
-    /// or with the pistol out, anything faster than a walk is a jog. Out of breath, or edging
+    /// or with the pistol out, a sprint is a run. Out of breath, or edging
     /// along a wall in cover, they only walk.
     pub(super) fn gait(&self) -> Gait {
         if self.winded || self.in_cover() {
@@ -131,8 +131,7 @@ impl Player {
         let sprinting = self.keys.shift_held.is_some_and(|held| held >= SPRINT_HOLD);
         let gait = if sprinting { Gait::Sprinting } else { self.pace };
         match gait {
-            Gait::Walking => Gait::Walking,
-            _ if self.strafing() => Gait::Jogging,
+            Gait::Sprinting if self.strafing() => Gait::Running,
             gait => gait,
         }
     }
