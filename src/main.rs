@@ -24,6 +24,7 @@ mod diagnostics;
 mod dialogue;
 mod dismember;
 mod drone;
+mod health;
 mod hearts;
 mod fixtures;
 mod formants;

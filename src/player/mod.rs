@@ -118,6 +118,8 @@ pub struct Player {
     stamina: f32,
     /// Whether the player has run themselves out and is walking it off.
     winded: bool,
+    /// Whether the player stood still this frame.
+    resting: bool,
     /// Whether the feet were on something as of this frame.
     grounded: bool,
     /// How fast the body was falling last frame, in meters per second, for the landing to read.
@@ -199,6 +201,7 @@ impl Default for Player {
             pace: posture::Gait::Walking,
             stamina: 1.0,
             winded: false,
+            resting: false,
             grounded: false,
             fall_speed: 0.0,
             jump_spent: false,
@@ -320,6 +323,10 @@ impl Player {
         self.flashlight_on
     }
 
+    pub fn resting(&self) -> bool {
+        self.resting
+    }
+
     pub fn position(&self, graph: &Graph) -> Vector3<f32> {
         graph[self.body].global_position()
     }
@@ -384,6 +391,7 @@ impl Player {
         let keys = &self.keys;
         let pushing = can_move && (keys.forward || keys.back || keys.left || keys.right);
         self.breathe(dt, pushing);
+        self.resting = !pushing;
         self.fit_posture(graph, dt);
         self.look_back.advance(self.keys.look_back, dt);
         if let Ok(flashlight) = graph.try_get_mut(self.flashlight) {

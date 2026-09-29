@@ -4,7 +4,8 @@
 //! pistol out, its ammo in the bottom right: the cyber pistol's is endless, shown as ∞.
 //!
 //! The alert is coloured by its phase - ALERT red, EVASION amber, CAUTION yellow - and ALERT and
-//! CAUTION blink; EVASION and CAUTION count down the seconds they have left. The stamina is a bar,
+//! CAUTION blink; EVASION and CAUTION count down the seconds they have left. The player's health
+//! is a red bar in the bottom middle, and the screen flashes red as they are hit. The stamina is a bar,
 //! green, yellow once it runs low, and red and blinking while the player is winded. Sentries have
 //! bars like it over their heads (see [`Hud::show_breath_bars`]).
 
@@ -40,6 +41,11 @@ const CAUTION_YELLOW: Color = Color::opaque(255, 225, 40);
 const BAR: (f32, f32) = (180.0, 10.0);
 const STAMINA_GREEN: Color = Color::opaque(90, 230, 120);
 const STAMINA_LOW: f32 = 0.35;
+/// The health bar's colour, and below how much of it it blinks; and how red the screen goes as
+/// the player is hit, out of 255.
+const HEALTH_RED: Color = Color::opaque(230, 50, 70);
+const HEALTH_LOW: f32 = 0.34;
+const HURT_RED: u8 = 90;
 
 /// What the status line is about.
 pub enum Status {
@@ -51,6 +57,9 @@ pub enum Status {
         best: Option<f32>,
         /// How much breath is left, from 0 to 1, and whether the player has run out of it.
         breath: (f32, bool),
+        /// How much health is left, from 0 to 1, and how long is left of the red flash of a hit,
+        /// in seconds.
+        health: (f32, f32),
         /// Whether the pistol is out.
         armed: bool,
         mouse_captured: bool,
@@ -68,6 +77,12 @@ pub struct Hud {
     alert: Handle<Text>,
     stamina: Handle<UiNode>,
     stamina_fill: Handle<Border>,
+    /// The health bar - its panel and what fills it - and the red over the whole screen as the
+    /// player is hit.
+    health: Handle<UiNode>,
+    health_fill: Handle<Border>,
+    hurt: Handle<UiNode>,
+    shown_health: Option<(f32, f32)>,
     /// The pistol's ammo, and whether it is showing.
     ammo: Handle<UiNode>,
     shown_ammo: bool,
@@ -152,6 +167,50 @@ impl Hud {
             .build(ctx)
         };
         let stamina_label = label(ctx, "STAMINA", HorizontalAlignment::Left);
+        let health_fill = BorderBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Left)
+                .with_margin(Thickness::uniform(3.0))
+                .with_width(BAR.0)
+                .with_height(BAR.1)
+                .with_background(Brush::Solid(HEALTH_RED).into()),
+        )
+        .with_stroke_thickness(Thickness::zero().into())
+        .build(ctx);
+        let health_frame = BorderBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Center)
+                .with_width(BAR.0 + 6.0)
+                .with_height(BAR.1 + 6.0)
+                .with_foreground(Brush::Solid(Color::opaque(200, 200, 200)).into())
+                .with_background(Brush::Solid(Color::from_rgba(0, 0, 0, 120)).into())
+                .with_child(health_fill),
+        )
+        .with_stroke_thickness(Thickness::uniform(1.0).into())
+        .build(ctx);
+        let health_label = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_margin(Thickness::bottom(3.0))
+                .with_foreground(Brush::Solid(Color::WHITE).into()),
+        )
+        .with_font_size(16.0.into())
+        .with_horizontal_text_alignment(HorizontalAlignment::Center)
+        .with_text("HEALTH")
+        .build(ctx);
+        let health = StackPanelBuilder::new(
+            // Across the whole bottom, with what is in it in the middle: the screen puts a child
+            // asking for less than all of it in its corner.
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Stretch)
+                .with_vertical_alignment(VerticalAlignment::Bottom)
+                .with_margin(Thickness::uniform(18.0))
+                .with_visibility(false)
+                .with_child(health_label)
+                .with_child(health_frame),
+        )
+        .with_orientation(Orientation::Vertical)
+        .build(ctx)
+        .to_base();
         let stamina = StackPanelBuilder::new(
             WidgetBuilder::new()
                 .on_column(0)
@@ -194,7 +253,8 @@ impl Hud {
         .with_orientation(Orientation::Vertical)
         .build(ctx)
         .to_base();
-        // Along the bottom of the window: the stamina on the left, the ammo on the right.
+        // Along the bottom of the window: the stamina on the left, the ammo on the right; the
+        // health, by itself, in the middle.
         let bottom = GridBuilder::new(
             WidgetBuilder::new()
                 .with_vertical_alignment(VerticalAlignment::Bottom)
@@ -211,8 +271,19 @@ impl Hud {
         // itself, in the corner. A screen is the size of the window, so in one the banner is
         // centered on the window, the alert at the top in the middle, the stamina in the bottom
         // left corner and the ammo in the bottom right.
+        // Red over everything, clear until the player is hit.
+        let hurt = BorderBuilder::new(
+            WidgetBuilder::new()
+                .with_visibility(false)
+                .with_background(Brush::Solid(Color::from_rgba(255, 0, 0, 0)).into()),
+        )
+        .with_stroke_thickness(Thickness::zero().into())
+        .build(ctx)
+        .to_base();
         let screen = ScreenBuilder::new(
             WidgetBuilder::new()
+                .with_child(hurt)
+                .with_child(health)
                 .with_child(banner)
                 .with_child(alert)
                 .with_child(bottom),
@@ -225,6 +296,9 @@ impl Hud {
             alert,
             stamina,
             stamina_fill,
+            health,
+            health_fill,
+            hurt,
             ammo,
             screen,
             ..Default::default()
@@ -251,13 +325,14 @@ impl Hud {
         self.note_time = (self.note_time - dt).max(0.0);
         self.blink = (self.blink + dt) % BLINK;
         let blinking_on = self.blink < BLINK_ON;
-        let (text, alarm, breath, armed) = match status {
-            Status::Loading => ("Loading the maze...".to_string(), None, None, false),
-            Status::Blank => (String::new(), None, None, false),
+        let (text, alarm, breath, health, armed) = match status {
+            Status::Loading => ("Loading the maze...".to_string(), None, None, None, false),
+            Status::Blank => (String::new(), None, None, None, false),
             Status::Round {
                 time,
                 best,
                 breath,
+                health,
                 armed,
                 mouse_captured,
                 alarm,
@@ -272,7 +347,7 @@ impl Hud {
                 if self.note_time > 0.0 {
                     text += &format!("\n{}", self.note);
                 }
-                (text, alarm, Some(breath), armed)
+                (text, alarm, Some(breath), Some(health), armed)
             }
         };
         ui.send(self.status, TextMessage::Text(text));
@@ -295,6 +370,31 @@ impl Hud {
                 ui.send(self.stamina_fill, WidgetMessage::Background(Brush::Solid(colour).into()));
             }
             self.shown_stamina = stamina;
+        }
+
+        // Rounded, so that it is only sent as it changes enough to see.
+        let health = health.map(|(left, flash)| {
+            ((left.clamp(0.0, 1.0) * 200.0).round() / 200.0, (flash * 20.0).round() / 20.0)
+        });
+        if health != self.shown_health {
+            ui.send(self.health, WidgetMessage::Visibility(health.is_some()));
+            if let Some((left, flash)) = health {
+                ui.send(self.health_fill, WidgetMessage::Width(BAR.0 * left));
+                let colour = match left < HEALTH_LOW && blinking_on {
+                    true => ALERT_RED,
+                    false => HEALTH_RED,
+                };
+                ui.send(self.health_fill, WidgetMessage::Background(Brush::Solid(colour).into()));
+                let red = (flash / crate::health::FLASH * HURT_RED as f32) as u8;
+                ui.send(self.hurt, WidgetMessage::Visibility(red > 0));
+                ui.send(
+                    self.hurt,
+                    WidgetMessage::Background(Brush::Solid(Color::from_rgba(255, 0, 0, red)).into()),
+                );
+            } else {
+                ui.send(self.hurt, WidgetMessage::Visibility(false));
+            }
+            self.shown_health = health;
         }
 
         if armed != self.shown_ammo {

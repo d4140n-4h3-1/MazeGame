@@ -1,5 +1,6 @@
 //! Hearts: health items floating in the maze's corridors, each slowly spinning and bobbing up and
-//! down. For now they only float there: there is no health for them to give back yet.
+//! down. Walking into one with health to make up picks it up (see [`Hearts::take`]), and gives
+//! back a good part of it at once (see [`crate::health`]).
 //!
 //! The model, [`HEART_MODEL`], is made in Blender from `health.blend` and exported as it is; it
 //! is scaled here to [`SIZE`] however big it was made. The engine takes a glTF model's surfaces
@@ -45,6 +46,8 @@ use fyrox::{
 
 /// The heart's model.
 pub const HEART_MODEL: &str = "data/health.glb";
+/// How near the middle of the player's body a heart has to be to be picked up, in meters.
+const TAKE_REACH: f32 = 0.9;
 /// How big a heart is across its biggest side, in meters.
 const SIZE: f32 = 0.45;
 /// How high the middle of a heart floats above the floor, in meters; how far it bobs up and
@@ -252,6 +255,25 @@ impl Hearts {
                 node.local_transform_mut().set_position(here);
             }
         }
+    }
+
+    /// Picks up the heart within [`TAKE_REACH`] of the player's middle at `player`, if there is
+    /// one: it is gone from the maze. Whether there was.
+    pub fn take(&mut self, graph: &mut Graph, player: Vector3<f32>) -> bool {
+        let Some(n) = self
+            .hearts
+            .iter()
+            .position(|&(_, _, at, _)| (at - player).norm() < TAKE_REACH)
+        else {
+            return false;
+        };
+        let (root, lamp, ..) = self.hearts.swap_remove(n);
+        for node in [root, lamp] {
+            if graph.is_valid_handle(node) {
+                graph.remove_node(node);
+            }
+        }
+        true
     }
 
     /// Shows only the hearts `can_see` says could be seen from where the player is.

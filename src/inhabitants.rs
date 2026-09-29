@@ -210,8 +210,10 @@ const CHASE_REACH: f32 = 200.0;
 /// How far out from the middle of the player's body it goes, standing, in meters (see
 /// `crate::player::posture`).
 const PLAYER_RADIUS: f32 = 0.35;
-/// How near the player's feet, in meters, a hostile droid's have to get to catch them - their
-/// bodies touching, give or take a few centimeters - and how far above or below.
+/// How near the player's feet, in meters, a hostile droid's have to get to hit them - their
+/// bodies touching, give or take a few centimeters - and how far above or below; and how long,
+/// in seconds, it stands after a hit before it comes on again.
+const HIT_PAUSE: f32 = 1.2;
 const CATCH: f32 = RADIUS + PLAYER_RADIUS + 0.05;
 const CATCH_HEIGHT: f32 = 1.0;
 /// How long, in seconds, a droid on Alert runs before it breaks into a sprint, from least to
@@ -257,8 +259,8 @@ pub enum Threat {
 /// What came of moving everyone along.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct News {
-    /// The droid that caught the player, if one did.
-    pub caught: Option<usize>,
+    /// The droid that hit the player, if one did.
+    pub hit: Option<usize>,
     /// The droids whose phase changed, as indices, and what to: none for calm again.
     pub alerts: Vec<(usize, Option<Alert>)>,
     /// The droids that heard the player, and are searching where.
@@ -1289,6 +1291,9 @@ impl Inhabitants {
                 && to_player.y.abs() < CATCH_HEIGHT
             {
                 caught = caught.or(Some(me));
+                // Having hit them, it stands a moment before coming on again.
+                droid.windup = HIT_PAUSE;
+                droid.speed = 0.0;
             }
 
             if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(droid.body) {
@@ -1318,7 +1323,7 @@ impl Inhabitants {
             droid.avatar.animate(graph, going, dt);
         }
         News {
-            caught,
+            hit: caught,
             alerts,
             heard,
             alarmed,

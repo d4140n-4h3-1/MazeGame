@@ -3,6 +3,7 @@
 use crate::{
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
     drone::{Drone, DroneLines, DRONE_LINES, DRONE_MODEL},
+    health::Health,
     hearts::{self, Hearts, HEART_MODEL},
     notes::{self, Notes, NOTES},
     diagnostics::{self, FrameStats},
@@ -292,6 +293,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     hearts: Hearts,
+    /// The player's health this round.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    health: Health,
     #[visit(skip)]
     #[reflect(hidden)]
     hearts_placed: bool,
@@ -569,6 +574,7 @@ impl MazeGame {
         );
 
         self.round_time = 0.0;
+        self.health = Health::default();
         self.knocked_down = false;
         self.phase = Phase::Playing;
         self.set_banner(ctx, "");
@@ -586,6 +592,7 @@ impl MazeGame {
                 time: self.round_time,
                 best: self.best_time,
                 breath: self.player.breath(),
+                health: (self.health.left, self.health.flash),
                 armed: self.player.armed(),
                 // The menu and the conversation say what to do next, so the hint to click would
                 // only be in the way.
@@ -595,6 +602,12 @@ impl MazeGame {
                 alarm: self.inhabitants.alarm(),
             },
         };
+        // Healing only while playing; the flash of the last hit fades out after too.
+        let round = matches!(self.phase, Phase::Playing | Phase::Won | Phase::Deleted);
+        if round && !self.menu.is_open() {
+            let resting = self.phase == Phase::Playing && self.player.resting();
+            self.health.update(ctx.dt, resting);
+        }
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
         self.show_breath_bars(ctx);
     }
@@ -937,7 +950,7 @@ impl MazeGame {
             }
         }
         let News {
-            caught,
+            hit,
             alerts,
             heard,
             alarmed,
@@ -959,10 +972,14 @@ impl MazeGame {
             self.inhabitants.set_eyes(n, screen::eyes(mood));
             self.bark(n, bark, mood);
         }
-        match caught {
+        match hit {
+            // Hit, they lose some health, and with none left they are deleted.
             Some(n) if self.phase == Phase::Playing => {
-                self.delete_player(ctx, n);
-                true
+                let last = self.health.hit();
+                if last {
+                    self.delete_player(ctx, n);
+                }
+                last
             }
             _ => false,
         }
@@ -1617,8 +1634,15 @@ impl MazeGame {
             }
         }
         if !self.menu.is_open() {
-            self.hearts
-                .update(&mut ctx.scenes[self.scene].graph, ctx.dt);
+            let graph = &mut ctx.scenes[self.scene].graph;
+            self.hearts.update(graph, ctx.dt);
+            // Walking into one with health to make up picks it up.
+            if self.phase == Phase::Playing && self.health.hurt() {
+                let player = self.player.position(graph);
+                if self.hearts.take(graph, player) {
+                    self.health.heart();
+                }
+            }
         }
     }
 
