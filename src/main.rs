@@ -19,11 +19,13 @@
 //! address instead, as `?MAZE_SEED=7` (see [`platform::var`]).
 
 mod computer;
+mod credits;
 mod culling;
 mod diagnostics;
 mod dialogue;
 mod dismember;
 mod drone;
+mod drone_shot;
 mod health;
 mod hearts;
 mod fixtures;

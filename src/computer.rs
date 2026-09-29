@@ -16,6 +16,9 @@
 //! MAZE_TERMINAL_OVERLAY=1 the terminal comes up over the screen instead, as a panel of the
 //! game's own interface, as big as the screen is in the view.
 //!
+//! Every computer carries credits too, a random amount whatever its files are (see
+//! [`crate::credits`]); clearing it transfers them to the player, and the terminal says how many.
+//!
 //! Once cleared, the computer's files are open to read: notes and diary entries, shared out among
 //! the maze's computers (see [`crate::notes`]). Up and down pick one, Enter opens it, up and down
 //! scroll it and Backspace goes back to the listing.
@@ -24,6 +27,7 @@
 //! one that goes in, low and buzzing for one that does not, twice rising for a command typed out.
 
 use crate::{
+    credits::Credits,
     dismember::SPILL,
     formants::{self, Sounds},
     layout::{Rng, WalkGrid},
@@ -159,7 +163,7 @@ const AWAY_FROM_START: u32 = 20;
 const APART: f32 = 60.0;
 /// How many files the listing shows at once; and how many lines of a file show at once, and how
 /// wide they are, in characters.
-const LISTED: usize = 7;
+const LISTED: usize = 6;
 pub const PAGE: usize = 10;
 const PAGE_WIDTH: usize = 38;
 
@@ -253,6 +257,9 @@ pub struct Hack {
     picked: usize,
     reading: Option<(usize, Vec<String>)>,
     scroll: usize,
+    /// The credits it carries, and whether they have been transferred to the player yet.
+    credits: Credits,
+    paid: bool,
 }
 
 /// What the terminal is showing, for it to type itself out afresh when that changes: the stage
@@ -261,7 +268,7 @@ pub type View = (Stage, Option<usize>);
 
 impl Hack {
     pub fn new(seed: u64) -> Self {
-        Self {
+        let mut hack = Self {
             stage: Stage::Locked,
             lines: Vec::new(),
             at: 0,
@@ -275,7 +282,24 @@ impl Hack {
             picked: 0,
             reading: None,
             scroll: 0,
-        }
+            credits: Credits::default(),
+            paid: false,
+        };
+        hack.credits = Credits::random(|n| hack.below(n));
+        hack
+    }
+
+    /// The credits it carries.
+    #[cfg(test)]
+    pub fn credits(&self) -> Credits {
+        self.credits
+    }
+
+    /// Its credits, once it is cleared, the first time they are asked for: transferred.
+    pub fn take_credits(&mut self) -> Option<Credits> {
+        let due = self.stage == Stage::Cleared && !self.paid;
+        self.paid |= due;
+        due.then_some(self.credits)
     }
 
     /// What it is showing, for the terminal.
@@ -498,7 +522,11 @@ impl Hack {
                 }
                 // The listing, as much of it as fits round the one picked.
                 None => {
-                    output.extend([bright("ACCESS GRANTED"), Vec::new()]);
+                    output.extend([
+                        bright("ACCESS GRANTED"),
+                        plain(&format!("CREDITS {} TRANSFERRED", self.credits)),
+                        Vec::new(),
+                    ]);
                     if self.files.is_empty() {
                         output.push(plain("NO FILES"));
                     } else {
@@ -1274,6 +1302,11 @@ impl Computer {
         self.hack.stage() == Stage::Cleared
     }
 
+    /// Its credits, once it has been cleared, the first time they are asked for: transferred.
+    pub fn take_credits(&mut self) -> Option<Credits> {
+        self.hack.take_credits()
+    }
+
     /// Enter, beeping if it starts a breach or opens a file.
     pub fn enter(&mut self, graph: &mut Graph) {
         if self.hack.enter() {
@@ -1342,8 +1375,9 @@ impl Computer {
         )
     }
 
-    /// Runs the hack on for another `dt`, and shows how it stands on the frame.
-    pub fn update(&mut self, dt: f32) {
+    /// Runs the hack on for another `dt`, and shows how it stands on the frame. Whether access has
+    /// just been denied: the trace completed.
+    pub fn update(&mut self, dt: f32) -> bool {
         self.hack.update(dt);
         self.blink = (self.blink + dt) % (2.0 * BLINK);
         let stage = self.hack.stage();
@@ -1357,7 +1391,9 @@ impl Computer {
             };
             frame.set_property("diffuseColor", colour);
         }
+        let denied = stage == Stage::Denied && self.lit != Some(Stage::Denied);
         self.lit = Some(stage);
+        denied
     }
 
     /// The glow of its frame, as area lights in the frame's colour: red while it is locked,
@@ -1611,6 +1647,25 @@ mod tests {
         assert_eq!(hack.stage(), Stage::Cleared);
         hack.enter();
         assert_eq!(hack.stage(), Stage::Cleared, "cleared stays cleared");
+    }
+
+    #[test]
+    fn its_credits_are_transferred_once_and_only_once_it_is_cleared() {
+        let mut hack = Hack::new(7);
+        let carried = hack.credits();
+        assert!(carried > Credits::default(), "every computer carries some");
+        assert_eq!(hack.take_credits(), None, "locked");
+        hack.enter();
+        for _ in 0..BREACH_LINES {
+            let line = hack.lines[hack.at];
+            typed(&mut hack, line);
+        }
+        assert_eq!(hack.take_credits(), Some(carried));
+        assert_eq!(hack.take_credits(), None, "already transferred");
+        // Each computer carries its own amount.
+        let amounts: std::collections::HashSet<Credits> =
+            (0..20).map(|seed| Hack::new(seed * 7919 + 1).credits()).collect();
+        assert!(amounts.len() > 15, "{amounts:?}");
     }
 
     #[test]

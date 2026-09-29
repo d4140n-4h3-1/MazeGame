@@ -1,15 +1,17 @@
 //! What is written on screen: a status line in the corner, a banner across the middle for the
 //! end of a round and for anything that went wrong, the droids' alert at the top in the middle,
 //! as in Metal Gear and Fallout, the player's stamina in the bottom left corner, and, with the
-//! pistol out, its ammo in the bottom right: the cyber pistol's is endless, shown as ∞.
+//! pistol out, its ammo in the bottom right: the cyber pistol's is endless, shown as ∞. The
+//! player's credits are in the top right.
 //!
 //! The alert is coloured by its phase - ALERT red, EVASION amber, CAUTION yellow - and ALERT and
 //! CAUTION blink; EVASION and CAUTION count down the seconds they have left. The player's health
 //! is a red bar in the bottom middle, and the screen flashes red as they are hit. The stamina is a bar,
 //! green, yellow once it runs low, and red and blinking while the player is winded. Sentries have
-//! bars like it over their heads (see [`Hud::show_breath_bars`]).
+//! bars like these over their heads, their health above their stamina, and the drone its health
+//! (see [`Hud::show_overhead_bars`]).
 
-use crate::{computer::FONT, inhabitants::Alert};
+use crate::{computer::FONT, credits::Credits, inhabitants::Alert};
 use fyrox::{
     asset::untyped::ResourceKind,
     core::{algebra::Vector2, color::Color, pool::Handle, uuid::Uuid},
@@ -44,6 +46,8 @@ const STAMINA_LOW: f32 = 0.35;
 /// The health bar's colour, and below how much of it it blinks; and how red the screen goes as
 /// the player is hit, out of 255.
 const HEALTH_RED: Color = Color::opaque(230, 50, 70);
+/// The colour the player's credits are written in.
+const CREDITS_GOLD: Color = Color::opaque(255, 205, 80);
 const HEALTH_LOW: f32 = 0.34;
 const HURT_RED: u8 = 90;
 
@@ -66,6 +70,8 @@ pub enum Status {
         /// How the droids hunting the player are going about it, if any are, and how many seconds
         /// that has left.
         alarm: Option<(Alert, f32)>,
+        /// The player's credits.
+        credits: Credits,
     },
 }
 
@@ -86,14 +92,17 @@ pub struct Hud {
     /// The pistol's ammo, and whether it is showing.
     ammo: Handle<UiNode>,
     shown_ammo: bool,
+    /// The player's credits in the top right, and what it last said.
+    credits: Handle<Text>,
+    shown_credits: Option<Credits>,
     /// How long it has been blinking, in seconds, and what was last put on screen, so that each
     /// is only sent when it changes.
     blink: f32,
     shown_alert: Option<(String, Color)>,
     shown_stamina: Option<(f32, Color)>,
-    /// The bars over the sentries' heads - each a frame and what fills it - of which those not
-    /// needed are hidden; and where they go.
-    breath_bars: Vec<(Handle<UiNode>, Handle<Border>)>,
+    /// The bars over the sentries' and the drone's heads - each its stamina and its health, a
+    /// frame and what fills it - of which those not needed are hidden; and where they go.
+    overhead_bars: Vec<[(Handle<UiNode>, Handle<Border>); 2]>,
     screen: Handle<UiNode>,
     /// A message shown for a moment, such as the view settings while they are being changed.
     note: String,
@@ -280,8 +289,21 @@ impl Hud {
         .with_stroke_thickness(Thickness::zero().into())
         .build(ctx)
         .to_base();
+        // The player's credits, in the top right, across from the status line.
+        let credits = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_horizontal_alignment(HorizontalAlignment::Right)
+                .with_vertical_alignment(VerticalAlignment::Top)
+                .with_margin(Thickness::uniform(12.0))
+                .with_visibility(false)
+                .with_foreground(Brush::Solid(CREDITS_GOLD).into()),
+        )
+        .with_font_size(22.0.into())
+        .with_horizontal_text_alignment(HorizontalAlignment::Right)
+        .build(ctx);
         let screen = ScreenBuilder::new(
             WidgetBuilder::new()
+                .with_child(credits)
                 .with_child(hurt)
                 .with_child(health)
                 .with_child(banner)
@@ -300,6 +322,7 @@ impl Hud {
             health_fill,
             hurt,
             ammo,
+            credits,
             screen,
             ..Default::default()
         }
@@ -325,9 +348,9 @@ impl Hud {
         self.note_time = (self.note_time - dt).max(0.0);
         self.blink = (self.blink + dt) % BLINK;
         let blinking_on = self.blink < BLINK_ON;
-        let (text, alarm, breath, health, armed) = match status {
-            Status::Loading => ("Loading the maze...".to_string(), None, None, None, false),
-            Status::Blank => (String::new(), None, None, None, false),
+        let (text, alarm, breath, health, armed, credits) = match status {
+            Status::Loading => ("Loading the maze...".to_string(), None, None, None, false, None),
+            Status::Blank => (String::new(), None, None, None, false, None),
             Status::Round {
                 time,
                 best,
@@ -336,6 +359,7 @@ impl Hud {
                 armed,
                 mouse_captured,
                 alarm,
+                credits,
             } => {
                 let mut text = format!("Time {}", format_time(time));
                 if let Some(best) = best {
@@ -347,7 +371,7 @@ impl Hud {
                 if self.note_time > 0.0 {
                     text += &format!("\n{}", self.note);
                 }
-                (text, alarm, Some(breath), Some(health), armed)
+                (text, alarm, Some(breath), Some(health), armed, Some(credits))
             }
         };
         ui.send(self.status, TextMessage::Text(text));
@@ -397,6 +421,14 @@ impl Hud {
             self.shown_health = health;
         }
 
+        if credits != self.shown_credits {
+            ui.send(self.credits, WidgetMessage::Visibility(credits.is_some()));
+            if let Some(credits) = credits {
+                ui.send(self.credits, TextMessage::Text(credits.to_string()));
+            }
+            self.shown_credits = credits;
+        }
+
         if armed != self.shown_ammo {
             ui.send(self.ammo, WidgetMessage::Visibility(armed));
             self.shown_ammo = armed;
@@ -404,64 +436,95 @@ impl Hud {
     }
 }
 
-/// A stamina bar over a droid's head: where the middle of its bottom edge is on screen, in
-/// pixels; how wide it is; and how much breath the droid has left, from 0 to 1, and whether it has
-/// run out.
+/// The bars over a sentry's or the drone's head: where the middle of their bottom edge is on
+/// screen, in pixels; how wide they are; how much health it has left, from 0 to 1; and how much
+/// breath, and whether it has run out, if it runs on breath. Its health goes above its breath.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BreathBar {
+pub struct OverheadBars {
     pub at: Vector2<f32>,
     pub width: f32,
-    pub left: f32,
-    pub winded: bool,
+    pub health: f32,
+    pub breath: Option<(f32, bool)>,
 }
 
+/// How far apart the bars over a head are, in pixels.
+const OVERHEAD_GAP: f32 = 2.0;
+
 impl Hud {
-    /// Shows `bars` over the droids' heads, looking as the player's does, and hides the rest.
-    pub fn show_breath_bars(&mut self, ui: &mut UserInterface, bars: &[BreathBar]) {
+    /// Shows `bars` over the heads of the sentries and the drone, looking as the player's do, and
+    /// hides the rest.
+    pub fn show_overhead_bars(&mut self, ui: &mut UserInterface, bars: &[OverheadBars]) {
         let blinking_on = self.blink < BLINK_ON;
-        while self.breath_bars.len() < bars.len() {
-            let bar = breath_bar(ui);
-            ui.send(bar.0, WidgetMessage::LinkWith(self.screen));
-            self.breath_bars.push(bar);
+        while self.overhead_bars.len() < bars.len() {
+            let pair = [overhead_bar(ui, STAMINA_GREEN), overhead_bar(ui, HEALTH_RED)];
+            for (frame, _) in pair {
+                ui.send(frame, WidgetMessage::LinkWith(self.screen));
+            }
+            self.overhead_bars.push(pair);
         }
-        for (n, &(frame, fill)) in self.breath_bars.iter().enumerate() {
+        for (n, &[stamina, health]) in self.overhead_bars.iter().enumerate() {
             let Some(bar) = bars.get(n) else {
-                ui.send(frame, WidgetMessage::Visibility(false));
+                ui.send(stamina.0, WidgetMessage::Visibility(false));
+                ui.send(health.0, WidgetMessage::Visibility(false));
                 continue;
             };
-            let width = bar.width.clamp(BREATH_BAR_WIDTH.0, BREATH_BAR_WIDTH.1);
+            let width = bar.width.clamp(OVERHEAD_BAR_WIDTH.0, OVERHEAD_BAR_WIDTH.1);
             let height = (width * BAR.1 / BAR.0 * 2.0).max(4.0);
-            let (left, colour) = stamina_shown(bar.left, bar.winded, blinking_on);
-            ui.send(frame, WidgetMessage::Visibility(true));
-            ui.send(frame, WidgetMessage::Width(width + 4.0));
-            ui.send(frame, WidgetMessage::Height(height + 4.0));
-            ui.send(
-                frame,
-                WidgetMessage::Margin(Thickness {
-                    left: bar.at.x - 0.5 * width - 2.0,
-                    top: bar.at.y - height - 4.0,
-                    right: 0.0,
-                    bottom: 0.0,
-                }),
-            );
-            ui.send(fill, WidgetMessage::Width(width * left));
-            ui.send(fill, WidgetMessage::Height(height));
-            ui.send(fill, WidgetMessage::Background(Brush::Solid(colour).into()));
+            // Each bar's frame, from the bottom up: its bottom edge this far above `at`.
+            let place = |ui: &UserInterface, (frame, fill): (Handle<UiNode>, Handle<Border>), up: f32, left: f32, colour: Color| {
+                ui.send(frame, WidgetMessage::Visibility(true));
+                ui.send(frame, WidgetMessage::Width(width + 4.0));
+                ui.send(frame, WidgetMessage::Height(height + 4.0));
+                ui.send(
+                    frame,
+                    WidgetMessage::Margin(Thickness {
+                        left: bar.at.x - 0.5 * width - 2.0,
+                        top: bar.at.y - up - height - 4.0,
+                        right: 0.0,
+                        bottom: 0.0,
+                    }),
+                );
+                ui.send(fill, WidgetMessage::Width(width * left));
+                ui.send(fill, WidgetMessage::Height(height));
+                ui.send(fill, WidgetMessage::Background(Brush::Solid(colour).into()));
+            };
+            let mut up = 0.0;
+            match bar.breath {
+                Some((left, winded)) => {
+                    let (left, colour) = stamina_shown(left, winded, blinking_on);
+                    place(ui, stamina, up, left, colour);
+                    up += height + 4.0 + OVERHEAD_GAP;
+                }
+                None => ui.send(stamina.0, WidgetMessage::Visibility(false)),
+            }
+            let (left, colour) = health_shown(bar.health, blinking_on);
+            place(ui, health, up, left, colour);
         }
     }
 }
 
-/// How wide a bar over a droid's head can get on screen, in pixels, from least to most.
-const BREATH_BAR_WIDTH: (f32, f32) = (40.0, 140.0);
+/// How full a health bar is and its colour, with `left` of it, and with what blinks showing or
+/// not: red, blinking brighter once it runs low.
+fn health_shown(left: f32, blinking_on: bool) -> (f32, Color) {
+    let left = (left.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    let colour = match left < HEALTH_LOW && blinking_on {
+        true => ALERT_RED,
+        false => HEALTH_RED,
+    };
+    (left, colour)
+}
 
-/// A stamina bar for over a droid's head, hidden: its frame, and what fills it.
-fn breath_bar(ui: &mut UserInterface) -> (Handle<UiNode>, Handle<Border>) {
+/// How wide a bar over a droid's head can get on screen, in pixels, from least to most.
+const OVERHEAD_BAR_WIDTH: (f32, f32) = (40.0, 140.0);
+
+/// A bar for over a droid's head, filled `colour`, hidden: its frame, and what fills it.
+fn overhead_bar(ui: &mut UserInterface, colour: Color) -> (Handle<UiNode>, Handle<Border>) {
     let ctx = &mut ui.build_ctx();
     let fill = BorderBuilder::new(
         WidgetBuilder::new()
             .with_horizontal_alignment(HorizontalAlignment::Left)
             .with_margin(Thickness::uniform(2.0))
-            .with_background(Brush::Solid(STAMINA_GREEN).into()),
+            .with_background(Brush::Solid(colour).into()),
     )
     .with_stroke_thickness(Thickness::zero().into())
     .build(ctx);
@@ -517,6 +580,15 @@ pub fn format_time(seconds: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_health_bar_over_a_head_blinks_brighter_only_once_low() {
+        assert_eq!(health_shown(1.0, true), (1.0, HEALTH_RED));
+        assert_eq!(health_shown(2.0 / 3.0, true), (0.67, HEALTH_RED));
+        assert_eq!(health_shown(1.0 / 3.0, true), (0.33, ALERT_RED));
+        assert_eq!(health_shown(1.0 / 3.0, false), (0.33, HEALTH_RED));
+        assert_eq!(health_shown(-0.5, false).0, 0.0);
+    }
 
     #[test]
     fn alert_and_caution_blink_and_evasion_counts_down_steadily() {

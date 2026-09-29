@@ -1,23 +1,46 @@
-//! A drone, for now only to be seen working: it hovers a few steps in front of where the player
-//! starts, facing them, and goes through each of its animations in turn - idling, patrolling,
-//! scanning, firing twice and dying - and then again from the start.
+//! A security drone, patrolling the maze. One is put down each round well away from where the
+//! player starts, and hovers [`HOVER`] above the floor along the corridors, going from one spot a
+//! trip away to the next and waiting a while at each - paying the player no heed, calm. More wait
+//! out of sight, to be called in (see [`Drone::call_in`]): a failed hack brings one.
+//!
+//! It turns hostile when the alarm is sounded (see [`Drone::alarm`]) or when the player's pistol
+//! hits a droid - or the drone itself (see [`Drone::shot`]). Then it goes about the player as a
+//! sentry does, but by air:
+//!
+//! - **Searching**: it flies to where the player was and scans there, then to one spot after
+//!   another nearby, scanning at each, for [`SEARCH`] seconds; and then it is calm again, and
+//!   patrols as before. It sees in front of it as a sentry that is not on Alert does - less far
+//!   the lower the player is, and with the lights off.
+//! - **Alert**: it can see the player. It comes on to [`ENGAGE`] from them, keeps facing them and
+//!   fires every [`FIRE_EVERY`] seconds while it can see them (see [`crate::drone_shot`]), each
+//!   shot hurting them where it hits. Losing them, it searches.
+//!
+//! [`HITS`] bolts from the pistol bring it down: it sputters, its rings break into four pieces
+//! each, which fly apart, and it drops with them to the floor, where it lies for the rest of the
+//! round. Its body is a sensor, which bolts hit and the player passes through.
 //!
 //! Its model, [`DRONE_MODEL`], is made in Blender: `drone_root`, which the animations move about,
-//! with the eye, the shell and two rings under it. The rings' spin is in the animations, but not
-//! its glow, which is played here to go with each: what its green materials glow with, over the
-//! animation's frames at 24 a second ([`glow`]).
+//! with the eye, the shell and two rings under it, and the ring pieces beside it. The rings' spin
+//! is in the animations, but not its glow, which is played here to go with each: what its green
+//! materials glow with, over the animation's frames at 24 a second ([`glow`]); and what colour,
+//! which is its mood's ([`Drone::mood`]), as a droid's eyes show theirs - its own green calm,
+//! orange searching and red on Alert - turning from one to the next over a moment.
 //!
-//! It lights what is round it too, green, as brightly as it glows: a lamp just in front of its
-//! eye, whose shadows are traced as every light's are. Not inside it, where the drone's own shell
-//! and eye, which are traced with the rest of the scene, would shut the light in.
+//! It lights what is round it too, in its colour, as brightly as it glows: a lamp just in front
+//! of its eye, whose shadows are traced as every light's are. Not inside it, where the drone's own
+//! shell and eye, which are traced with the rest of the scene, would shut the light in.
 //!
-//! It speaks System Latin as it starts each animation, as [`DRONE_LINES`] has it - said as beeps,
-//! hums and buzzes (see [`crate::formants::chirps`]), which no one would take for speech.
+//! It speaks System Latin as things happen to it - hearing the alarm, spotting the player,
+//! starting to search, giving up and going down - as [`DRONE_LINES`] has it, said as beeps, hums
+//! and buzzes (see [`crate::formants::chirps`]), which no one would take for speech.
 
 use crate::{
-    fixtures::{glow_strength, EMISSION_STRENGTH},
+    dialogue::{screen, Mood},
+    fixtures::{glow_strength, DIFFUSE_COLOR, EMISSION_STRENGTH},
     formants::Curve,
-    layout::WalkGrid,
+    inhabitants::{self, Alert},
+    layout::{Rng, WalkGrid},
+    player::posture::Posture,
     survey,
 };
 use fyrox::{
@@ -33,18 +56,20 @@ use fyrox::{
     scene::{
         animation::{Animation, AnimationPlayer},
         base::BaseBuilder,
-        graph::Graph,
+        collider::{Collider, ColliderBuilder, ColliderShape},
+        graph::{physics::RayCastOptions, Graph},
         light::{
             point::{PointLight, PointLightBuilder},
             BaseLightBuilder,
         },
         mesh::Mesh,
         node::Node,
+        rigidbody::{RigidBody, RigidBodyBuilder, RigidBodyType},
         Scene,
     },
 };
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{collections::HashMap, f32::consts::PI};
 
 /// The drone's model, and what drones say.
 pub const DRONE_MODEL: &str = "data/drone.glb";
@@ -57,7 +82,7 @@ pub struct Said {
     pub means: String,
 }
 
-/// What drones say, by the animation they say it as they start.
+/// What drones say, by what they say it about: see [`Drone::update`].
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct DroneLines {
     pub lines: HashMap<String, Vec<Said>>,
@@ -70,25 +95,66 @@ impl DroneLines {
         serde_json::from_str(&text).map_err(|error| format!("{path}: {error}"))
     }
 
-    /// The `n`th line, going round, for the animation called `name`; None for one with none.
+    /// The `n`th line, going round, for what is called `name`; None for something with none.
     pub fn line(&self, name: &str, n: usize) -> Option<&Said> {
         let lines = self.lines.get(name)?;
         lines.get(n % lines.len().max(1))
     }
 }
+
 /// How much the model is scaled: as made it is 6.5 m across its rings, and 1.3 m in the game.
 const SCALE: f32 = 0.2;
-/// How high it hovers, in meters above the floor; and how far in front of the player it goes,
-/// the first of these with floor all the way to it.
-const HOVER: f32 = 1.7;
-const AHEAD: [f32; 4] = [3.5, 3.0, 2.5, 2.0];
+/// How high it hovers, in meters above the floor. The death animation drops it this far.
+pub const HOVER: f32 = 1.7;
+/// How far from where the player starts it is put down, in steps across the grid's half-meter
+/// cells, at least: out of sight.
+const AWAY_FROM_PLAYER: f32 = 40.0;
+/// How far it goes on patrol each time it sets off, and how far between the spots it searches,
+/// in steps across the grid, from least to most; and how long it waits between trips, in seconds.
+const TRIP: (f32, f32) = (30.0, 120.0);
+const SEARCH_TRIP: (f32, f32) = (10.0, 40.0);
+const REST: (f32, f32) = (3.0, 8.0);
+/// How fast it flies, in meters per second: patrolling, and hostile; how quickly it gets up to
+/// speed, in meters per second per second; and how quickly it turns, in radians a second.
+const PATROL_SPEED: f32 = 1.4;
+const HURRY_SPEED: f32 = 3.5;
+const ACCELERATION: f32 = 3.0;
+const TURN_RATE: f32 = 3.0;
+/// How near the next point on its route it has to get, in meters, before making for the one after,
+/// and how near the last counts as there.
+const REACHED: f32 = 0.6;
+const ARRIVED: f32 = 0.15;
+/// How quickly it follows the floor up and down.
+const FLOOR_EASING: f32 = 4.0;
+/// How long it searches once it has lost the player, or been sent to look for them, in seconds.
+pub const SEARCH: f32 = 30.0;
+/// On Alert: how near the player it comes, in meters, how far off it fires from, how often, and
+/// how soon after spotting them the first time; and how often it works out its way to them again.
+const ENGAGE: f32 = 6.0;
+const FIRE_RANGE: f32 = 20.0;
+const FIRE_EVERY: f32 = 1.5;
+const FIRST_SHOT: f32 = 0.8;
+const REPLAN: f32 = 0.5;
+/// How many of the pistol's bolts bring it down.
+pub const HITS: u32 = 3;
+/// Its body, for bolts to hit: a ball this big across its middle, in meters.
+const BODY_RADIUS: f32 = 0.3;
 /// Its lamp: where it is, in the model's own terms along the way it faces - just clear of the
-/// front of its eye, which reaches 1.4 out from the middle; its colour; how bright it is for each
-/// strength of [`glow`]; and how far it reaches, in meters.
+/// front of its eye, which reaches 1.4 out from the middle; how bright it is for each strength of
+/// [`glow`]; and how far it reaches, in meters.
 const LAMP_AT: f32 = 1.7;
-const LAMP_COLOUR: Color = Color::opaque(40, 255, 80);
 const LAMP_BRIGHTNESS: f32 = 1.5;
 const LAMP_REACH: f32 = 5.0;
+/// Where its shots leave from, in the model's own terms along the way it faces: just clear of the
+/// front of its eye and of its body; and the frame of `drone_fire` they leave on, as the eye
+/// flashes.
+const MUZZLE: f32 = 1.7;
+const FIRE_AT: f32 = 2.0;
+/// How long `drone_fire` and `drone_scan` last, in seconds.
+const FIRE_LENGTH: f32 = 25.0 / FPS;
+const SCAN_LENGTH: f32 = 97.0 / FPS;
+/// How quickly its colour turns to its mood's: most of the way in a third of a second.
+const MOOD_RATE: f32 = 6.0;
 /// Its node that the animations move about, which the lamp goes along with.
 const BODY: &str = "drone_root";
 /// The material property that says how much like metal a surface is, from 0 to 1.
@@ -99,16 +165,13 @@ const FPS: f32 = 24.0;
 /// engine only glows round what is brighter than 1.01, and green light counts for less than
 /// three quarters of how bright it is, so that as made its green would only be coloured.
 const BRIGHTNESS: f32 = 3.0;
-
-/// Its animations, in the order it goes through them, each with how many times it plays.
-const SHOWN: [(&str, u32); 6] = [
-    ("drone_idle", 2),
-    ("drone_patrol", 3),
-    ("drone_scan", 1),
-    ("drone_fire", 1),
-    ("drone_fire", 1),
-    ("drone_death", 1),
-];
+/// Its animations: the loops it hovers in, still and on the move; and the rest, each played once.
+const IDLE: &str = "drone_idle";
+const PATROL: &str = "drone_patrol";
+const SCAN: &str = "drone_scan";
+const FIRE: &str = "drone_fire";
+const DEATH: &str = "drone_death";
+const ANIMATIONS: [&str; 5] = [IDLE, PATROL, SCAN, FIRE, DEATH];
 
 /// How strongly its green materials glow `frame` frames into the animation called `name`: as
 /// many times as bright as green light of strength 1.
@@ -139,6 +202,63 @@ pub fn glow(name: &str, frame: f32) -> f32 {
     curve.at(frame)
 }
 
+/// The colour a glow whose own colour is `own` has in `mood`, strength 1 in its brightest part.
+pub(crate) fn mood_colour(own: Vector3<f32>, mood: Mood) -> Vector3<f32> {
+    screen::eyes(mood).map_or(own, |colour| {
+        let colour = Vector3::new(colour.r, colour.g, colour.b).cast::<f32>();
+        colour / colour.max().max(1.0)
+    })
+}
+
+/// A colour of strength 1 at its brightest, as a colour to light with.
+pub(crate) fn light_colour(colour: Vector3<f32>) -> Color {
+    let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Color::opaque(byte(colour.x), byte(colour.y), byte(colour.z))
+}
+
+/// `angle` brought round to between -π and π.
+fn wrap(angle: f32) -> f32 {
+    (angle + PI).rem_euclid(2.0 * PI) - PI
+}
+
+/// `vector` along the ground.
+fn flat(vector: Vector3<f32>) -> Vector3<f32> {
+    Vector3::new(vector.x, 0.0, vector.z)
+}
+
+/// How the drone is going about the player.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum State {
+    /// Calm: it patrols, paying the player no heed.
+    Patrol,
+    /// It can see the player, and fires at them.
+    Alert,
+    /// It is looking for the player, `left` seconds more.
+    Search { left: f32 },
+    /// Brought down.
+    Down,
+}
+
+/// Where the player is, for the drone to look for them: their feet and the middle of their body,
+/// what their body is to anything that hits it, how they hold themselves, and whether it is too
+/// dark to see them far.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Target {
+    pub feet: Vector3<f32>,
+    pub middle: Vector3<f32>,
+    pub collider: Handle<Collider>,
+    pub posture: Posture,
+    pub in_the_dark: bool,
+}
+
+/// What the drone did this frame: what it has something to say about, as [`DRONE_LINES`] names it; and
+/// where a shot leaves from, and its colour, if it has fired one.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Doing {
+    pub says: Option<&'static str>,
+    pub fired: Option<(Vector3<f32>, Vector3<f32>)>,
+}
+
 /// The drone in the scene.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drone {
@@ -147,15 +267,43 @@ pub struct Drone {
     /// What the animations move about, and its lamp.
     body: Handle<Node>,
     lamp: Handle<Node>,
+    /// Its body for bolts to hit, and the ball that is, while it is up.
+    hull: Handle<Node>,
+    collider: Handle<Collider>,
     /// Its animations by name.
     animations: Vec<(String, Handle<Animation>)>,
     /// Its own copies of the materials that glow, and which way their glow's colour goes.
     glows: Vec<(MaterialResource, Vector3<f32>)>,
-    /// Which of [`SHOWN`] it is playing, and how many times it has played it through.
-    shown: usize,
-    played: u32,
-    /// How far into the animation it was last frame, in seconds, to tell when it comes round.
-    last: f32,
+    /// The colour it glows now, on its way to its mood's, as [`mood_colour`] has it.
+    colour: Vector3<f32>,
+    /// The animation it is playing, and for how long it has, in seconds; and whether it has fired
+    /// this time through `drone_fire`.
+    playing: &'static str,
+    since: f32,
+    fired: bool,
+    /// How it is going about the player.
+    state: State,
+    /// Whether it has been put down in this round's maze.
+    placed: bool,
+    /// Where it hovers - the model's root - which way it faces, in radians, left positive from
+    /// the world's +z, and how fast it is flying, in meters per second.
+    at: Vector3<f32>,
+    heading: f32,
+    speed: f32,
+    /// The rest of its route, as points on the floor, the next one last.
+    route: Vec<Vector3<f32>>,
+    /// How long it has left to wait before its next trip, or to scan where it is, in seconds.
+    resting: f32,
+    scanning: f32,
+    /// Where it last saw the player's feet, or was sent to look for them; and how many spots it has
+    /// searched since.
+    lost_at: Vector3<f32>,
+    searched: u32,
+    /// On Alert, how long until it fires again, and until it works out its way to them again.
+    fire_in: f32,
+    replan: f32,
+    /// How many of the pistol's bolts have hit it.
+    hits: u32,
 }
 
 impl Drone {
@@ -189,7 +337,6 @@ impl Drone {
         // Not scattering into a haze in the air: the drone is what glows.
         let lamp = PointLightBuilder::new(
             BaseLightBuilder::new(BaseBuilder::new().with_visibility(false))
-                .with_color(LAMP_COLOUR)
                 .with_intensity(LAMP_BRIGHTNESS)
                 .with_scatter_enabled(false),
         )
@@ -209,7 +356,7 @@ impl Drone {
                 (animation.name().to_owned(), handle)
             })
             .collect::<Vec<_>>();
-        for (name, _) in SHOWN {
+        for name in ANIMATIONS {
             if !animations.iter().any(|(had, _)| had == name) {
                 Log::warn(format!("Drone: {DRONE_MODEL} has no {name}"));
             }
@@ -219,61 +366,135 @@ impl Drone {
             player,
             body,
             lamp,
+            // Given a body once it is put down.
+            hull: Handle::NONE,
+            collider: Handle::NONE,
             animations,
+            colour: glows.first().map_or(Vector3::new(0.0, 1.0, 0.0), |(_, own)| *own),
             glows,
-            shown: SHOWN.len() - 1,
-            played: 0,
-            last: 0.0,
+            playing: DEATH,
+            since: 0.0,
+            fired: false,
+            state: State::Patrol,
+            placed: false,
+            at: Vector3::zeros(),
+            heading: 0.0,
+            speed: 0.0,
+            route: Vec::new(),
+            resting: 0.0,
+            scanning: 0.0,
+            lost_at: Vector3::zeros(),
+            searched: 0,
+            fire_in: 0.0,
+            replan: 0.0,
+            hits: 0,
         };
-        drone.next(graph);
+        drone.play(graph, IDLE);
         Some(drone)
     }
 
-    /// Puts it hovering in front of the player, whose feet are at `feet` and who faces `ahead`,
-    /// over the floor of `grid` whose corner is at `origin`, facing them. Whether there was
-    /// floor in front of them for it.
+    /// Puts it down afresh, calm and whole, over the floor of `grid` whose corner is at `origin`,
+    /// well away from the player's `feet`. Whether there was anywhere to put it.
     pub fn place(
-        &self,
+        &mut self,
         graph: &mut Graph,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         feet: Vector3<f32>,
-        ahead: Vector3<f32>,
+        rng: &mut Rng,
     ) -> bool {
-        let floor_at = |at: Vector3<f32>| {
-            survey::cell_at(grid, origin, at).filter(|&(x, z)| grid.is_walkable(x, z))
-        };
-        // Floor all the way there, so that it is not through a wall.
-        let clear = |distance: f32| {
-            let steps = (distance / (survey::CELL_SIZE * 0.5)).ceil() as usize;
-            (0..=steps).all(|k| floor_at(feet + ahead * (distance * k as f32 / steps as f32)).is_some())
-        };
-        let Some(distance) = AHEAD.into_iter().find(|&d| clear(d)) else {
-            Log::warn("Drone: no floor in front of the player to hover over");
+        let Some(start) = survey::cell_at(grid, origin, feet)
+            .filter(|&(x, z)| grid.is_walkable(x, z))
+            .or_else(|| survey::nearest_walkable(grid, origin, feet))
+        else {
             return false;
         };
-        let at = feet + ahead * distance;
-        let floor = floor_at(at).map_or(feet.y, |(x, z)| grid.floor(x, z));
-        let facing = -ahead;
-        graph[self.root]
-            .local_transform_mut()
-            .set_position(Vector3::new(at.x, floor + HOVER, at.z))
-            .set_rotation(UnitQuaternion::from_axis_angle(
-                &Vector3::y_axis(),
-                facing.x.atan2(facing.z),
-            ));
+        let routes = grid.routes_from(start, f32::INFINITY);
+        let reached: Vec<(usize, f32)> = routes
+            .costs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, cost)| cost.map(|cost| (i, cost)))
+            .collect();
+        let away: Vec<usize> = reached
+            .iter()
+            .filter(|&&(_, cost)| cost >= AWAY_FROM_PLAYER)
+            .map(|&(i, _)| i)
+            .collect();
+        // Out of the way if there is room; in a small maze, as far off as it can be.
+        let cell = match away.is_empty() {
+            false => away[rng.below(away.len())],
+            true => match reached.iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
+                Some(&(i, _)) => i,
+                None => return false,
+            },
+        };
+        let (x, z) = (cell % grid.width, cell / grid.width);
+        self.at = survey::cell_center(origin, x, z) + Vector3::new(0.0, grid.floor(x, z) + HOVER, 0.0);
+        self.heading = inhabitants::between(rng, (-PI, PI));
+        self.state = State::Patrol;
+        self.placed = true;
+        self.speed = 0.0;
+        self.route.clear();
+        self.resting = inhabitants::between(rng, REST);
+        self.scanning = 0.0;
+        self.hits = 0;
+        if !graph.is_valid_handle(self.hull) {
+            (self.hull, self.collider) = hull(graph);
+        }
+        self.pose(graph);
+        if let Ok(hull) = graph.try_get_mut_of_type::<RigidBody>(self.hull) {
+            hull.local_transform_mut().set_position(self.at);
+        }
+        self.play(graph, IDLE);
         graph[self.root].set_visibility(true);
         graph[self.lamp].set_visibility(true);
-        Log::info(format!("Drone: hovering {distance:.1} m in front of the player"));
+        Log::info(format!("Drone: patrolling from {:.1} m away", flat(self.at - feet).norm()));
         true
     }
 
-    /// The animation of [`SHOWN`] it is playing.
-    fn playing(&self) -> Option<Handle<Animation>> {
-        let (name, _) = SHOWN[self.shown];
-        self.animations
-            .iter()
-            .find(|(had, _)| had == name)
-            .map(|&(_, handle)| handle)
+    /// Puts it down afresh as [`Drone::place`] does, well away from the player's `feet`, and sends
+    /// it straight to search where they are, `at`, as the alarm would: called in. Whether there
+    /// was anywhere to put it.
+    pub fn call_in(
+        &mut self,
+        graph: &mut Graph,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        feet: Vector3<f32>,
+        at: Vector3<f32>,
+        rng: &mut Rng,
+    ) -> bool {
+        if !self.place(graph, (grid, origin), feet, rng) {
+            return false;
+        }
+        self.search(at);
+        true
+    }
+
+    /// Takes it out of the round: out of sight, and out of the way of bolts, until it is put down
+    /// again.
+    pub fn hide(&mut self, graph: &mut Graph) {
+        self.placed = false;
+        self.state = State::Patrol;
+        self.route.clear();
+        graph[self.root].set_visibility(false);
+        graph[self.lamp].set_visibility(false);
+        if graph.is_valid_handle(self.hull) {
+            graph.remove_node(self.hull);
+        }
+    }
+
+    /// Whether it is in this round, hovering where it is.
+    pub fn is_placed(&self) -> bool {
+        self.placed
+    }
+
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    /// Where it is hovering.
+    pub fn at(&self) -> Vector3<f32> {
+        self.at
     }
 
     /// What the animations move about: where it speaks from.
@@ -281,13 +502,97 @@ impl Drone {
         self.body
     }
 
-    /// Goes on to the next of [`SHOWN`] from the start.
-    fn next(&mut self, graph: &mut Graph) {
-        let before = self.playing();
-        self.shown = (self.shown + 1) % SHOWN.len();
-        self.played = 0;
-        self.last = 0.0;
-        let now = self.playing();
+    /// Its body, for bolts to hit, while it is up.
+    pub fn collider(&self) -> Handle<Collider> {
+        self.collider
+    }
+
+    /// Where its health bar goes - over the top of it - and how much health it has left, from 0
+    /// to 1, while it is after the player or has been hit, and is up.
+    pub fn health_bar(&self, graph: &Graph) -> Option<(Vector3<f32>, f32)> {
+        let shown = match self.state {
+            State::Down => false,
+            State::Alert | State::Search { .. } => true,
+            State::Patrol => self.hits > 0,
+        };
+        (shown && self.placed).then(|| {
+            let top = graph[self.body].global_position() + Vector3::new(0.0, BODY_RADIUS, 0.0);
+            (top, 1.0 - self.hits as f32 / HITS as f32)
+        })
+    }
+
+    /// How it feels, which colours its glow: calm, searching, or after the player.
+    pub fn mood(&self) -> Mood {
+        match self.state {
+            State::Patrol => Mood::Normal,
+            State::Search { .. } | State::Down => Mood::Agitated,
+            State::Alert => Mood::Hostile,
+        }
+    }
+
+    /// The alarm sounded, or a droid shot, with the player's feet at `at`: calm or searching, it
+    /// searches there. What it has to say about it, if anything.
+    pub fn alarm(&mut self, at: Vector3<f32>) -> Option<&'static str> {
+        match self.state {
+            State::Down | State::Alert => None,
+            _ if !self.placed => None,
+            was => {
+                self.search(at);
+                (was == State::Patrol).then_some("alarm")
+            }
+        }
+    }
+
+    /// A bolt that hit `collider`, fired by the player from `from`: if it hit the drone, it takes
+    /// the hit, and searches where it came from if it was not after the player already. Whether it
+    /// was the drone, and whether that brought it down.
+    pub fn shot(&mut self, graph: &mut Graph, collider: Handle<Collider>, from: Vector3<f32>) -> Option<bool> {
+        if collider != self.collider || self.state == State::Down || !self.placed {
+            return None;
+        }
+        self.hits += 1;
+        if self.hits >= HITS {
+            self.state = State::Down;
+            self.route.clear();
+            self.speed = 0.0;
+            // Out of the way of the bolts that follow: it lies on the floor, and they fly over.
+            if graph.is_valid_handle(self.hull) {
+                graph.remove_node(self.hull);
+            }
+            self.play(graph, DEATH);
+            return Some(true);
+        }
+        if self.state != State::Alert {
+            self.search(from);
+        }
+        Some(false)
+    }
+
+    /// Searches from `at`, going there first.
+    fn search(&mut self, at: Vector3<f32>) {
+        self.state = State::Search { left: SEARCH };
+        self.lost_at = at;
+        self.searched = 0;
+        self.route.clear();
+        self.scanning = 0.0;
+    }
+
+    /// Starts the animation called `name` from its start, looping those it hovers in, unless it
+    /// is playing it already.
+    fn play(&mut self, graph: &mut Graph, name: &'static str) {
+        if self.playing == name {
+            return;
+        }
+        let find = |name: &str| {
+            self.animations
+                .iter()
+                .find(|(had, _)| had == name)
+                .map(|&(_, handle)| handle)
+        };
+        let (before, now) = (find(self.playing), find(name));
+        self.playing = name;
+        self.since = 0.0;
+        self.fired = false;
         let Ok(player) = graph.try_get_mut_of_type::<AnimationPlayer>(self.player) else {
             return;
         };
@@ -296,41 +601,280 @@ impl Drone {
             before.set_enabled(false);
         }
         if let Some(now) = now.and_then(|h| animations.try_get_mut(h).ok()) {
-            now.set_loop(true).set_enabled(true).rewind();
+            now.set_loop(name == IDLE || name == PATROL)
+                .set_enabled(true)
+                .rewind();
         }
-        Log::info(format!("Drone: {}", SHOWN[self.shown].0));
     }
 
-    /// Glows along with the animation it is playing, and goes on to the next once it has played
-    /// it through as many times as it is to. The engine plays the animation itself. The name of
-    /// the animation it has just started, if it has, for it to speak as it does.
-    pub fn update(&mut self, graph: &mut Graph) -> Option<&'static str> {
-        let Some(handle) = self.playing() else {
-            self.next(graph);
-            return Some(SHOWN[self.shown].0);
+    /// Where it is and which way it faces, as it is.
+    fn pose(&self, graph: &mut Graph) {
+        graph[self.root]
+            .local_transform_mut()
+            .set_position(self.at)
+            .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.heading));
+    }
+
+    /// Whether it can see the `player`: in front of it as a sentry sees, or all round on Alert,
+    /// and with nothing in the way from its eye to the middle of their body.
+    fn sees(&self, graph: &Graph, player: &Target) -> bool {
+        let alert = match self.state {
+            State::Alert => Alert::Alert,
+            _ => Alert::Evasion,
         };
-        let time = graph
-            .try_get_of_type::<AnimationPlayer>(self.player)
-            .ok()
-            .and_then(|player| player.animations().try_get(handle).ok())
-            .map(|animation| animation.time_position());
-        let Some(time) = time else {
-            return None;
-        };
-        // It has come round to the start again.
-        if time < self.last {
-            self.played += 1;
-            if self.played >= SHOWN[self.shown].1 {
-                self.next(graph);
-                return Some(SHOWN[self.shown].0);
+        let under = self.at - Vector3::new(0.0, HOVER, 0.0);
+        if !inhabitants::could_see(alert, under, self.heading, player.feet, player.posture, player.in_the_dark) {
+            return false;
+        }
+        let from = graph[self.body].global_position();
+        let way = player.middle - from;
+        let length = way.norm();
+        if length < 1.0e-3 {
+            return true;
+        }
+        let mut hits = Vec::new();
+        graph.physics.cast_ray(
+            RayCastOptions {
+                ray_origin: Point3::from(from),
+                ray_direction: way / length,
+                max_len: length,
+                groups: Default::default(),
+                sort_results: true,
+            },
+            &mut hits,
+        );
+        hits.iter()
+            .find(|hit| hit.collider != self.collider)
+            .is_some_and(|hit| hit.collider == player.collider)
+    }
+
+    /// Goes about its business for another `dt` over the floor of `grid` whose corner is at
+    /// `origin`, with the `player` where they are - if `live`, as while a round is being played;
+    /// otherwise it only glows, hovering where it is. What it did.
+    pub fn update(
+        &mut self,
+        graph: &mut Graph,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        player: &Target,
+        rng: &mut Rng,
+        dt: f32,
+        live: bool,
+    ) -> Doing {
+        let mut doing = Doing::default();
+        if live && self.placed {
+            self.since += dt;
+            doing.says = self.think(graph, (grid, origin), player, rng, dt);
+            self.fly((grid, origin), player, dt);
+            self.pose(graph);
+            if let Ok(hull) = graph.try_get_mut_of_type::<RigidBody>(self.hull) {
+                hull.set_next_kinematic_translation(self.at);
+            }
+            // Which animation goes with what it is doing: firing and scanning play through.
+            let next = match self.state {
+                State::Down => DEATH,
+                _ if self.playing == FIRE && self.since < FIRE_LENGTH => FIRE,
+                State::Alert if self.fire_in <= 0.0 => {
+                    self.fire_in = FIRE_EVERY;
+                    FIRE
+                }
+                State::Search { .. } if self.scanning > 0.0 => SCAN,
+                _ if self.speed > 0.2 => PATROL,
+                _ => IDLE,
+            };
+            self.play(graph, next);
+        }
+        self.glow(graph, dt);
+        // It fires as the eye flashes, at wherever the player is by then.
+        let time = self.time(graph);
+        if self.playing == FIRE && !self.fired && time * FPS >= FIRE_AT && live {
+            self.fired = true;
+            let from = graph[self.body]
+                .global_transform()
+                .transform_point(&Point3::new(0.0, 0.0, MUZZLE))
+                .coords;
+            doing.fired = Some((from, self.colour));
+        }
+        doing
+    }
+
+    /// Where the animation it is playing is, in seconds.
+    fn time(&self, graph: &Graph) -> f32 {
+        let handle = self
+            .animations
+            .iter()
+            .find(|(had, _)| had == self.playing)
+            .map(|&(_, handle)| handle);
+        handle
+            .and_then(|handle| {
+                let player = graph.try_get_of_type::<AnimationPlayer>(self.player).ok()?;
+                Some(player.animations().try_get(handle).ok()?.time_position())
+            })
+            .unwrap_or(0.0)
+    }
+
+    /// Looks for the player and decides where to go. What it has to say, if anything.
+    fn think(
+        &mut self,
+        graph: &Graph,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        player: &Target,
+        rng: &mut Rng,
+        dt: f32,
+    ) -> Option<&'static str> {
+        let hostile = matches!(self.state, State::Alert | State::Search { .. });
+        let sees = hostile && self.sees(graph, player);
+        let under = self.at - Vector3::new(0.0, HOVER, 0.0);
+        match self.state {
+            State::Down => None,
+            State::Patrol => {
+                if self.route.is_empty() {
+                    self.resting -= dt;
+                    if self.resting <= 0.0 {
+                        self.route = inhabitants::plan(grid, origin, under, TRIP, rng);
+                        self.resting = inhabitants::between(rng, REST);
+                    }
+                }
+                None
+            }
+            State::Search { .. } if sees => {
+                self.state = State::Alert;
+                self.fire_in = FIRST_SHOT;
+                self.replan = 0.0;
+                self.scanning = 0.0;
+                Some("spotted")
+            }
+            State::Alert if !sees => {
+                let at = self.lost_at;
+                self.search(at);
+                Some("searching")
+            }
+            State::Alert => {
+                self.lost_at = player.feet;
+                self.fire_in -= dt;
+                // Facing them, coming on to within its range of them, and no nearer.
+                let to = flat(player.feet - under);
+                self.heading = to.x.atan2(to.z);
+                self.replan -= dt;
+                if to.norm() <= ENGAGE {
+                    self.route.clear();
+                } else if self.replan <= 0.0 || self.route.is_empty() {
+                    self.replan = REPLAN;
+                    self.route = inhabitants::route_to(grid, origin, under, player.feet);
+                }
+                // Out of range, it holds its fire till it is nearer.
+                if to.norm() > FIRE_RANGE {
+                    self.fire_in = self.fire_in.max(0.1);
+                }
+                None
+            }
+            State::Search { left } => {
+                let left = left - dt;
+                if left <= 0.0 {
+                    self.state = State::Patrol;
+                    self.route.clear();
+                    self.scanning = 0.0;
+                    self.resting = REST.0;
+                    return Some("calm");
+                }
+                self.state = State::Search { left };
+                let mut says = None;
+                if self.scanning > 0.0 {
+                    self.scanning -= dt;
+                    // Done scanning: on to another spot nearby.
+                    if self.scanning <= 0.0 {
+                        self.scanning = 0.0;
+                        self.searched += 1;
+                        self.route = inhabitants::plan(grid, origin, under, SEARCH_TRIP, rng);
+                    }
+                } else if self.route.is_empty() {
+                    if self.searched == 0 && flat(self.lost_at - under).norm() > REACHED {
+                        // First where the player was.
+                        self.searched = 1;
+                        self.route = inhabitants::route_to(grid, origin, under, self.lost_at);
+                        says = Some("searching");
+                    } else {
+                        // Got there, or has nowhere to go: it scans.
+                        self.searched = self.searched.max(1);
+                        self.scanning = SCAN_LENGTH;
+                    }
+                }
+                says
             }
         }
-        self.last = time;
-        let strength = BRIGHTNESS * glow(SHOWN[self.shown].0, time * FPS);
-        for (material, colour) in &self.glows {
-            material
-                .data_ref()
-                .set_property(EMISSION_STRENGTH, MaterialProperty::Vector3(colour * strength));
+    }
+
+    /// Flies on along its route for another `dt`, turning to face the way it goes - or the player,
+    /// on Alert - and hovering over the floor.
+    fn fly(&mut self, (grid, origin): (&WalkGrid, Vector3<f32>), player: &Target, dt: f32) {
+        if self.state == State::Down {
+            return;
+        }
+        let under = self.at - Vector3::new(0.0, HOVER, 0.0);
+        // Past the points it has got near, the last one only once it is there.
+        while let Some(&next) = self.route.last() {
+            let near = if self.route.len() == 1 { ARRIVED } else { REACHED };
+            if flat(next - under).norm() > near {
+                break;
+            }
+            self.route.pop();
+        }
+        let hurry = matches!(self.state, State::Alert | State::Search { .. });
+        let top = if hurry { HURRY_SPEED } else { PATROL_SPEED };
+        let (way, wanted) = match self.route.last() {
+            Some(&next) => {
+                let to = flat(next - under);
+                let distance = to.norm();
+                // Slowing down for the end of its route.
+                let wanted = match self.route.len() {
+                    1 => top.min((2.0 * ACCELERATION * distance).sqrt()),
+                    _ => top,
+                };
+                (to / distance.max(1.0e-4), wanted)
+            }
+            None => (Vector3::zeros(), 0.0),
+        };
+        self.speed = match wanted > self.speed {
+            true => (self.speed + ACCELERATION * dt).min(wanted),
+            false => (self.speed - 2.0 * ACCELERATION * dt).max(wanted),
+        };
+        self.at += way * self.speed * dt;
+        // Facing the way it goes, or the player on Alert.
+        let facing = match self.state {
+            State::Alert => {
+                let to = flat(player.feet - under);
+                (to.norm() > 1.0e-3).then(|| to.x.atan2(to.z))
+            }
+            _ => (self.speed > 0.1).then(|| way.x.atan2(way.z)),
+        };
+        if let Some(facing) = facing {
+            let turn = wrap(facing - self.heading);
+            self.heading = wrap(self.heading + turn.clamp(-TURN_RATE * dt, TURN_RATE * dt));
+        }
+        // Hovering over the floor where it is, if there is floor there.
+        if let Some((x, z)) = survey::cell_at(grid, origin, self.at).filter(|&(x, z)| grid.is_walkable(x, z)) {
+            let height = grid.floor(x, z) + HOVER;
+            self.at.y += (height - self.at.y) * (1.0 - (-FLOOR_EASING * dt).exp());
+        }
+    }
+
+    /// Glows along with the animation it is playing, in its mood's colour, and lights what is
+    /// round it as brightly.
+    fn glow(&mut self, graph: &mut Graph, dt: f32) {
+        let time = self.time(graph);
+        let turned = 1.0 - (-MOOD_RATE * dt).exp();
+        let own = self.glows.first().map_or(self.colour, |(_, own)| *own);
+        self.colour += (mood_colour(own, self.mood()) - self.colour) * turned;
+        let strength = glow(self.playing, time * FPS);
+        // Its colour as well as its glow, as a droid's eyes: the eye and the inside of the shell
+        // are made green, and would stay green under any glow.
+        let colour = light_colour(self.colour);
+        for (material, _) in &self.glows {
+            let mut material = material.data_ref();
+            material.set_property(DIFFUSE_COLOR, colour);
+            material.set_property(
+                EMISSION_STRENGTH,
+                MaterialProperty::Vector3(self.colour * BRIGHTNESS * strength),
+            );
         }
         // The lamp, in front of the eye wherever the animation has it, as bright as the glow.
         let at = graph[self.body]
@@ -339,15 +883,29 @@ impl Drone {
             .coords;
         graph[self.lamp].local_transform_mut().set_position(at);
         if let Ok(lamp) = graph.try_get_mut_of_type::<PointLight>(self.lamp) {
-            lamp.base_light_mut().set_intensity(LAMP_BRIGHTNESS * glow(SHOWN[self.shown].0, time * FPS));
+            lamp.base_light_mut().set_intensity(LAMP_BRIGHTNESS * strength);
+            lamp.base_light_mut().set_color(light_colour(self.colour));
         }
-        None
     }
+}
+
+/// Its body for bolts to hit: a ball that is a sensor, which the player and the droids pass
+/// through, on a body moved by hand. The body, and the ball.
+fn hull(graph: &mut Graph) -> (Handle<Node>, Handle<Collider>) {
+    let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
+        .with_shape(ColliderShape::ball(BODY_RADIUS))
+        .with_sensor(true)
+        .build(graph);
+    let body = RigidBodyBuilder::new(BaseBuilder::new().with_child(collider))
+        .with_body_type(RigidBodyType::KinematicPositionBased)
+        .build(graph)
+        .to_base();
+    (body, collider)
 }
 
 /// Gives the drone its own copy of each material under `nodes` that glows, so that its glow can
 /// change without changing the model's, with which way the colour of its glow goes, at strength 1.
-fn claim_glows(graph: &mut Graph, nodes: &[Handle<Node>]) -> Vec<(MaterialResource, Vector3<f32>)> {
+pub(crate) fn claim_glows(graph: &mut Graph, nodes: &[Handle<Node>]) -> Vec<(MaterialResource, Vector3<f32>)> {
     let mut claimed: Vec<(u64, MaterialResource, Vector3<f32>)> = Vec::new();
     for &node in nodes {
         let Some(mesh) = graph[node].cast_mut::<Mesh>() else {
@@ -383,6 +941,7 @@ fn claim_glows(graph: &mut Graph, nodes: &[Handle<Node>]) -> Vec<(MaterialResour
     claimed.into_iter().map(|(_, copy, colour)| (copy, colour)).collect()
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,45 +951,67 @@ mod tests {
         // As the engine weighs green light (Rec. 709).
         let brightest = |strength: f32| 0.7152 * BRIGHTNESS * strength;
         for f in 0..97 {
-            assert!(brightest(glow("drone_idle", f as f32)) > 1.01, "idle at {f}");
+            assert!(brightest(glow(IDLE, f as f32)) > 1.01, "idle at {f}");
         }
-        assert!(brightest(glow("drone_patrol", 0.0)) > 1.01);
+        assert!(brightest(glow(PATROL, 0.0)) > 1.01);
     }
 
     #[test]
     fn its_glow_follows_each_animation() {
         // Idle breathes between 0.9 and 1.5.
-        let idle: Vec<f32> = (0..97).map(|f| glow("drone_idle", f as f32)).collect();
+        let idle: Vec<f32> = (0..97).map(|f| glow(IDLE, f as f32)).collect();
         let (low, high) = idle.iter().fold((f32::MAX, f32::MIN), |(l, h), &g| (l.min(g), h.max(g)));
         assert!((low - 0.9).abs() < 0.01 && (high - 1.5).abs() < 0.01, "{low} {high}");
-        assert_eq!(glow("drone_patrol", 30.0), 1.0);
+        assert_eq!(glow(PATROL, 30.0), 1.0);
         // Scan pulses at the end.
-        assert_eq!(glow("drone_scan", 40.0), 1.0);
-        assert_eq!(glow("drone_scan", 78.0), 5.0);
-        assert_eq!(glow("drone_scan", 81.0), 2.0);
-        assert_eq!(glow("drone_scan", 84.0), 5.0);
-        assert_eq!(glow("drone_scan", 96.0), 3.0);
+        assert_eq!(glow(SCAN, 40.0), 1.0);
+        assert_eq!(glow(SCAN, 78.0), 5.0);
+        assert_eq!(glow(SCAN, 81.0), 2.0);
+        assert_eq!(glow(SCAN, 84.0), 5.0);
+        assert_eq!(glow(SCAN, 96.0), 3.0);
         // Fire flashes.
-        assert_eq!(glow("drone_fire", 2.0), 8.0);
-        assert_eq!(glow("drone_fire", 14.0), 1.0);
+        assert_eq!(glow(FIRE, 2.0), 8.0);
+        assert_eq!(glow(FIRE, 14.0), 1.0);
         // Death flickers, then goes out.
-        assert_eq!(glow("drone_death", 1.0), 4.0);
-        assert_eq!(glow("drone_death", 3.0), 0.0);
-        assert_eq!(glow("drone_death", 21.0), 4.0);
-        assert_eq!(glow("drone_death", 40.0), 0.0);
-        assert_eq!(glow("drone_death", 60.0), 0.0);
+        assert_eq!(glow(DEATH, 1.0), 4.0);
+        assert_eq!(glow(DEATH, 3.0), 0.0);
+        assert_eq!(glow(DEATH, 21.0), 4.0);
+        assert_eq!(glow(DEATH, 40.0), 0.0);
+        assert_eq!(glow(DEATH, 60.0), 0.0);
     }
 
     #[test]
-    fn it_has_something_to_say_as_it_starts_each_animation() {
+    fn its_mood_colours_it_as_a_droids_eyes() {
+        let green = Vector3::new(0.0, 1.0, 0.0);
+        assert_eq!(mood_colour(green, Mood::Normal), green);
+        let red = mood_colour(green, Mood::Hostile);
+        assert!(red.x == 1.0 && red.y < 0.5 && red.z < 0.5, "{red}");
+        let orange = mood_colour(green, Mood::Agitated);
+        assert!(orange.x == 1.0 && orange.y > 0.3 && orange.y < 0.8, "{orange}");
+        assert_eq!(light_colour(Vector3::new(1.0, 0.5, 0.0)), Color::opaque(255, 128, 0));
+    }
+
+    #[test]
+    fn angles_come_round() {
+        assert!((wrap(3.0 * PI / 2.0) + PI / 2.0).abs() < 1.0e-5);
+        assert!((wrap(-3.0 * PI / 2.0) - PI / 2.0).abs() < 1.0e-5);
+        assert!((wrap(0.5) - 0.5).abs() < 1.0e-6);
+    }
+
+    /// What it says, and when: hearing the alarm or a droid shot, spotting the player, starting
+    /// to search where they were, giving up, and going down.
+    const SAYS: [&str; 5] = ["alarm", "spotted", "searching", "calm", "down"];
+
+    #[test]
+    fn it_has_something_to_say_about_everything_it_does() {
         let lines = DroneLines::load(DRONE_LINES).expect("the drones' lines");
-        for (name, _) in SHOWN {
+        for name in SAYS {
             let said = lines.line(name, 0).unwrap_or_else(|| panic!("nothing for {name}"));
             assert!(!said.says.is_empty() && !said.means.is_empty());
         }
         // Going round its lines in turn.
-        let patrol = lines.lines["drone_patrol"].len();
-        assert_eq!(lines.line("drone_patrol", patrol), lines.line("drone_patrol", 0));
+        let spotted = lines.lines["spotted"].len();
+        assert_eq!(lines.line("spotted", spotted), lines.line("spotted", 0));
         assert_eq!(lines.line("nothing", 0), None);
     }
 }

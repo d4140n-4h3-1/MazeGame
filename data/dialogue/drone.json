@@ -1,22 +1,23 @@
 {
-  "about": "What the drones say, in System Latin (see data/system_latin/system_latin_systemized.md), said as beeps, hums and buzzes - see src/formants/chirps.rs - so that no one hears it as speech; 'means' is what it says in English. 'lines' are by the animation a drone says them as it starts: one of them, picked in turn, each time it starts that animation; an animation with none, or not given, is done in silence.",
+  "about": "What the drones say, in System Latin (see data/system_latin/system_latin_systemized.md), said as beeps, hums and buzzes - see src/formants/chirps.rs - so that no one hears it as speech; 'means' is what it says in English. 'lines' are by what a drone says them about, one of them picked in turn each time: 'alarm' as it hears the alarm, or a droid shot, while it patrols; 'spotted' as it sees the player; 'searching' as it sets off to where it lost them or was sent; 'calm' as it gives up and patrols again; and 'down' as it is brought down. Something with none, or not given, is done in silence.",
   "lines": {
-    "drone_idle": [
-      { "says": "Accipatum.", "means": "Acknowledged." }
+    "alarm": [
+      { "says": "Sirenatio accipatum. Zeto aggressor.", "means": "Alarm received. Searching for the attacker." }
     ],
-    "drone_patrol": [
-      { "says": "Resumo patrolium.", "means": "Resuming patrol." },
-      { "says": "Zeto intrusor.", "means": "Searching for the intruder." }
-    ],
-    "drone_scan": [
-      { "says": "Verifico.", "means": "Checking." },
-      { "says": "Quid? Sonus detectum.", "means": "What? A sound detected." }
-    ],
-    "drone_fire": [
+    "spotted": [
       { "says": "Intrusor detectum. Sta.", "means": "Intruder detected. Halt." },
       { "says": "Aggressor detectum.", "means": "Attacker detected." }
     ],
-    "drone_death": [
+    "searching": [
+      { "says": "Zeto intrusor.", "means": "Searching for the intruder." },
+      { "says": "Quid? Sonus detectum.", "means": "What? A sound detected." },
+      { "says": "Verifico.", "means": "Checking." }
+    ],
+    "calm": [
+      { "says": "Resumo patrolium.", "means": "Resuming patrol." },
+      { "says": "Accipatum.", "means": "Acknowledged." }
+    ],
+    "down": [
       { "says": "Periculum.", "means": "Danger." }
     ]
   }

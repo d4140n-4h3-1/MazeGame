@@ -64,6 +64,7 @@ mod lean;
 mod movement;
 mod noise;
 mod pistol;
+pub use pistol::PISTOL_SOUNDS;
 pub(crate) mod posture;
 mod talk;
 mod third_person;
@@ -327,13 +328,13 @@ impl Player {
         self.resting
     }
 
-    pub fn position(&self, graph: &Graph) -> Vector3<f32> {
-        graph[self.body].global_position()
+    /// What the player's body is to anything that hits it.
+    pub fn collider(&self) -> Handle<Collider> {
+        self.collider
     }
 
-    /// Which way the player faces, in radians, left positive from the world's +z.
-    pub fn yaw(&self) -> f32 {
-        self.yaw
+    pub fn position(&self, graph: &Graph) -> Vector3<f32> {
+        graph[self.body].global_position()
     }
 
     /// Where the player's feet are.

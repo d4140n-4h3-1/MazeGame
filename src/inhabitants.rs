@@ -18,8 +18,7 @@
 //! Each is one of the kinds of droid in the conversations (see [`crate::dialogue`]), with a code
 //! of its own, and can be talked to by a player close by and facing it. While it is, it stands
 //! still and turns to face them, and afterwards stands a moment before going on its way. They
-//! all start out of the player's sight, and wander - all but one, which stands a little way in
-//! front of where the player starts, facing them, for a while before it sets off too.
+//! all start out of the player's sight, and wander.
 //!
 //! A conversation can turn a droid hostile (see [`Inhabitants::set_hostile`]), and a hostile
 //! droid hunts the player the way Metal Gear's guards do, through its [`Alert`] phases:
@@ -52,7 +51,7 @@
 //! Hostile, it cannot be talked to any more, but after [`HITS`] bolts it goes down, its eyes
 //! dark: it goes limp and falls, knocked back by the last bolt, and lies where it falls (see
 //! [`crate::ragdoll`]) - or, without a ragdoll, crouches. Lying there, a bolt still shoves it.
-//! [`VANISH_AFTER`] seconds after it went down, it is gone.
+//! It stays there, for the rest of the round; the others step over it rather than round it.
 //!
 //! A droid that is not hostile minds having the player's pistol pointed at it (see
 //! [`Inhabitants::feel_aimed_at`]): for as long as its kind stands for it, and then it stops,
@@ -108,12 +107,6 @@ const MIDDLE: f32 = 0.85;
 /// How far from the player they are put down, in steps across the grid's half-meter cells
 /// (see [`WalkGrid::routes_from`]): out of sight to begin with.
 const AWAY_FROM_PLAYER: f32 = 24.0;
-/// How far from the player the one put down near them is, from least to most, in the same steps;
-/// how far to either side of the way they face, in radians, if there is room there; and how long
-/// it stands there, in seconds, before it sets off.
-const NEAR_PLAYER: (f32, f32) = (8.0, 14.0);
-const NEAR_CONE: f32 = 30.0 * std::f32::consts::PI / 180.0;
-const NEAR_REST: f32 = 20.0;
 /// How far a droid goes each time it sets off, in steps across the grid, from least to most:
 /// never just round the corner, never across the whole maze.
 const TRIP: (f32, f32) = (30.0, 160.0);
@@ -228,8 +221,6 @@ const SENTRY_STAMINA: f32 = 1.5;
 const SENTRY_RECOVERY: f32 = 2.0 / 3.0;
 /// How many of the pistol's bolts it takes to stop a hostile droid.
 pub const HITS: u32 = 3;
-/// How long, in seconds, a droid that has been stopped lies there before it is gone.
-pub const VANISH_AFTER: f32 = 4.0;
 /// How tall a droid that has been stopped is, crouched, in meters.
 const DOWN_HEIGHT: f32 = 1.1;
 
@@ -278,6 +269,8 @@ pub struct Breath {
     pub face: Vector3<f32>,
     pub left: f32,
     pub winded: bool,
+    /// How much of its health it has left, from 0 to 1: bolts take it.
+    pub health: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -352,10 +345,6 @@ struct Inhabitant {
     down: bool,
     /// Its body gone limp, once it has been stopped, if it has a ragdoll.
     ragdoll: Option<Ragdoll>,
-    /// How long it has been down, in seconds; and whether it is gone: out of sight and out of
-    /// everyone's way for good.
-    down_for: f32,
-    gone: bool,
 }
 
 impl Inhabitant {
@@ -370,23 +359,6 @@ impl Inhabitant {
         if self.avatar.break_off(graph, part) {
             ragdoll.let_loose(graph, part);
         }
-    }
-
-    /// Takes it away for good, [`VANISH_AFTER`] seconds after it went down: out of sight, its
-    /// limp bodies out of the physics, and its capsule too if it still has one. Its place among
-    /// the droids stays, since they are known by where they are in the list.
-    fn vanish(&mut self, graph: &mut Graph) {
-        self.gone = true;
-        self.avatar.set_visible(graph, false);
-        self.avatar.sweep_up(graph);
-        if let Some(ragdoll) = self.ragdoll.take() {
-            ragdoll.remove(graph);
-        }
-        if graph.is_valid_handle(self.collider) {
-            graph.remove_node(self.collider);
-        }
-        self.route.clear();
-        self.speed = 0.0;
     }
 }
 
@@ -484,7 +456,7 @@ pub struct Inhabitants {
 }
 
 /// A number from `range.0` to `range.1`.
-fn between(rng: &mut Rng, range: (f32, f32)) -> f32 {
+pub(crate) fn between(rng: &mut Rng, range: (f32, f32)) -> f32 {
     range.0 + (range.1 - range.0) * rng.below(1001) as f32 / 1000.0
 }
 
@@ -573,7 +545,7 @@ fn step_aside(
 /// as it sees at all on Alert; otherwise only in front, and less far the lower the player is -
 /// but right next to it, in any direction. `in_the_dark`, with the lights off and no flashlight
 /// on, it sees less far either way.
-fn could_see(
+pub(crate) fn could_see(
     alert: Alert,
     feet: Vector3<f32>,
     heading: f32,
@@ -800,7 +772,7 @@ fn walkable_cell(
 
 /// A route from `feet` to `to`, as points on the floor, the first one last, ending at `to`
 /// itself. Empty if there is no way there within [`CHASE_REACH`].
-fn route_to(
+pub(crate) fn route_to(
     grid: &WalkGrid,
     origin: Vector3<f32>,
     feet: Vector3<f32>,
@@ -826,7 +798,7 @@ fn route_to(
 
 /// A route from `feet` to somewhere a trip away, as points on the floor, the first one last. Empty
 /// if there is nowhere to go.
-fn plan(
+pub(crate) fn plan(
     grid: &WalkGrid,
     origin: Vector3<f32>,
     feet: Vector3<f32>,
@@ -883,16 +855,14 @@ impl Inhabitants {
     }
 
     /// Puts the maze's inhabitants into `scene` on the floor of `grid` whose corner is at
-    /// `origin`, well away from the `player`'s feet - all but one, a little way in front of them
-    /// as they face `facing`. They take turns being each of the kinds of droid there are to talk
-    /// to, each looking as its one of `liveries` has it.
+    /// `origin`, well away from the `player`'s feet. They take turns being each of the kinds of
+    /// droid there are to talk to, each looking as its one of `liveries` has it.
     pub fn populate(
         &mut self,
         scene: &mut Scene,
         liveries: Vec<Livery>,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         player: Vector3<f32>,
-        facing: f32,
         rng: &mut Rng,
     ) {
         self.clear(&mut scene.graph);
@@ -920,32 +890,12 @@ impl Inhabitants {
             .filter(|(_, cost)| cost.is_some_and(|c| c >= AWAY_FROM_PLAYER))
             .map(|(i, _)| (i % grid.width, i / grid.width))
             .collect();
-        let near: Vec<(usize, usize)> = routes
-            .costs
-            .iter()
-            .enumerate()
-            .filter(|(_, cost)| cost.is_some_and(|c| (NEAR_PLAYER.0..=NEAR_PLAYER.1).contains(&c)))
-            .map(|(i, _)| (i % grid.width, i / grid.width))
-            .collect();
-        // In front of them if there is room, where they will see it.
-        let ahead: Vec<(usize, usize)> = near
-            .iter()
-            .copied()
-            .filter(|&cell| {
-                let to = flat(on_floor(grid, origin, cell) - player).try_normalize(1.0e-3);
-                to.is_some_and(|to| to.dot(&forward(facing)) >= NEAR_CONE.cos())
-            })
-            .collect();
-        let near = if ahead.is_empty() { near } else { ahead };
         let first = rng.below(characters);
         for n in 0..count {
-            // The first near the player, if there is room; the rest away.
-            let close = n == 0 && !near.is_empty();
-            let place = match close {
-                true => near[rng.below(near.len())],
-                false if places.is_empty() => break,
-                false => places.swap_remove(rng.below(places.len())),
-            };
+            if places.is_empty() {
+                break;
+            }
+            let place = places.swap_remove(rng.below(places.len()));
             let feet = on_floor(grid, origin, place);
             let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
                 .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
@@ -975,19 +925,10 @@ impl Inhabitants {
                 avatar,
                 feet,
                 speed: 0.0,
-                heading: match close {
-                    true => {
-                        let to_player = flat(player - feet);
-                        to_player.x.atan2(to_player.z)
-                    }
-                    false => between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
-                },
+                heading: between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
                 route: Vec::new(),
-                // Not all setting off at once, and the one near the player not for a while.
-                resting: match close {
-                    true => NEAR_REST,
-                    false => between(rng, REST),
-                },
+                // Not all setting off at once.
+                resting: between(rng, REST),
                 waiting: 0.0,
                 last_seen: None,
                 character,
@@ -1017,8 +958,6 @@ impl Inhabitants {
                 hits: 0,
                 down: false,
                 ragdoll: None,
-                down_for: 0.0,
-                gone: false,
             });
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
@@ -1055,11 +994,9 @@ impl Inhabitants {
             .chain(std::iter::once((player, None)))
             .collect();
         let the_player = everyone.len() - 1;
-        let gone: Vec<bool> = self.droids.iter().map(|droid| droid.gone).collect();
+        // Those lying where they went down are in no one's way.
+        let down: Vec<bool> = self.droids.iter().map(|droid| droid.down).collect();
         for (me, droid) in self.droids.iter_mut().enumerate() {
-            if droid.gone {
-                continue;
-            }
             // In the hostile droid's colours while it is after the player; it goes down in
             // whichever it had on.
             let hostile = droid.alert.is_some();
@@ -1068,13 +1005,6 @@ impl Inhabitants {
                     recolour(graph, droid.avatar.root(), livery, hostile);
                 }
                 droid.looks_hostile = hostile;
-            }
-            if droid.down {
-                droid.down_for += dt;
-                if droid.down_for >= VANISH_AFTER {
-                    droid.vanish(graph);
-                    continue;
-                }
             }
             // Limp, the physics has it: its bones follow its bodies, its capsule is gone, and it
             // is wherever its pelvis has got to.
@@ -1100,7 +1030,7 @@ impl Inhabitants {
                 .enumerate()
                 .filter(|&(other, _)| {
                     other != me
-                        && !gone.get(other).copied().unwrap_or(false)
+                        && !down.get(other).copied().unwrap_or(false)
                         && !(hunting && other == the_player)
                 })
                 .map(|(_, &other)| other);
@@ -1566,14 +1496,15 @@ impl Inhabitants {
         self.droids
             .iter()
             .enumerate()
-            .filter(|(_, droid)| droid.sentry && !droid.down && !droid.gone)
-            .filter(|(_, droid)| droid.alert.is_some() || droid.stamina < droid.most)
+            .filter(|(_, droid)| droid.sentry && !droid.down)
+            .filter(|(_, droid)| droid.alert.is_some() || droid.stamina < droid.most || droid.hits > 0)
             .filter_map(|(n, droid)| {
                 Some(Breath {
                     feet: droid.feet,
                     face: self.face(graph, n)?,
                     left: droid.stamina / droid.most,
                     winded: droid.winded,
+                    health: 1.0 - droid.hits as f32 / HITS as f32,
                 })
             })
             .collect()
@@ -1758,7 +1689,7 @@ impl Inhabitants {
         for droid in &self.droids {
             droid
                 .avatar
-                .set_visible(graph, !droid.gone && level.can_see(droid.feet));
+                .set_visible(graph, level.can_see(droid.feet));
         }
     }
 

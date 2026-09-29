@@ -1,8 +1,10 @@
 //! The game itself: loading a level, playing rounds in it, and the player's input.
 
 use crate::{
+    credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
-    drone::{Drone, DroneLines, DRONE_LINES, DRONE_MODEL},
+    drone::{Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
+    drone_shot::{Shots, SHOT_MODEL},
     health::{Health, HealthSounds, Healing, Heard},
     hearts::{self, Hearts, HEART_MODEL},
     notes::{self, Notes, NOTES},
@@ -144,8 +146,12 @@ fn pitch(voices: &Voices, code: u32, mood: Mood) -> f32 {
     (1.0 + VOICE_SPREAD * ((code % 7) as f32 / 3.0 - 1.0)) * voices.mood_pitch(mood)
 }
 
-/// The stamina bars over the sentries' heads: how far above the face, and how wide, in meters, and
-/// how far off, in meters, they are still shown.
+/// How many drones there are: one patrolling each round, the rest waiting out of sight to be
+/// called in by a failed hack.
+const DRONES: usize = 4;
+
+/// The bars over the sentries' heads, and the drone's: how far above the face or the top of the
+/// drone, and how wide, in meters, and how far off, in meters, they are still shown.
 const BREATH_BAR_ABOVE: f32 = 0.3;
 const BREATH_BAR_WIDTH: f32 = 0.6;
 const BREATH_BAR_REACH: f32 = 25.0;
@@ -235,6 +241,10 @@ pub struct MazeGame {
     /// Whether MAZE_KNOCKDOWN has shot a droid down this round yet.
     knocked_down: bool,
     best_time: Option<f32>,
+    /// The credits the player has taken from computers, kept from one maze to the next.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    credits: Credits,
     /// How long ago the player was deleted, in seconds.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -305,10 +315,17 @@ pub struct MazeGame {
     hearts_placed: bool,
     #[visit(skip)]
     #[reflect(hidden)]
-    drone: Option<Drone>,
+    drones: Vec<Drone>,
     #[visit(skip)]
     #[reflect(hidden)]
     drone_placed: bool,
+    /// Its shots, as their model loads and once they are made.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    shot_model: Option<ModelResource>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    shots: Option<Shots>,
     /// How drones sound and what they say, how many lines it has said, and the one being made
     /// into sound to say, if any.
     #[visit(skip)]
@@ -317,6 +334,22 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     drone_said: usize,
+    /// Whether MAZE_DRONE_ALARM has sent the drone after the player this round.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_alarmed: bool,
+    /// What each drone has to say about something that happened to it outside its own update, by
+    /// its place among the drones; which is saying the line being made into sound; and where
+    /// drones have been called in to since the last update, to be sent there.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_says: Vec<(usize, &'static str)>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_speaking: usize,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_calls: Vec<Vector3<f32>>,
     #[visit(skip)]
     #[reflect(hidden)]
     drone_saying: Option<Making>,
@@ -453,6 +486,7 @@ impl MazeGame {
         self.droid = Some(resources.request::<Model>(DROID_MODEL));
         self.computer_model = Some(resources.request::<Model>(COMPUTER_MODEL));
         self.drone_model = Some(resources.request::<Model>(DRONE_MODEL));
+        self.shot_model = Some(resources.request::<Model>(SHOT_MODEL));
         self.heart_model = Some(resources.request::<Model>(HEART_MODEL));
         match platform::var("MAZE_MODEL") {
             Some(path) => self.model = Some(resources.request::<Model>(path)),
@@ -549,6 +583,8 @@ impl MazeGame {
         self.start_cell = Some(start);
         self.computer_placed = false;
         self.drone_placed = false;
+        self.drone_alarmed = false;
+        self.drone_calls.clear();
         self.hearts_placed = false;
         let start_position = survey::cell_center(*origin, start.0, start.1);
         let exit_position = survey::cell_center(*origin, exit.0, exit.1);
@@ -571,6 +607,9 @@ impl MazeGame {
         let into_maze = survey::open_direction(grid, *origin, start);
         // Everyone is put down afresh for the new round, away from where the player starts.
         self.inhabitants.clear(&mut scene.graph);
+        if let Some(shots) = self.shots.as_mut() {
+            shots.clear(&mut scene.graph);
+        }
         self.player.teleport(
             &mut scene.graph,
             start_position + Vector3::new(0.0, 1.2, 0.0),
@@ -604,6 +643,7 @@ impl MazeGame {
                     || self.menu.is_open()
                     || self.talking.is_some(),
                 alarm: self.inhabitants.alarm(),
+                credits: self.credits,
             },
         };
         // Healing only while playing; the flash of the last hit fades out after too.
@@ -621,7 +661,7 @@ impl MazeGame {
             }
         }
         self.hud.update(ctx.user_interfaces.first(), ctx.dt, status);
-        self.show_breath_bars(ctx);
+        self.show_overhead_bars(ctx);
     }
 
     /// Puts the current view settings on screen for a few seconds.
@@ -826,7 +866,7 @@ impl MazeGame {
         let player = self.player.feet(&scene.graph);
         if let Some(liveries) = liveries {
             self.inhabitants
-                .populate(scene, liveries, (grid, *origin), player, self.player.yaw(), rng);
+                .populate(scene, liveries, (grid, *origin), player, rng);
         }
         let graph = &scene.graph;
         // With the lights off, the player is hard to see, unless their flashlight gives them
@@ -867,8 +907,25 @@ impl MazeGame {
             }
         }
         let mut provoked = Vec::new();
+        let mut droid_shot = false;
         for strike in self.player.struck() {
             let collider = strike.collider;
+            // A drone, shot: it takes the hit, and goes down after enough of them.
+            let hit = self
+                .drones
+                .iter_mut()
+                .enumerate()
+                .find_map(|(n, drone)| Some((n, drone.shot(graph, collider, player)?)));
+            match hit {
+                Some((n, true)) => {
+                    self.drone_says.push((n, "down"));
+                    self.hud.show_note("A drone is down".into());
+                    continue;
+                }
+                Some((_, false)) => continue,
+                None => (),
+            }
+            droid_shot |= self.inhabitants.hit(collider).is_some();
             if let Some(n) = self.inhabitants.shot(graph, strike, player) {
                 let name = self.name_of(n).unwrap_or_else(|| "The droid".into());
                 self.hud.show_note(format!("{name} is down"));
@@ -880,8 +937,59 @@ impl MazeGame {
                 }
             }
         }
+        // A droid shot sets the drones on the player.
+        if droid_shot {
+            self.alert_drone(player);
+        }
         for n in provoked {
             self.on_threat(ctx, n, Threat::Provoked);
+        }
+    }
+
+    /// Sends the drones in the maze to search where the player's feet are, `at`, as the alarm
+    /// does.
+    fn alert_drone(&mut self, at: Vector3<f32>) {
+        for (n, drone) in self.drones.iter_mut().enumerate() {
+            if let Some(says) = drone.alarm(at) {
+                self.drone_says.push((n, says));
+            }
+        }
+    }
+
+    /// Calls a drone in to search where the player is, `at`: the one patrolling nearest there,
+    /// or failing that one from out of sight, from well away - or failing that, with every drone
+    /// already out, down or after the player, the searching one nearest there, to look there
+    /// instead. Some drone always comes.
+    fn call_drone(&mut self, graph: &mut Graph, at: Vector3<f32>) {
+        let (Some((grid, origin)), Some(rng)) = (self.level.grid.as_ref(), self.rng.as_mut()) else {
+            return;
+        };
+        let nearest = |drones: &[Drone], state: fn(State) -> bool| {
+            drones
+                .iter()
+                .enumerate()
+                .filter(|(_, drone)| drone.is_placed() && state(drone.state()))
+                .min_by(|a, b| (a.1.at() - at).norm().total_cmp(&(b.1.at() - at).norm()))
+                .map(|(n, _)| n)
+        };
+        if let Some(n) = nearest(&self.drones, |state| state == State::Patrol) {
+            if let Some(says) = self.drones[n].alarm(at) {
+                self.drone_says.push((n, says));
+            }
+            Log::info(format!("Drone {n}: called to the computer"));
+            return;
+        }
+        let feet = self.player.feet(graph);
+        if let Some(n) = self.drones.iter().position(|drone| !drone.is_placed()) {
+            if self.drones[n].call_in(graph, (grid, *origin), feet, at, rng) {
+                self.drone_says.push((n, "alarm"));
+                Log::info(format!("Drone {n}: called in"));
+                return;
+            }
+        }
+        if let Some(n) = nearest(&self.drones, |state| matches!(state, State::Search { .. })) {
+            self.drones[n].alarm(at);
+            Log::info(format!("Drone {n}: sent to the computer"));
         }
     }
 
@@ -944,6 +1052,8 @@ impl MazeGame {
                 };
                 self.inhabitants
                     .raise_alarm(n, player, |character| is_sentry(script, character));
+                // The drone answers the alarm too.
+                self.alert_drone(player);
                 let name = self.name_of(n).unwrap_or_else(|| "A droid".into());
                 self.hud.show_note(format!("{name} sounded the alarm"));
             }
@@ -992,7 +1102,8 @@ impl MazeGame {
                 let at = self.player.position(graph);
                 self.health_sounds.play(graph, Heard::Hit, at);
                 if last {
-                    self.delete_player(ctx, n);
+                    let name = self.name_of(n).unwrap_or_else(|| "A droid".into());
+                    self.delete_player(ctx, &name);
                 }
                 last
             }
@@ -1076,11 +1187,10 @@ impl MazeGame {
 
     /// The player has been caught by the `n`th droid: they stop where they are, and are told so
     /// until the next maze.
-    fn delete_player(&mut self, ctx: &mut PluginContext, n: usize) {
+    fn delete_player(&mut self, ctx: &mut PluginContext, name: &str) {
         self.stop_talking(ctx);
         self.phase = Phase::Deleted;
         self.deleted = 0.0;
-        let name = self.name_of(n).unwrap_or_else(|| "A droid".into());
         self.set_banner(ctx, &format!("Deleted by {name}"));
     }
 
@@ -1178,39 +1288,56 @@ impl MazeGame {
         self.at_computer = at_computer;
     }
 
-    /// Puts a stamina bar over the head of each sentry the player can see that is after them or
-    /// has spent some of its breath, the size it would be there, as the player's is on screen.
-    fn show_breath_bars(&mut self, ctx: &mut PluginContext) {
+    /// Puts bars over the head of each sentry the player can see that is after them, has spent
+    /// some of its breath or been hit - its health over its stamina - and over the drone, its
+    /// health, while it is after them or has been hit; the size they would be there, as the
+    /// player's are on screen.
+    fn show_overhead_bars(&mut self, ctx: &mut PluginContext) {
         let ui = ctx.user_interfaces.first_mut();
         let playing = matches!(self.phase, Phase::Playing | Phase::Won | Phase::Deleted);
         if !playing || self.menu.is_open() || self.talking.is_some() {
-            self.hud.show_breath_bars(ui, &[]);
+            self.hud.show_overhead_bars(ui, &[]);
             return;
         }
         let size = ui.screen_size();
         let graph = &ctx.scenes[self.scene].graph;
         let player = self.player.feet(graph);
-        let bars: Vec<hud::BreathBar> = self
+        // Where the bars go on screen over `top`, seen from `feet`, and how wide.
+        let placed = |feet: Vector3<f32>, top: Vector3<f32>| {
+            if (feet - player).norm() >= BREATH_BAR_REACH || !self.player.can_see(graph, feet) {
+                return None;
+            }
+            let above = top + Vector3::new(0.0, BREATH_BAR_ABOVE, 0.0);
+            let at = self.player.on_screen(graph, above, size)?;
+            // How many pixels a meter is, there.
+            let higher = self.player.on_screen(graph, above + Vector3::y(), size)?;
+            Some((at, BREATH_BAR_WIDTH * (at - higher).norm()))
+        };
+        let mut bars: Vec<hud::OverheadBars> = self
             .inhabitants
             .breath(graph)
             .into_iter()
-            .filter(|breath| (breath.feet - player).norm() < BREATH_BAR_REACH)
-            .filter(|breath| self.player.can_see(graph, breath.feet))
             .filter_map(|breath| {
-                let above = breath.face + Vector3::new(0.0, BREATH_BAR_ABOVE, 0.0);
-                let at = self.player.on_screen(graph, above, size)?;
-                // How many pixels a meter is, there.
-                let higher = self.player.on_screen(graph, above + Vector3::y(), size)?;
-                let per_meter = (at - higher).norm();
-                Some(hud::BreathBar {
+                let (at, width) = placed(breath.feet, breath.face)?;
+                Some(hud::OverheadBars {
                     at,
-                    width: BREATH_BAR_WIDTH * per_meter,
-                    left: breath.left,
-                    winded: breath.winded,
+                    width,
+                    health: breath.health,
+                    breath: Some((breath.left, breath.winded)),
                 })
             })
             .collect();
-        self.hud.show_breath_bars(ui, &bars);
+        for (top, health) in self.drones.iter().filter_map(|drone| drone.health_bar(graph)) {
+            if let Some((at, width)) = placed(top, top) {
+                bars.push(hud::OverheadBars {
+                    at,
+                    width,
+                    health,
+                    breath: None,
+                });
+            }
+        }
+        self.hud.show_overhead_bars(ui, &bars);
     }
 
     /// What the `n`th inhabitant is called on screen: what kind of droid it is, and its code.
@@ -1522,8 +1649,25 @@ impl MazeGame {
             }
         }
         if !self.menu.is_open() {
+            let mut denied = false;
+            let mut taken = Credits::default();
             for computer in &mut self.computers {
-                computer.update(ctx.dt);
+                denied |= computer.update(ctx.dt);
+                // Cleared, it transfers its credits to the player.
+                if let Some(credits) = computer.take_credits() {
+                    taken += credits;
+                }
+            }
+            if taken > Credits::default() {
+                self.credits += taken;
+                self.hud.show_note(format!("+{taken} transferred"));
+                Log::info(format!("Credits: +{taken}, {} in all", self.credits));
+            }
+            // A failed hack calls in a drone, to where the player is.
+            if denied && self.phase == Phase::Playing {
+                let feet = self.player.feet(&ctx.scenes[self.scene].graph);
+                self.drone_calls.push(feet);
+                self.hud.show_note("Trace complete: a drone is on its way".into());
             }
         }
         // The terminal of the one the player is using, or last used.
@@ -1567,36 +1711,105 @@ impl MazeGame {
             .show(ctx.user_interfaces, computer, on_screen, ctx.dt);
     }
 
-    /// Puts the drone into the scene once its model has loaded, and in front of the player once a
-    /// round is under way; keeps it going.
+    /// Puts the drones into the scene once their model has loaded - one to patrol each round,
+    /// well away from the player, the rest out of sight until called in - and keeps them going,
+    /// and their shots flying, which hurt the player they hit.
     fn set_up_drone(&mut self, ctx: &mut PluginContext) {
         if let Some(model) = self.drone_model.take_if(|model| model.is_ok()) {
-            self.drone = Drone::spawn(&model, &mut ctx.scenes[self.scene]);
+            let scene = &mut ctx.scenes[self.scene];
+            self.drones = (0..DRONES).filter_map(|_| Drone::spawn(&model, scene)).collect();
         } else if self.drone_model.as_ref().is_some_and(|model| model.is_failed_to_load()) {
-            Log::err(format!("Could not load {DRONE_MODEL}; there is no drone"));
+            Log::err(format!("Could not load {DRONE_MODEL}; there are no drones"));
             self.drone_model = None;
         }
-        let Some(drone) = self.drone.as_mut() else {
+        if let Some(model) = self.shot_model.take_if(|model| model.is_ok()) {
+            self.shots = Some(Shots::spawn(&model, &mut ctx.scenes[self.scene]));
+        } else if self.shot_model.as_ref().is_some_and(|model| model.is_failed_to_load()) {
+            Log::err(format!("Could not load {SHOT_MODEL}; the drones fire nothing"));
+            self.shot_model = None;
+        }
+        // Shots fly, and hurt, only while the round is being played - through the drones.
+        if self.phase == Phase::Playing && !self.menu.is_open() {
+            let graph = &mut ctx.scenes[self.scene].graph;
+            let drones: Vec<_> = self.drones.iter().map(|drone| drone.collider()).collect();
+            let hits = self.shots.as_mut().map_or(0, |shots| {
+                shots.update(graph, ctx.dt, self.player.collider(), &drones)
+            });
+            for _ in 0..hits {
+                if self.phase != Phase::Playing {
+                    break;
+                }
+                let last = self.health.hit();
+                let at = self.player.position(graph);
+                self.health_sounds.play(graph, Heard::Hit, at);
+                if last {
+                    self.delete_player(ctx, "a security drone");
+                    break;
+                }
+            }
+        }
+        if self.drones.is_empty() || self.level.grid.is_none() {
+            return;
+        }
+        // The first patrols, the rest wait out of sight: put down once a round.
+        if !self.drone_placed && self.phase == Phase::Playing {
+            let graph = &mut ctx.scenes[self.scene].graph;
+            let feet = self.player.feet(graph);
+            if let (Some((grid, origin)), Some(rng)) = (self.level.grid.as_ref(), self.rng.as_mut()) {
+                for drone in &mut self.drones {
+                    drone.hide(graph);
+                }
+                self.drones[0].place(graph, (grid, *origin), feet, rng);
+            }
+            // Tried once a round, found or not.
+            self.drone_placed = true;
+        }
+        // With MAZE_DRONE_ALARM=<seconds>, to try the drones out: that far into the round, one is
+        // called in as by a failed hack.
+        let alarm = platform::var("MAZE_DRONE_ALARM").and_then(|s| s.trim().parse::<f32>().ok());
+        if alarm.is_some_and(|at| self.round_time >= at) && !self.drone_alarmed && self.drone_placed {
+            self.drone_alarmed = true;
+            let feet = self.player.feet(&ctx.scenes[self.scene].graph);
+            self.drone_calls.push(feet);
+            Log::info("MAZE_DRONE_ALARM: a drone is called in");
+        }
+        for at in std::mem::take(&mut self.drone_calls) {
+            self.call_drone(&mut ctx.scenes[self.scene].graph, at);
+        }
+        let (Some((grid, origin)), Some(rng)) = (self.level.grid.as_ref(), self.rng.as_mut()) else {
             return;
         };
         let graph = &mut ctx.scenes[self.scene].graph;
-        if !self.drone_placed && self.phase == Phase::Playing {
-            if let Some((grid, origin)) = self.level.grid.as_ref() {
-                let feet = self.player.feet(graph);
-                drone.place(graph, (grid, *origin), feet, self.player.ahead());
-                // Tried once a round, found or not.
-                self.drone_placed = true;
+        let target = Target {
+            feet: self.player.feet(graph),
+            middle: self.player.position(graph),
+            collider: self.player.collider(),
+            posture: self.player.posture(),
+            in_the_dark: self.lights_off && !self.player.flashlight_on(),
+        };
+        let live = self.phase == Phase::Playing && !self.menu.is_open();
+        let mut says = std::mem::take(&mut self.drone_says);
+        for (n, drone) in self.drones.iter_mut().enumerate() {
+            let doing = drone.update(graph, (grid, *origin), &target, rng, ctx.dt, live);
+            says.extend(doing.says.map(|said| (n, said)));
+            // At the player's middle, wherever they are as it fires.
+            if let (Some((from, colour)), Some(shots)) = (doing.fired, self.shots.as_mut()) {
+                shots.fire(graph, from, target.middle, colour);
             }
         }
-        let started = drone.update(graph);
-        // Speaking as it starts an animation, in beeps made in the background, from its body.
-        if let (Some(name), Some((chirps, lines))) = (started, &self.drone_voice) {
+        for &(n, said) in &says {
+            Log::info(format!("Drone {n}: {said}"));
+        }
+        // Speaking as things happen to it, in beeps made in the background, from its body: one
+        // line at a time, the latest.
+        if let (Some(&(n, name)), Some((chirps, lines))) = (says.last(), &self.drone_voice) {
             if let Some(said) = lines.line(name, self.drone_said) {
                 self.drone_said += 1;
                 let sound = chirps.say(&said.says, 1.0);
                 let (rate, reach) = (chirps.sample_rate, sound.reach);
                 let receiver = platform::in_background(move || synth::make(&sound, rate));
                 self.drone_saying = Some(Making(receiver, reach));
+                self.drone_speaking = n;
             }
         }
         if let (Some(Making(receiver, reach)), Some((chirps, _))) =
@@ -1604,7 +1817,8 @@ impl MazeGame {
         {
             match receiver.try_recv() {
                 Ok(samples) => {
-                    if let Some(buffer) = formants::playable(samples, chirps.sample_rate) {
+                    let body = self.drones.get(self.drone_speaking).map(|drone| drone.body());
+                    if let (Some(buffer), Some(body)) = (formants::playable(samples, chirps.sample_rate), body) {
                         let sound = SoundBuilder::new(BaseBuilder::new())
                             .with_buffer(Some(buffer))
                             .with_radius(*reach)
@@ -1612,7 +1826,7 @@ impl MazeGame {
                             .with_status(SoundStatus::Playing)
                             .build(graph);
                         // Along with it, wherever it goes.
-                        graph.link_nodes(sound, drone.body());
+                        graph.link_nodes(sound, body);
                     }
                     self.drone_saying = None;
                 }

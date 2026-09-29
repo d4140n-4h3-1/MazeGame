@@ -99,6 +99,38 @@ shadows (its `raytracing` feature).
 
 29 September 2026:
 
+- **A security drone patrols the maze.** It is put down well away from where you start and
+  hovers along the corridors from one spot to the next, calm, its glow green, paying you no
+  heed. It turns on you only when a scout or maintenance unit sounds the alarm, or when a bolt
+  from your pistol hits a droid (or the drone): it says so ("Sirenatio accipatum. Zeto
+  aggressor."), flies to where you were, and searches there and nearby for 30 seconds, scanning
+  at each spot, its glow orange, before it calms down and patrols again. Seeing you, it goes red,
+  comes on to 6 m and fires a plasma shot every second and a half while it can see you; a shot
+  that hits takes a third of your health, as a sentry's touch does. Three bolts bring it down:
+  its rings break into four pieces each, which fly apart, and it drops with them to the floor.
+  It sees in front of it as a sentry that is not on Alert does. What it says is in
+  `data/dialogue/drone.json`, by what it says it about.
+- **The drone's shot** is a glowing ball with a tail and two small rings turning about it, made
+  in Blender (`data/drone_shot.glb`), in the colour of the drone's mood, lighting what it passes;
+  it sounds and hums as the pistol's bolts do. It flies at 12 m/s, slow enough to step out of the
+  way of from a few steps off, and stops at the first thing it hits.
+- **Credits.** Every computer carries credits, whatever else is on it: a random amount, most
+  of them a few credits and now and then a good deal more, up to 500. Clearing its hack
+  transfers them to you - the terminal says how many under ACCESS GRANTED - and your credits
+  show in gold in the top right, kept from one maze to the next. Credits go as dollars and cents
+  do: whole credits and hundredths of one, written `1,234.56 CR`.
+- **The fallen stay down.** A droid shot down lies where it fell, broken parts and all, for the
+  rest of the round, rather than disappearing a few seconds later; the others walk over it.
+- **A failed hack calls in a drone.** When the trace completes, the patrolling drone nearest the
+  computer comes to search there; if none is patrolling, one more flies in from out of sight -
+  there are four in all - and failing that, the nearest one searching goes there instead. Some
+  drone always comes.
+- **Health bars over the sentries and the drone.** A sentry's red health bar sits over its
+  stamina bar, shown with it - once it is after you, has spent some breath or has been hit -
+  and a bolt takes a third of it. The drone has a health bar alone, while it is after you or has
+  been hit.
+- **No droid waits in front of you at the start** any more: every droid starts out of sight, and
+  wanders.
 - **Jog, run and sprint.** Caps Lock still goes between walking and jogging. A tap of Shift now
   goes between walking and running, a pace between a jog and a sprint - the sprint's stride,
   stepped out slower - which costs stamina, if far less than a sprint: 20 seconds of it on a
@@ -478,6 +510,7 @@ logs goes to the browser's console there.
 | `MAZE_SSAO=0`            | Turns ambient occlusion off.                                            |
 | `MAZE_REFLECTIONS=0`     | Turns floor reflections off.                                            |
 | `MAZE_KNOCKDOWN=<s>`     | That many seconds into a round, shoots down the droid nearest you, to try the ragdolls out. |
+| `MAZE_DRONE_ALARM=<s>`   | That many seconds into a round, sends the drone after you as if the alarm had sounded, to try it out. |
 | `MAZE_DISMEMBER=<parts>` | With `MAZE_KNOCKDOWN`, breaks those parts off it too, such as `head,forearm.L,shin.R`. |
 | `MAZE_COMPUTER=1`        | Puts you at the computer, using it, as soon as it is placed; `breach` starts a breach too, and `look` only puts you in front of it. |
 | `MAZE_TERMINAL_OVERLAY=1` | Shows the computer's terminal over its screen, as a panel of the game's interface, instead of on the screen itself. |
@@ -521,6 +554,9 @@ how a droid comes apart, and the computer's hack and where it goes.
 | `inward.rs`     | Makes the tiles' surfaces visible from inside and out.                     |
 | `hud.rs`        | The status line, the banner, the alert at the top, the stamina bar and the pistol's ammo. |
 | `hearts.rs`     | The hearts: where they go in each maze, and their floating and spinning.   |
+| `drone.rs`      | The security drone: its patrol, the alarm, searching and firing, its glow and mood. |
+| `credits.rs`    | Credits, the maze's money: amounts in hundredths, how they are written, and what a computer carries. |
+| `drone_shot.rs` | The drone's shots: their flight, what they hit, and their glow.            |
 | `menu.rs`       | The pause menu.                                                            |
 | `computer.rs`   | The computer to hack: where it goes, the hack, and its terminal.           |
 | `ragdoll.rs`    | A droid gone limp: its bodies and joints, from `data/droid_motion.json`.   |
