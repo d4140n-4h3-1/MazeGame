@@ -11,9 +11,9 @@ license = "MIT AND CC-BY-SA-4.0"
 
 [dependencies]
 # The engine's wgpu backend only. On Linux wgpu drives Vulkan.
-fyrox = { git = "https://github.com/d4140n-4h3-1/Fyrox.git", branch = "vulkan", default-features = false, features = ["backend_wgpu"] }
+fyrox = { git = "https://github.com/d4140n-4h3-1/Hydroxus.git", branch = "vulkan", default-features = false, features = ["backend_wgpu"] }
 # Only used to confirm at startup which graphics API the renderer actually got.
-fyrox-graphics-wgpu = { git = "https://github.com/d4140n-4h3-1/Fyrox.git", branch = "vulkan" }
+fyrox-graphics-wgpu = { git = "https://github.com/d4140n-4h3-1/Hydroxus.git", branch = "vulkan" }
 wgpu = "30"
 # Reading where the droid's skids take it, from the file made along with its animations.
 serde = { version = "1", features = ["derive"] }

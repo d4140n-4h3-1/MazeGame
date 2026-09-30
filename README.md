@@ -45,14 +45,15 @@ browser with WebGL 2 is all it needs.
   cargo run
   ```
 
-  The engine fork is about 400 MB. `.cargo/config.toml` has Cargo fetch it with the system `git`
+  The engine, [Hydroxus](https://github.com/d4140n-4h3-1/Hydroxus), is about 400 MB. `.cargo/config.toml` has Cargo fetch it with the system `git`
   rather than its own library, which can resume an interrupted download instead of starting it
   over. `Cargo.lock` pins the commits used; `cargo update` moves to the latest of each branch.
 
-  The engine is modified, so upstream Fyrox will not do: the
-  [`vulkan` branch of this fork](https://github.com/d4140n-4h3-1/Fyrox/tree/vulkan) makes the
-  wgpu backend render like the OpenGL one and adds the hardware ray tracing that the traced
-  shadows use. `VULKAN.md` in the fork describes every change.
+  The engine is modified, so upstream Fyrox will not do: Hydroxus is a fork of Fyrox whose
+  [`vulkan` branch](https://github.com/d4140n-4h3-1/Hydroxus/tree/vulkan) makes the wgpu backend
+  render like the OpenGL one and adds the hardware ray tracing that the traced shadows use. Its
+  crates keep Fyrox's names, so the game still says `fyrox`. `VULKAN.md` in Hydroxus describes
+  every change.
   [`fyrox-gfx`](https://github.com/d4140n-4h3-1/fyrox-gfx) holds the graphics effects the game
   adds on top of the engine.
 
@@ -61,9 +62,9 @@ engine's OpenGL backend, which it would otherwise pick over Vulkan.
 
 ## What's changed
 
-### The engine, compared with upstream Fyrox
+### The engine, Hydroxus, compared with upstream Fyrox
 
-The fork's `vulkan` branch is two commits on top of upstream Fyrox as of 13 September 2026:
+Hydroxus's `vulkan` branch began as two commits on top of upstream Fyrox as of 13 September 2026:
 
 1. **Make the wgpu (Vulkan) backend render like the OpenGL one.** Fixes found by rendering the
    same scenes on both backends and comparing the frames:
@@ -86,7 +87,7 @@ The fork's `vulkan` branch is two commits on top of upstream Fyrox as of 13 Sept
    - glTF meshes without a material come out plain white instead of dark white metal.
    - Animations saved by older engine versions load their property paths.
 
-`VULKAN.md` in the fork explains each change in detail.
+`VULKAN.md` in Hydroxus explains each change in detail.
 
 ### fyrox-gfx
 
@@ -96,6 +97,12 @@ reflections, a budget that keeps shadow maps for the nearest lamps only, and the
 shadows (its `raytracing` feature).
 
 ### The game
+
+30 September 2026:
+
+- **The engine fork is now Hydroxus.** The fork of Fyrox the game is built on has a name, and a
+  README of its own crediting Fyrox. Its crates keep their Fyrox names, so nothing in the game
+  changes but where Cargo fetches it from.
 
 29 September 2026:
 
