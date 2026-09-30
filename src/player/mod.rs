@@ -37,9 +37,9 @@
 //!
 //! What the player hears, they hear from where the camera is, facing the way it faces.
 //!
-//! In cover at the edge of the wall, holding the key that would go on past leans: the head moves
-//! out round the corner and tilts, to see past it without stepping out from behind it - see
-//! [`lean`]. It never leans into a wall.
+//! In cover at the edge of the wall, holding the key that would go on past - or aiming the pistol -
+//! leans: the head moves out round the corner and tilts, to see past it without stepping out from
+//! behind it - see [`lean`]. It never leans into a wall.
 //!
 //! Holding Q looks behind: the head turns round over the shoulder while the body keeps going the
 //! way it was facing, so the player can see what is following them without stopping.
@@ -146,10 +146,10 @@ pub struct Player {
     /// How high the eyes are above the feet right now, on their way to the posture's height.
     eyes: f32,
     look_back: LookBack,
-    /// How far the head is leaning right now, in meters, along the body's `right` (see
-    /// [`Player::fit_lean`]); the tilt is taken from the same number, so the head always tips the
-    /// way it is leaning.
-    lean: f32,
+    /// How far the head is leaning out right now, in meters, in the body's own terms (see
+    /// [`Player::fit_lean`]); the tilt is taken from how much of it is to the side, so the head
+    /// always tips the way it is leaning.
+    lean: Vector3<f32>,
     /// The wall the droid is in cover against, if it is.
     cover: Option<cover::Cover>,
     yaw: f32,
@@ -216,7 +216,7 @@ impl Default for Player {
             shaped_for: None,
             eyes: Posture::Standing.eyes(),
             look_back: LookBack::default(),
-            lean: 0.0,
+            lean: Vector3::zeros(),
             cover: None,
             yaw: 0.0,
             pitch: 0.0,
@@ -366,7 +366,7 @@ impl Player {
         self.posture = Posture::Standing;
         self.eyes = Posture::Standing.eyes();
         self.look_back = LookBack::default();
-        self.lean = 0.0;
+        self.lean = Vector3::zeros();
         self.cover = None;
         self.stamina = 1.0;
         self.winded = false;
@@ -409,7 +409,7 @@ impl Player {
         self.face_speaker(graph, dt);
         let rotation = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.yaw);
         let right = rotation * -Vector3::x();
-        self.fit_lean(graph, right, dt);
+        self.fit_lean(graph, rotation, dt);
 
         graph[self.body]
             .local_transform_mut()

@@ -53,9 +53,10 @@
 //! In cover against a wall, it leans back against it, GTA V style: its cover idle, and its cover
 //! walk and jog, shuffling sideways along the wall with its back to it, in place of the usual
 //! ones - each made twice, for the wall on its left and on its right. Without them it idles and
-//! walks as ever. At the corner, where the wall ends, raising the pistol reaches it out round the
-//! corner in one hand, the droid staying behind the wall; pushing on past the corner as well, it
-//! turns across the wall and leans out round it to aim one-handed, only as far out as it has to.
+//! walks as ever. At the corner, where the wall ends, aiming - or pushing on past the corner -
+//! turns it across the wall to lean out round it and aim one-handed, only as far out as it has to;
+//! firing without aiming only reaches the pistol out round the corner in one hand, the droid
+//! staying behind the wall.
 //!
 //! It draws a pistol, holds it at the ready, raises it to aim and fires it, lowers it again a
 //! moment after the last shot unless it is held raised, and holsters it, with its upper body - from the
@@ -269,6 +270,9 @@ const COVER_JOG: [&str; 2] = ["droid_lean_jog_L", "droid_lean_jog_R"];
 const COVER_AIM: [&str; 2] = ["droid_lean_aim_L", "droid_lean_aim_R"];
 /// Only the pistol arm reached out round the corner, the droid behind the wall, the barrel pointing
 /// back across it. For the wall on its left, and on its right.
+/// Leaning out round the corner to aim, how far past straight across the wall, back toward it, the
+/// barrel may be brought round, in radians: little enough to keep the pistol clear of the wall's end.
+const TOWARD_WALL: f32 = 15.0 * std::f32::consts::PI / 180.0;
 const COVER_REACH: [&str; 2] = ["droid_lean_reach_L", "droid_lean_reach_R"];
 /// How fast the crouch is played for each gait - walking, jogging, running, sprinting - crouched, and
 /// down on the floor crawling, as a multiple of how it was made. Each is slower than the one
@@ -949,6 +953,23 @@ fn yaw_of(way: Vector3<f32>) -> f32 {
     way.x.atan2(way.z)
 }
 
+/// Turns the pose in `pose` round, a half turn about the droid's up, from the last bone of
+/// `chain` down: that bone's place and its turn both.
+fn turn_round(pose: &mut FxHashMap<Handle<Node>, Bone>, chain: &[Handle<Node>]) {
+    let Some((&bone, above)) = chain.split_last() else {
+        return;
+    };
+    if chain.iter().any(|bone| !pose.contains_key(bone)) {
+        return;
+    }
+    let half = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), std::f32::consts::PI);
+    let parent = place(above, |bone| pose[&bone]).rotation;
+    if let Some(bone) = pose.get_mut(&bone) {
+        bone.position = parent.inverse() * (half * (parent * bone.position));
+    }
+    rotate_bone(pose, chain, half);
+}
+
 /// Turns the last bone of `chain` in `target` by `angle` about the droid's up, in its own terms,
 /// left positive, and with it everything that hangs off it.
 fn turn_bone(target: &mut FxHashMap<Handle<Node>, Bone>, chain: &[Handle<Node>], angle: f32) {
@@ -1251,6 +1272,9 @@ pub struct Avatar {
     cornered: Option<(Wall, bool)>,
     corner_weight: f32,
     reach_weight: f32,
+    /// How far over it has gone to keeping its body square to the wall it has its back against,
+    /// from 0 to 1: in cover, but for leaning out round the corner.
+    against_weight: f32,
     /// The side the wall was last on aiming round the corner, to fade back from.
     corner_side: Wall,
     /// Its strafes walking, jogging, running and crouched, each way, as indexes into `cycles`, as
@@ -2016,6 +2040,7 @@ impl Avatar {
             cornered: None,
             corner_weight: 0.0,
             reach_weight: 0.0,
+            against_weight: 0.0,
             corner_side: Wall::Left,
             strafes,
             stepping: None,
@@ -2463,6 +2488,8 @@ impl Avatar {
         // Aiming round the corner, the pose it holds there is its own aim: the pistol's clips
         // and aims give way to it.
         let own_aim = 1.0 - smooth(self.corner_weight);
+        // Against the wall, no twist of the body to aim.
+        let square_on = 1.0 - smooth(self.against_weight);
         if self.arms_weight > 0.0 {
             let w = own_aim * smooth(self.arms_weight);
             for (bone, pose) in &self.arms_pose {
@@ -2515,7 +2542,8 @@ impl Avatar {
             let (pitch, yaw) = (self.look.0, wrap(self.look.1 - facing));
             for (bone, offset) in aims.offset(pitch, yaw) {
                 if let Some(pose) = target.get_mut(&bone) {
-                    let offset = Bone::identity().towards(offset, arm_weight(&bone, own_aim * w));
+                    let offset = Bone::identity()
+                        .towards(offset, arm_weight(&bone, own_aim * square_on * w));
                     pose.position += offset.position;
                     pose.rotation *= offset.rotation;
                 }
@@ -2533,7 +2561,15 @@ impl Avatar {
                     Wall::Right => -std::f32::consts::FRAC_PI_2,
                 } * smooth(self.corner_weight);
                 let off = wrap(yaw - across);
-                let yaw = across + off.clamp(right.unwrap_or(off), left.unwrap_or(off));
+                let (mut right, mut left) = (right.unwrap_or(off), left.unwrap_or(off));
+                // Leaning out round the corner, the pistol comes back toward the wall no further
+                // than a little past straight across, clear of the end of it.
+                let out = smooth(self.corner_weight) * (1.0 - smooth(self.reach_weight));
+                match self.corner_side {
+                    Wall::Left => left += (TOWARD_WALL - left) * out,
+                    Wall::Right => right += (-TOWARD_WALL - right) * out,
+                }
+                let yaw = across + off.clamp(right, left);
                 let wanted = pointing(pitch.clamp(bottom, top), wrap(yaw + facing - self.heading));
                 if matches!(self.arms, Arms::Aiming | Arms::Ready) {
                     let barrel =
@@ -2546,7 +2582,8 @@ impl Avatar {
                 // Reaching round the corner, the arm is as far out as it goes: turning the back
                 // would only swing it into the wall.
                 let reach = smooth(self.reach_weight);
-                let turn = UnitQuaternion::identity().slerp(&self.aim_fix, w * (1.0 - reach));
+                let turn =
+                    UnitQuaternion::identity().slerp(&self.aim_fix, w * (1.0 - reach) * square_on);
                 turn_back(&mut target, &square.back, turn);
             }
         }
@@ -2556,7 +2593,7 @@ impl Avatar {
         // that the stride sways it rather than being taken back out.
         if let (Some(square), Some((twist, drop))) = (self.square.as_ref(), stride) {
             if at_ready > 0.0 {
-                let twist = at_ready * READY_TWIST * twist;
+                let twist = at_ready * square_on * READY_TWIST * twist;
                 twist_back(&mut target, &square.back, twist);
                 turn_bone(&mut target, &square.shoulders[1], -PISTOL_STEADY * twist);
                 let dip = UnitQuaternion::from_axis_angle(
@@ -2587,6 +2624,15 @@ impl Avatar {
             self.end_skid(graph);
         }
         let facing = self.facing_for(going);
+        // In cover the clips turn the droid a quarter turn on its heading, its back to the wall,
+        // one way for the wall on its left and the other for its right. Going the other way along
+        // the wall the heading comes round at once, and the pose it goes over from is turned
+        // round with it: the body stays facing out from the wall rather than swinging into it.
+        let turned_round =
+            matches!((going.cover, self.covered), (Some(now), Some(before)) if now != before);
+        if turned_round {
+            self.heading = facing;
+        }
         self.turn(graph, facing, dt);
         if going.grounded {
             self.airborne = 0.0;
@@ -2618,16 +2664,23 @@ impl Avatar {
                 _ => (),
             }
         }
-        // At the corner with the pistol up, it reaches it out round the corner - or, pushing on
-        // past, leans out round it to aim.
+        // At the corner with the pistol up, it leans out round it to aim when it peeks - aiming,
+        // or pushing on past - and otherwise, firing blind, only reaches the pistol out.
         let raised = matches!(self.arms, Arms::Raising | Arms::Aiming | Arms::Firing(_));
+        // Only standing still, where the pose it holds there shows: on the move the pistol's own
+        // aim keeps the barrel pointed, rather than it being let go to the shuffle's lowered hand.
         let cornered = going
             .cover
-            .filter(|_| going.corner && raised)
+            .filter(|_| going.corner && raised && wanted.is_none())
             .map(|wall| (wall, going.peeking))
             .filter(|&(wall, out)| self.corner_clip(wall, out).is_some());
         if let Some((wall, _)) = cornered {
             self.corner_side = wall;
+        }
+        // Into the pose at the corner or out of it, the body under the pistol turns a long way at
+        // once: the turn that kept the barrel on target before would only swing it off now.
+        if cornered != self.cornered {
+            self.aim_fix = UnitQuaternion::identity();
         }
         let step = dt / ARMS_FADE;
         let into_corner = if cornered.is_some() { 1.0 } else { 0.0 };
@@ -2638,6 +2691,14 @@ impl Avatar {
             0.0
         };
         self.reach_weight += (reaching - self.reach_weight).clamp(-step, step);
+        // Its back against the wall - in cover, but for leaning out round the corner - the body
+        // keeps square to it and does not twist to aim, which would swing the pistol into it.
+        let against = if going.cover.is_some() && !matches!(cornered, Some((_, true))) {
+            1.0
+        } else {
+            0.0
+        };
+        self.against_weight += (against - self.against_weight).clamp(-step, step);
         // Standing still, going into cover or out of it, or round the corner to aim or back,
         // changes one idle for the other.
         if wanted.is_none()
@@ -2673,6 +2734,9 @@ impl Avatar {
             self.fade_from_here(graph);
         }
 
+        if turned_round && self.fade == 0.0 {
+            turn_round(&mut self.from, &self.skeleton.hips);
+        }
         let mut target = self.rest.clone();
         if let Some(index) = self.playing {
             let cycle = &self.cycles[index];
@@ -3554,6 +3618,29 @@ mod tests {
         let turned = shoulders_yaw(turn(0.4) * left, turn(0.4) * right);
         assert!((turned - 0.4).abs() < 1e-5, "{turned}");
         assert!((yaw_of(turn(-0.7) * Vector3::z()) + 0.7).abs() < 1e-5);
+    }
+
+    #[test]
+    fn turned_round_the_hips_face_and_stand_the_other_way() {
+        let (root, hips) = (Handle::new(1, 1), Handle::new(2, 1));
+        let bone = |x: f32| Bone {
+            position: Vector3::new(x, 1.0, 0.0),
+            rotation: UnitQuaternion::identity(),
+        };
+        let mut pose: FxHashMap<Handle<Node>, Bone> = [(root, Bone::identity()), (hips, bone(0.2))]
+            .into_iter()
+            .collect();
+        turn_round(&mut pose, &[root, hips]);
+        let turned = pose[&hips];
+        assert!(
+            (turned.position - Vector3::new(-0.2, 1.0, 0.0)).norm() < 1e-5,
+            "{turned:?}"
+        );
+        let ahead = turned.rotation * Vector3::z();
+        assert!(
+            (ahead - -Vector3::z()).norm() < 1e-5,
+            "faces the other way: {ahead:?}"
+        );
     }
 
     #[test]

@@ -144,18 +144,20 @@ impl Player {
     /// lean, and turned by the look behind, the pitch, the lean and the roll. The camera goes
     /// there, or behind it - see [`Player::place_camera`].
     pub(super) fn place_head(&mut self, graph: &mut Graph, dt: f32) {
-        let leaning = self.lean / LEAN_DISTANCE;
+        // How far into a full lean, and how much of it to the right (the body's right is its -x).
+        let leaning = (self.lean.norm() / LEAN_DISTANCE).min(1.0);
+        let to_right = -self.lean.x / LEAN_DISTANCE;
         let (up, sideways) = bob(self.stride, self.swing);
         // The head turns on the body; walking goes by the body, so it carries on ahead. A lean
-        // moves it out to the side (the body's right is its -x) and tilts it the same way.
+        // moves it out round the corner, and tilts it as far as that is to the side.
         let head = Vector3::new(
-            -self.lean - sideways,
-            FEET + self.eyes - LEAN_DIP * leaning.abs() + up - self.landing,
-            0.0,
+            self.lean.x - sideways,
+            FEET + self.eyes - LEAN_DIP * leaning + up - self.landing,
+            self.lean.z,
         );
         let tilt = UnitQuaternion::from_axis_angle(
             &Vector3::z_axis(),
-            leaning * LEAN_TILT.to_radians() + self.roll,
+            to_right * LEAN_TILT.to_radians() + self.roll,
         );
         let turned = |yaw: f32, pitch: f32| {
             UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.look_back.angle() + yaw)

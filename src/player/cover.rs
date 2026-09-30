@@ -178,9 +178,21 @@ impl Player {
     }
 
     /// Which way to lean round the corner, along the ground: while the droid is at the edge of
-    /// the wall it is in cover against, with a key held that would take it on past.
+    /// the wall it is in cover against, with a key held that would take it on past - or with the
+    /// pistol out and the right mouse button held to aim, which leans it out round the corner
+    /// to aim of itself.
     pub(super) fn cover_peek(&self) -> Option<Vector3<f32>> {
-        self.cover?.peek
+        let cover = self.cover?;
+        let aiming = self.armed && self.keys.strafe;
+        cover
+            .peek
+            .or_else(|| (cover.corner && aiming).then(|| along(cover.normal) * cover.facing))
+    }
+
+    /// Straight into the wall the droid is in cover against, along the ground: the way round its
+    /// end, from beside it, to its far side.
+    pub(super) fn cover_across(&self) -> Option<Vector3<f32>> {
+        Some(-self.cover?.normal)
     }
 
     /// Whether the droid is in cover at the end of the wall, the way it faces: at the corner.

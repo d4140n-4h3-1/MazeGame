@@ -11,8 +11,10 @@
 //! holstered once the fighting is over. Shot
 //! down, a droid falls limp, knocked back by the shot, and may lose what it was hit in; it comes
 //! back as a new droid. They cross the arena along the walk grid, see only in front
-//! of them (hydroxus-ai's sight), and fight from cover: a crouched droid behind a low block or a
-//! pillar is out of the line of fire, and stands up or steps round it to shoot. Hurt, a droid
+//! of them (hydroxus-ai's sight), and fight from cover: a crouched droid behind a low block is out
+//! of the line of fire, and stands up to shoot over it; behind a wall or a pillar too tall to shoot
+//! over, it stands with its back to it, as the player does in cover, and leans out round the side
+//! of it to shoot. Hurt, a droid
 //! falls back to cover further from the enemy. The dead come back at their own end of the arena
 //! a few seconds later, and the first team to reach the kill limit wins the match.
 //!
@@ -75,7 +77,7 @@ use hydroxus_ai::{prelude::*, route::route_to_weighted};
 use maze::{
     dismember,
     player::{
-        avatar::{Avatar, Going},
+        avatar::{Avatar, Going, Wall},
         pistol::{Bolts, BOLT_SPEED},
         posture::{Gait, Posture},
     },
@@ -288,6 +290,25 @@ impl Droid {
 
     fn chest(&self) -> Vector3<f32> {
         self.position + Vector3::y() * if self.crouched { CHEST_CROUCHED } else { CHEST_STANDING }
+    }
+
+    /// Behind tall cover - a wall or a pillar, which it shoots round rather than over - which side
+    /// the wall is on and which way along it the droid faces, toward the side it leans out from:
+    /// with `spot` and `peek` of its task, and the cover spots.
+    fn tall_cover(spot: usize, peek: Vector3<f32>, covers: &[CoverSpot]) -> Option<(Wall, f32)> {
+        let at = covers.get(spot)?.position;
+        let along = flat(peek - at);
+        // Low cover is shot over from the spot itself.
+        if along.norm() < 0.3 {
+            return None;
+        }
+        let along = along.normalize();
+        let left = -right_of(along);
+        let shielded = |way: Vector3<f32>| {
+            covers[spot].shields.iter().map(|s| s.dot(&way)).fold(f32::MIN, f32::max)
+        };
+        let wall = if shielded(left) > shielded(-left) { Wall::Left } else { Wall::Right };
+        Some((wall, heading_of(along)?))
     }
 
     fn cover_spot(&self) -> Option<usize> {
@@ -1080,9 +1101,19 @@ impl Battle {
                 }
             }
             Task::Hidden { spot, peek, left } => {
-                self.droids[i].crouched = true;
+                // Behind tall cover it stands with its back to it rather than crouching.
+                let tall = Droid::tall_cover(spot, peek, &self.covers).is_some();
+                self.droids[i].crouched = !tall;
                 let position = self.covers[spot].position;
-                self.walk_to(i, position);
+                if tall && (self.droids[i].position - position).norm() < 1.5 {
+                    // Back in from leaning out round it.
+                    let droid = &mut self.droids[i];
+                    droid.position = position;
+                    droid.was_at = position;
+                    droid.route.clear();
+                } else {
+                    self.walk_to(i, position);
+                }
                 // Flanked: an enemy can see it where it crouches. Find better cover.
                 let exposed = self.enemies_of(i).any(|j| {
                     (self.droids[j].position - position).norm() < 40.0
@@ -1112,7 +1143,17 @@ impl Battle {
             }
             Task::Peeking { spot, peek, left } => {
                 self.droids[i].crouched = false;
-                self.walk_to(i, peek);
+                if Droid::tall_cover(spot, peek, &self.covers).is_some() {
+                    // Round tall cover it leans out from where it stands, rather than stepping out:
+                    // its eyes, for what it sees and shoots, are out at `peek`, and its body is
+                    // drawn behind the cover, leaning out (see `show_droids`).
+                    let droid = &mut self.droids[i];
+                    droid.position = peek;
+                    droid.was_at = peek;
+                    droid.route.clear();
+                } else {
+                    self.walk_to(i, peek);
+                }
                 let smart = self.smart(i);
                 // With nobody in sight, it fires at where one was just seen, to keep them down.
                 self.droids[i].suppress_at = if smart && self.droids[i].target.is_none() {
@@ -1688,9 +1729,17 @@ impl Battle {
                     break;
                 }
             }
-            // Face the target while there is one; otherwise, the way it is going.
+            // Face the target while there is one; otherwise, the way it is going. Behind tall
+            // cover, along the wall toward the side it leans out from.
             let target = droid.target.map(|j| j);
+            let along = match droid.task {
+                Task::Hidden { spot, peek, .. } | Task::Peeking { spot, peek, .. } => {
+                    Droid::tall_cover(spot, peek, &self.covers).map(|(_, along)| along)
+                }
+                _ => None,
+            };
             let face = match (target, droid.suppress_at) {
+                _ if along.is_some() => along,
                 (Some(j), _) => heading_of(self.droids[j].position - self.droids[i].position),
                 (None, Some((_, at))) => heading_of(at - self.droids[i].position),
                 (None, None) => heading_of(way),
@@ -1732,7 +1781,20 @@ impl Battle {
     }
 
     fn show_droids(&mut self, graph: &mut Graph, dt: f32) {
-        for droid in &mut self.droids {
+        // Behind tall cover: which side the wall is on, where the droid stands behind it, and
+        // whether it is leaning out round it.
+        let tall: Vec<Option<(Wall, Vector3<f32>, bool)>> = self
+            .droids
+            .iter()
+            .map(|d| match d.task {
+                Task::Hidden { spot, peek, .. } | Task::Peeking { spot, peek, .. } => {
+                    let (wall, _) = Droid::tall_cover(spot, peek, &self.covers)?;
+                    Some((wall, self.covers[spot].position, matches!(d.task, Task::Peeking { .. })))
+                }
+                _ => None,
+            })
+            .collect();
+        for (droid, tall) in self.droids.iter_mut().zip(tall) {
             // Lying where it fell, the physics has it.
             if let Some(ragdoll) = droid.ragdoll.as_mut().filter(|_| droid.fallen) {
                 ragdoll.update(graph);
@@ -1752,9 +1814,11 @@ impl Battle {
             let lift = droid.air.map_or(0.0, |(height, _)| height);
             // Its root turned the way it faces, as the player's body is turned the way they look:
             // the droid takes which way it goes, and faces, from there.
+            // Leaning out round tall cover, it stands behind it: its eyes are out at `position`.
+            let stands = tall.map_or(droid.position, |(_, behind, _)| behind);
             graph[droid.root]
                 .local_transform_mut()
-                .set_position(droid.position + Vector3::y() * lift)
+                .set_position(stands + Vector3::y() * lift)
                 .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), droid.heading));
             // How fast it went since last frame, which is what its feet keep pace with.
             let moved = flat(droid.position - droid.was_at);
@@ -1788,14 +1852,16 @@ impl Battle {
                 jumped: std::mem::take(&mut droid.jumped),
                 low: droid.low_jump,
                 falling,
-                cover: None,
-                corner: false,
-                peeking: false,
+                // Behind tall cover, its back to it at the side it leans out from - the corner -
+                // and leaning out round it to shoot.
+                cover: tall.map(|(wall, _, _)| wall),
+                corner: tall.is_some(),
+                peeking: tall.is_some_and(|(_, _, out)| out),
                 pushing: speed > 0.1,
-                strafing,
+                strafing: strafing && tall.is_none(),
                 armed: droid.calm_for < HOLSTER_AFTER,
                 trigger: std::mem::take(&mut droid.fired),
-                raised,
+                raised: raised && tall.is_none_or(|(_, _, out)| out),
                 look,
                 way,
             };

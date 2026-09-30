@@ -1,11 +1,18 @@
 //! Leaning out round the corner the droid is in cover behind: at the edge of the wall, holding
-//! the key that would go on past it moves the head out that way, keeping it clear of the walls.
+//! the key that would go on past it - or aiming the pistol - moves the head out that way, and the
+//! camera with it, keeping it clear of the walls.
 
 use super::{Player, FEET};
-use fyrox::{core::algebra::Vector3, scene::graph::Graph};
+use fyrox::{
+    core::algebra::{UnitQuaternion, Vector3},
+    scene::graph::Graph,
+};
 
-/// How far the head moves out to the side when leaning, in meters.
-pub(super) const LEAN_DISTANCE: f32 = 0.4;
+/// How far the head moves out round the corner when leaning, in meters: along the wall past its
+/// end, and then across the end of it, past the line of the wall, so that the camera behind it
+/// sees round the corner as the droid leans its head and the pistol out.
+pub(super) const LEAN_DISTANCE: f32 = 1.0;
+const LEAN_ACROSS: f32 = 0.6;
 /// How far the head tilts at a full lean, in degrees.
 pub(super) const LEAN_TILT: f32 = 12.0;
 /// How much lower the eyes are at a full lean: the body bends to the side.
@@ -28,13 +35,22 @@ impl Player {
     /// the edge of the wall it is in cover against with a key held that way, as far as the room
     /// beside the head allows, and back in otherwise.
     ///
-    /// The lean is along the body's `right`, as the head moves, so it is as much of the way round
-    /// the corner as lies across the body: all of it looking at the wall, none looking along it.
-    pub(super) fn fit_lean(&mut self, graph: &Graph, right: Vector3<f32>, dt: f32) {
+    /// The lean is the whole way round the corner, whichever way the body is turned by
+    /// `rotation`: out to the side looking at the wall, and straight on looking along it, so the
+    /// camera behind the head goes out round the corner too.
+    pub(super) fn fit_lean(&mut self, graph: &Graph, rotation: UnitQuaternion<f32>, dt: f32) {
         let head = graph[self.body].global_position() + Vector3::new(0.0, FEET + self.eyes, 0.0);
-        let target = self.cover_peek().map_or(0.0, |way| {
+        let target = self.cover_peek().map_or(Vector3::zeros(), |way| {
             let room = self.distance_to_hit(graph, head, way, LEAN_DISTANCE + LEAN_CLEARANCE);
-            way.dot(&right) * lean_reach(room)
+            let out = way * lean_reach(room);
+            // From out there, across the end of the wall toward its far side - as far as the wall
+            // itself lets it, so only once the head is past the end.
+            let across = self.cover_across().map_or(Vector3::zeros(), |across| {
+                let room =
+                    self.distance_to_hit(graph, head + out, across, LEAN_ACROSS + LEAN_CLEARANCE);
+                across * lean_reach(room).min(LEAN_ACROSS)
+            });
+            rotation.inverse() * (out + across)
         });
         self.lean += (target - self.lean) * (1.0 - (-LEAN_EASING * dt).exp());
     }
