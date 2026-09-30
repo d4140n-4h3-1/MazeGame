@@ -33,6 +33,7 @@ mod drone;
 mod drone_shot;
 mod health;
 mod hearts;
+mod firewall;
 mod fixtures;
 mod formants;
 pub mod game;

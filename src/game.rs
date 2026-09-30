@@ -3,6 +3,7 @@
 use crate::{
     credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
+    firewall::{self, Firewalls},
     drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
     alarm::AlarmSound,
@@ -291,6 +292,11 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     computers: Vec<Computer>,
+    /// The firewalls round the flags, in a maze model for capture the flag, each opened by one
+    /// of the computers.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    firewalls: Firewalls,
     /// The drone, as its model loads and once it is in the scene, and whether it has been put in
     /// front of the player this round.
     #[visit(skip)]
@@ -495,7 +501,10 @@ impl MazeGame {
         self.shot_model = Some(resources.request::<Model>(SHOT_MODEL));
         self.heart_model = Some(resources.request::<Model>(HEART_MODEL));
         match platform::var("MAZE_MODEL") {
-            Some(path) => self.model = Some(resources.request::<Model>(path)),
+            Some(path) => {
+                self.model = Some(resources.request::<Model>(path));
+                self.firewalls = Firewalls::request(resources);
+            }
             None => self.prefabs = Some(Prefabs::request(resources)),
         }
     }
@@ -559,6 +568,12 @@ impl MazeGame {
         self.barks.clear();
         // Made (and seeded) first: the grid below borrows the game.
         self.rng();
+        // The firewalls first, closed again, so that the floor round them is out of the grid
+        // before anything is put on it.
+        if let Some((grid, origin)) = self.level.grid.as_mut() {
+            let scene = &mut ctx.scenes[self.scene];
+            self.firewalls.place(scene, &self.level.markers, grid, *origin);
+        }
         let Some((grid, origin)) = self.level.grid.as_ref() else {
             return;
         };
@@ -1624,19 +1639,48 @@ impl MazeGame {
                 let colliders: Vec<_> = self.computers.iter().map(Computer::collider).collect();
                 let mut taken = Vec::new();
                 let mut placed = Vec::new();
-                for (n, computer) in self.computers.iter_mut().enumerate() {
+                // Each firewall answers to one of the last computers, put first after the one
+                // near the start, where the model marks for it or else near the firewall.
+                let count = self.computers.len();
+                let tied = self.firewalls.iter().count().min(count.saturating_sub(1));
+                let first_tied = count - tied;
+                let order = std::iter::once(0).chain(first_tied..count).chain(1..first_tied);
+                for n in order {
                     let spot = match n {
                         0 => computer::spot(grid, start),
+                        n if n >= first_tied => {
+                            let wall = self.firewalls.iter().nth(n - first_tied);
+                            wall.and_then(|wall| {
+                                let name = format!("computer_{}", wall.side);
+                                let marker = self.level.markers.iter().find(|m| m.name == name);
+                                match marker {
+                                    Some(marker) => computer::spot_marked(grid, *origin, marker.position, marker.yaw),
+                                    None => grid
+                                        .nearest_walkable(*origin, wall.position)
+                                        .and_then(|cell| computer::spot(grid, cell)),
+                                }
+                            })
+                        }
                         _ => computer::spot_away(grid, start, &taken, rng),
                     };
+                    let computer = &mut self.computers[n];
                     match spot {
                         Some(spot) => {
                             computer.place(graph, grid, *origin, spot, &colliders);
                             taken.push(spot.0);
                             placed.push(n);
+                            if n >= first_tied {
+                                if let Some(wall) = self.firewalls.get_mut(n - first_tied) {
+                                    wall.computer = Some(n);
+                                    Log::info(format!("Firewall: {}'s opened by computer {n}", wall.side));
+                                }
+                            }
                         }
                         None => computer.hide(graph),
                     }
+                }
+                if self.firewalls.iter().any(|wall| wall.computer.is_none()) {
+                    Log::warn("Maze: a firewall has no computer to open it, and stays open");
                 }
                 if placed.first() != Some(&0) {
                     Log::warn("Maze: found no wall near the start to put a computer against");
@@ -1699,6 +1743,8 @@ impl MazeGame {
                 self.hud.show_note(format!("+{taken} transferred"));
                 Log::info(format!("Credits: +{taken}, {} in all", self.credits));
             }
+            // A hacked computer opens its firewall.
+            self.firewalls.update(&mut ctx.scenes[self.scene].graph, &self.computers, ctx.elapsed_time);
             // A failed hack calls in a drone, to where the player is.
             if denied && self.phase == Phase::Playing {
                 let feet = self.player.feet(&ctx.scenes[self.scene].graph);
@@ -2108,10 +2154,12 @@ impl Plugin for MazeGame {
             _ if self.menu.is_open() => (),
             Phase::Loading => {
                 let models: Vec<(String, ModelResource)> = match (&self.model, &self.prefabs) {
-                    (Some(model), _) => vec![(
-                        platform::var("MAZE_MODEL").unwrap_or_default(),
-                        model.clone(),
-                    )],
+                    (Some(model), _) => {
+                        let path = platform::var("MAZE_MODEL").unwrap_or_default();
+                        let mut models = vec![(path, model.clone())];
+                        models.extend(self.firewalls.models());
+                        models
+                    }
                     (None, Some(prefabs)) => prefabs
                         .all()
                         .into_iter()
@@ -2172,7 +2220,12 @@ impl Plugin for MazeGame {
                     let exit = scene.graph[self.exit].global_position();
                     let player = self.player.position(&scene.graph);
                     let flat = Vector3::new(exit.x - player.x, 0.0, exit.z - player.z);
-                    if flat.norm() < EXIT_RADIUS {
+                    // A flag is only there to take once its firewall is down, and is reached
+                    // from beside its plinth.
+                    let flag = self.firewalls.at(exit);
+                    let (reach, open) = flag.map_or((EXIT_RADIUS, true), |w| (firewall::REACH, w.is_open()));
+                    let side = flag.map(|w| w.side);
+                    if open && flat.norm() < reach {
                         self.phase = Phase::Won;
                         let best = self
                             .best_time
@@ -2180,7 +2233,11 @@ impl Plugin for MazeGame {
                         let record = self.best_time.is_none_or(|b| self.round_time < b);
                         self.best_time = Some(best);
                         let text = format!(
-                            "You escaped in {}{}\nPress N for another maze",
+                            "{} in {}{}\nPress N for another maze",
+                            match side {
+                                Some(side) => format!("You took {side}'s flag"),
+                                None => "You escaped".to_string(),
+                            },
                             hud::format_time(self.round_time),
                             if record { " - a new best!" } else { "" }
                         );

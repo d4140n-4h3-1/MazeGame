@@ -111,6 +111,10 @@ their animations; the crate decides what they make of what is round them.
 - **A capture-the-flag map**, `data/arena/ctf_map.glb`: a red base at one end and a cyan base at
   the other, each with its flag, joined by three lanes. The team battle can be fought in it
   with `BATTLE_MAP`.
+- **Flags in firewalls.** Each flag stands in a firewall, a flickering shell of orange glass that
+  nothing gets through, until the computer it answers to, in the same base, is hacked. Take
+  blue's flag to win the round. The flags and the firewall are the models made in Blender,
+  exported by `data/ctf/export_models.py`.
 - **The droids see only in front of them, always.** On ALERT too, and right next to them too: a
   droid or a drone can be crept up on from behind, or slipped round while it looks the other
   way. A hunting droid that loses you round its back has to search for you.
@@ -635,8 +639,16 @@ long walls with doorways through them split the field into three lanes. The midd
 round a central tower, and each side lane is narrower, with a low wall across its middle. Both
 halves of the map are the same, mirrored, with low and tall cover and pillars throughout.
 `data/arena/ctf_map.py` builds it in Blender (`blender -b --python data/arena/ctf_map.py`).
-Played with `MAZE_MODEL`, the cyan flag is the something to find. The team battle fights in it
-with
+Played with `MAZE_MODEL`, you start at red's end and take blue's flag.
+
+The model marks where the game puts things with empties. `flag_red` and `flag_blue` get that
+side's flag, `data/ctf/flag_red.glb` or `data/ctf/flag_blue.glb`, standing in a firewall,
+`data/ctf/firewall.glb`, turned the way the empty's +x points. `computer_red` and `computer_blue`
+get the computer that opens that firewall, its screen facing along the empty's +x; without one,
+the computer goes against the wall nearest the firewall. The firewall's orange shell stands in the
+way until its computer is hacked, then goes, and the flag can be taken from beside its plinth.
+The shell is see-through glass that tints what is behind it orange, and its glow and its light
+flicker. The team battle fights in it with
 
 ```sh
 BATTLE_MAP=data/arena/ctf_map.glb cargo run --release --example team_battle

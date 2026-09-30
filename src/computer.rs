@@ -1473,6 +1473,20 @@ pub fn spot(grid: &WalkGrid, start: (usize, usize)) -> Option<Spot> {
     best.map(|(_, spot)| spot)
 }
 
+/// Where a maze model marks a computer to go, at `position` with its screen facing along `yaw`
+/// (see [`crate::level::Marker`]), on `grid`, whose corner is at `origin`: the nearest cell
+/// that is walkable, facing whichever way along the grid is nearest.
+pub fn spot_marked(grid: &WalkGrid, origin: Vector3<f32>, position: Vector3<f32>, yaw: f32) -> Option<Spot> {
+    let cell = grid.nearest_walkable(origin, position)?;
+    let (x, z) = (yaw.cos(), -yaw.sin());
+    let facing = if x.abs() >= z.abs() {
+        (x.signum() as i64, 0)
+    } else {
+        (0, z.signum() as i64)
+    };
+    Some((cell, facing))
+}
+
 /// Where another computer goes, from `start` in `grid`, picked by `rng`: anywhere it fits against
 /// a wall at least [`AWAY_FROM_START`] cells of walking on, and [`APART`] cells from each of the
 /// cells `taken` already - or, with nowhere that far, as far as there is room for.

@@ -30,6 +30,21 @@ use fyrox::{
     },
 };
 
+/// How high the middle of a flag is over the floor its firewall stands on.
+const FLAG_MIDDLE: f32 = 2.0;
+/// What a model's empty is named to mark where the game puts something: a flag in its firewall,
+/// or the computer that opens it (see [`crate::firewall`]).
+const MARKERS: [&str; 2] = ["flag_", "computer_"];
+
+/// Somewhere a maze model marks with an empty, by the empty's name, for the game to put
+/// something: where it is, and which way its +x points, as a turn about the vertical.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marker {
+    pub name: String,
+    pub position: Vector3<f32>,
+    pub yaw: f32,
+}
+
 /// FBX models are authored in centimeters.
 const FBX_SCALE: f32 = 0.01;
 
@@ -50,6 +65,8 @@ pub struct Level {
     glow: Glow,
     /// What the player is looking for, if the model puts something in the maze to find.
     pub goal: Option<Vector3<f32>>,
+    /// Where the model says things go that the game puts there itself: see [`Marker`].
+    pub markers: Vec<Marker>,
     /// Where the player can walk, and the world position of that grid's corner, once finished.
     pub grid: Option<(WalkGrid, Vector3<f32>)>,
     /// What of a random maze is drawn and lit: only what can be seen from where the player is.
@@ -117,8 +134,15 @@ impl Level {
 
         // A model can put something in its maze to find. Tiles have nothing of the kind, and
         // their small parts - the light fixtures - would only be mistaken for it.
+        // A model for capture the flag marks where the flags go instead: the player takes
+        // blue's, from where it stands in its firewall.
+        let markers = if fixed { markers(&scene.graph, root) } else { Vec::new() };
         let goal = if fixed {
-            landmark(&scene.graph, root)
+            markers
+                .iter()
+                .find(|marker| marker.name == "flag_blue")
+                .map(|marker| marker.position + Vector3::y() * FLAG_MIDDLE)
+                .or_else(|| landmark(&scene.graph, root))
         } else {
             None
         };
@@ -162,6 +186,7 @@ impl Level {
             lamps: Vec::new(),
             glow,
             goal,
+            markers,
             grid: None,
             culling: None,
         }
@@ -251,4 +276,24 @@ fn landmark(graph: &Graph, root: Handle<Node>) -> Option<Vector3<f32>> {
         }
     }
     groups.into_iter().map(|group| group.center()).next()
+}
+
+/// The model's markers: nodes that are not meshes, named for something the game puts there.
+fn markers(graph: &Graph, root: Handle<Node>) -> Vec<Marker> {
+    graph
+        .traverse_handle_iter(root)
+        .filter(|&handle| !graph[handle].is_mesh())
+        .filter(|&handle| MARKERS.iter().any(|m| graph[handle].name().starts_with(m)))
+        .map(|handle| {
+            let node = &graph[handle];
+            let transform = node.global_transform();
+            let x = transform.transform_vector(&Vector3::x());
+            Marker {
+                name: node.name().to_string(),
+                position: node.global_position(),
+                yaw: (-x.z).atan2(x.x),
+            }
+        })
+        .inspect(|m| Log::info(format!("Maze: {} at {:.1} {:.1} {:.1}", m.name, m.position.x, m.position.y, m.position.z)))
+        .collect()
 }

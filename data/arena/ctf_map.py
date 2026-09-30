@@ -3,7 +3,9 @@
 #     blender -b --python data/arena/ctf_map.py
 #
 # Two bases face each other down the long (x) axis, red at -x and cyan at +x, each a walled room
-# with its flag in the middle and three ways in: the front door onto the yard, and a door in each
+# with its flag in the middle - put there by the game, in a firewall, at the empty `flag_red` or
+# `flag_blue`, with the computer that opens it at `computer_red` or `computer_blue` - and three
+# ways in: the front door onto the yard, and a door in each
 # side wall off a back corridor. Between them the field is split into three lanes by two long
 # walls with doorways through them: an open middle lane round a central tower, and a narrower
 # lane down each side. Everything is mirrored end to end, so neither side has the better of it.
@@ -72,6 +74,13 @@ def hexagon(group, x, y, radius, z0, z1, mat):
         vertices=6, radius=radius, depth=z1 - z0, location=(x, y, (z0 + z1) / 2), rotation=(0, 0, math.pi / 6)
     )
     add(group, bpy.context.active_object, mat)
+
+
+def marker(name, x, y, sx):
+    empty = bpy.data.objects.new(name, None)
+    empty.location = (x, y, 0.0)
+    empty.rotation_euler = (0.0, 0.0, 0.0 if sx == 1 else math.pi)
+    bpy.context.scene.collection.objects.link(empty)
 
 
 def mirrored(put):
@@ -151,14 +160,12 @@ def base(sx, team):
         box("CoverBlocks", sx * -41.0, sx * -39.0, sy * 8.0, sy * 10.0, 0.0, HIGH, "BlockHigh")
         hexagon("Pillars", sx * -37.0, sy * 9.0, 0.8, 0.0, CEILING, "Pillar")
 
-    # The flag: a stand, a pole and the cloth, in the team's colour.
-    flag = "Flag_Red" if team == "TeamRed" else "Flag_Cyan"
-    x = sx * -37.0
-    hexagon(flag, x, 0.0, 0.5, 0.0, 0.25, "Pole")
-    bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=0.04, depth=2.3, location=(x, 0.0, 0.25 + 1.15))
-    add(flag, bpy.context.active_object, "Pole")
-    # The cloth hangs off the pole towards the middle of the arena.
-    box(flag, x, x + sx * 0.9, -0.02, 0.02, 1.9, 2.5, team)
+    # Where the game puts the flag, in its firewall, and the computer that firewall answers to:
+    # empties, each facing along its own +x - the flag's cloth towards the middle of the arena,
+    # the computer's screen out from the back wall.
+    side = "red" if team == "TeamRed" else "blue"
+    marker(f"flag_{side}", sx * -37.0, 0.0, sx)
+    marker(f"computer_{side}", sx * -(HALF_X - 0.8), -5.0, sx)
 
 
 ends(base)
