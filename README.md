@@ -120,6 +120,10 @@ their animations; the crate decides what they make of what is round them.
 - **Upstream Fyrox merged into Hydroxus**, up to 27 September: Dmitry Stepanov's markdown and
   inline text elements in the UI, and fixes to the editor and inspector. Nothing in the game's
   rendering changes.
+- **The team battle example shows the battle.** It started its camera above the arena's roof,
+  so all it showed was the ceiling; now it starts inside, looking across the arena from one long
+  side. Its scoreboard is at the top in the middle and its help along the bottom, instead of on
+  top of each other.
 
 29 September 2026:
 

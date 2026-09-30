@@ -29,6 +29,7 @@ use fyrox::{
     graph::SceneGraph,
     gui::{
         brush::Brush,
+        screen::ScreenBuilder,
         text::{Text, TextBuilder, TextMessage},
         widget::WidgetBuilder,
         HorizontalAlignment, Thickness, UserInterface,
@@ -305,8 +306,10 @@ impl Battle {
         scene.rendering_options.ambient_lighting_color = Color::opaque(70, 72, 80);
         scene.rendering_options.environment_lighting_source = EnvironmentLightingSource::AmbientColor;
 
-        self.camera_position = Vector3::new(0.0, 28.0, -38.0);
-        self.pitch = 38f32.to_radians();
+        // Inside the arena, under its ceiling - the roof hides everything from above - in the
+        // middle of one long side, looking across it with a team to either side.
+        self.camera_position = Vector3::new(0.0, 4.6, -29.0);
+        self.pitch = 22f32.to_radians();
         self.camera = CameraBuilder::new(BaseBuilder::new()).build(&mut scene.graph).to_base();
         self.scene = ctx.scenes.add(scene);
         self.map = Some(ctx.resource_manager.request::<Model>(MAP));
@@ -339,11 +342,18 @@ impl Battle {
                 .with_foreground(Brush::Solid(Color::opaque(200, 200, 200)).into()),
         )
         .with_font_size(16.0.into())
+        .with_vertical_text_alignment(fyrox::gui::VerticalAlignment::Bottom)
         .with_text(
             "WASD fly   Q/E down/up   Shift faster   Right mouse look\n\
              Tab follow a droid   F free camera   Space pause   R new match   Esc quit",
         )
         .build(&mut ui.build_ctx());
+        // The UI's root gives its children only the size they ask for, in its corner; a screen is
+        // the size of the window, so in one the scoreboard is at the top in the middle and the help
+        // along the bottom.
+        let children = [self.scoreboard, self.banner, self.help].map(|text| text.to_base());
+        let ctx = &mut ui.build_ctx();
+        ScreenBuilder::new(WidgetBuilder::new().with_children(children)).build(ctx);
     }
 
     fn rng(&mut self) -> &mut Rng {
