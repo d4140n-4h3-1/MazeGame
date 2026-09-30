@@ -1,7 +1,13 @@
+//! The menus.
+//!
+//! The main menu comes first, over a blank screen: which game to play - the maze, or capture the
+//! flag - or to leave.
+//!
 //! The pause menu: the world stops behind a dimmed screen, with buttons to carry on, to switch
-//! the maze's lights, to change the options, to start again or to leave, and a reminder of the
-//! controls. The options are a page of their own: the subtitles of what the droids say, in
-//! System Latin and in English, each on or off. Escape there goes back to the menu.
+//! the maze's lights, to change the options, to start again, to go back to the main menu or to
+//! leave, and a reminder of the controls. The options are a page of their own: the subtitles of
+//! what the droids say, in System Latin and in English, each on or off. Escape there goes back to
+//! the menu.
 
 use crate::dialogue::screen::Subtitles;
 use fyrox::{
@@ -39,7 +45,89 @@ pub enum Choice {
     LatinSubtitles,
     EnglishSubtitles,
     Restart,
+    /// Go back to the main menu, leaving the game under way.
+    MainMenu,
     Quit,
+}
+
+/// Which game the player picked in the main menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Game {
+    Maze,
+    CaptureTheFlag,
+}
+
+/// What the player picked in the main menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    Play(Game),
+    Quit,
+}
+
+/// The main menu: which game to play, or to leave.
+#[derive(Debug, Default, PartialEq)]
+pub struct MainMenu {
+    screen: Handle<Screen>,
+    maze: Handle<Button>,
+    ctf: Handle<Button>,
+    quit: Handle<Button>,
+}
+
+impl MainMenu {
+    /// Builds the menu, hidden, over everything else in `ui`, on a backdrop nothing shows through.
+    pub fn build(ui: &mut UserInterface) -> Self {
+        let ctx = &mut ui.build_ctx();
+        let heading = title(ctx, "Maze");
+        let (maze, _) = button(ctx, "Maze");
+        let (ctf, _) = button(ctx, "Capture the Flag");
+        let (quit, _) = button(ctx, "Quit");
+        let about = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_margin(Thickness::top(24.0))
+                .with_foreground(Brush::Solid(Color::opaque(190, 190, 200)).into()),
+        )
+        .with_text(
+            "Maze: find the way out of a new maze each round.\n\
+             Capture the Flag: hack blue's firewall and take their flag,\n\
+             with red's droids and drone on your side.",
+        )
+        .with_font_size(16.0.into())
+        .with_horizontal_text_alignment(HorizontalAlignment::Center)
+        .build(ctx);
+        let items = [heading.to_base(), maze.to_base(), ctf.to_base(), quit.to_base(), about.to_base()];
+        let page = page(ctx, true, items);
+        let backdrop = BorderBuilder::new(
+            WidgetBuilder::new()
+                .with_background(Brush::Solid(Color::opaque(8, 10, 14)).into())
+                .with_child(page),
+        )
+        .with_stroke_thickness(Thickness::uniform(0.0).into())
+        .build(ctx);
+        let screen = ScreenBuilder::new(WidgetBuilder::new().with_visibility(false).with_child(backdrop))
+            .build(ctx);
+        Self {
+            screen,
+            maze,
+            ctf,
+            quit,
+        }
+    }
+
+    pub fn set_open(&self, ui: &UserInterface, open: bool) {
+        ui.send(self.screen, WidgetMessage::Visibility(open));
+    }
+
+    /// What `message` picks from the menu, if anything.
+    pub fn choice(&self, message: &UiMessage) -> Option<Start> {
+        [
+            (self.maze, Start::Play(Game::Maze)),
+            (self.ctf, Start::Play(Game::CaptureTheFlag)),
+            (self.quit, Start::Quit),
+        ]
+        .into_iter()
+        .find(|&(button, _)| matches!(message.data_from(button), Some(ButtonMessage::Click)))
+        .map(|(_, choice)| choice)
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -50,6 +138,7 @@ pub struct PauseMenu {
     lights_label: Handle<Text>,
     options: Handle<Button>,
     restart: Handle<Button>,
+    main_menu: Handle<Button>,
     quit: Handle<Button>,
     /// The menu's own page, and the options'.
     main_page: Handle<UiNode>,
@@ -74,6 +163,7 @@ impl PauseMenu {
         let (lights, lights_label) = button(ctx, &lights_text(true));
         let (options, _) = button(ctx, "Options");
         let (restart, _) = button(ctx, restart);
+        let (main_menu, _) = button(ctx, "Main menu");
         let (quit, _) = button(ctx, "Quit");
         let controls = TextBuilder::new(
             WidgetBuilder::new()
@@ -93,6 +183,7 @@ impl PauseMenu {
                 lights.to_base(),
                 options.to_base(),
                 restart.to_base(),
+                main_menu.to_base(),
                 quit.to_base(),
                 controls.to_base(),
             ],
@@ -135,6 +226,7 @@ impl PauseMenu {
             lights_label,
             options,
             restart,
+            main_menu,
             quit,
             main_page,
             options_page,
@@ -200,6 +292,7 @@ impl PauseMenu {
             (self.latin, Choice::LatinSubtitles),
             (self.english, Choice::EnglishSubtitles),
             (self.restart, Choice::Restart),
+            (self.main_menu, Choice::MainMenu),
             (self.quit, Choice::Quit),
         ]
         .into_iter()

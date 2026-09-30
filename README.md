@@ -108,6 +108,7 @@ their animations; the crate decides what they make of what is round them.
 
 30 September 2026:
 
+- **A main menu** to pick the maze or capture the flag, which the pause menu can go back to.
 - **A capture-the-flag map**, `data/arena/ctf_map.glb`: a red base at one end and a cyan base at
   the other, each with its flag, joined by three lanes. The team battle can be fought in it
   with `BATTLE_MAP`.
@@ -519,6 +520,15 @@ is compiled with optimizations even in a debug build, and the game itself is not
 is quick enough to play while still easy to debug. `cargo run --release` optimizes the game as
 well.
 
+It opens on the main menu, to pick which game to play:
+
+- **Maze**: find the way out of a new random maze each round.
+- **Capture the Flag**: in `data/arena/ctf_map.glb`, hack the computer in blue's base to take
+  down the firewall round their flag, and take it, with red's droids and drone on your side and
+  blue's against you.
+
+With `MAZE_MODEL` set, it skips the menu and plays that model.
+
 ### In a browser
 
 ```sh
@@ -582,7 +592,9 @@ window in the middle of a round pauses it too. The menu has:
 - **Options**: switch the subtitles of what the droids say on or off, the System Latin and the
   English each by itself. With only the English on, it is as big as the System Latin would be.
   Back, or Escape, returns to the menu.
-- **New maze**: the same as N. **New round** when playing a fixed maze model.
+- **Start again**: the same as N: a new maze, or a new round in a fixed maze model or capture the
+  flag.
+- **Main menu**: leave the game under way for the main menu, to pick another.
 - **Quit**.
 
 ## Options
@@ -651,7 +663,8 @@ long walls with doorways through them split the field into three lanes. The midd
 round a central tower, and each side lane is narrower, with a low wall across its middle. Both
 halves of the map are the same, mirrored, with low and tall cover and pillars throughout.
 `data/arena/ctf_map.py` builds it in Blender (`blender -b --python data/arena/ctf_map.py`).
-Played with `MAZE_MODEL`, you start at red's end and take blue's flag.
+It is what **Capture the Flag** on the main menu plays, as `MAZE_MODEL` does too: you start at
+red's end and take blue's flag.
 
 The model marks where the game puts things with empties. `flag_red` and `flag_blue` get that
 side's flag, `data/ctf/flag_red.glb` or `data/ctf/flag_blue.glb`, standing in a firewall,

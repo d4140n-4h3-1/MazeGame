@@ -11,6 +11,9 @@
 
 use fyrox::core::algebra::Vector3;
 
+/// The map it is played on.
+pub const CTF_MAP: &str = "data/arena/ctf_map.glb";
+
 /// How many droids each side has.
 pub const DROIDS: usize = 2;
 

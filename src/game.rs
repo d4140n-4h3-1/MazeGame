@@ -11,7 +11,7 @@ use fyrox::{
 use crate::{
     credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
-    ctf::{Bases, Side},
+    ctf::{Bases, Side, CTF_MAP},
     firewall::{self, Firewalls},
     drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
@@ -35,7 +35,7 @@ use crate::{
     inhabitants::{Alert, Inhabitants, Livery, News, Threat, HOSTILE_MODEL},
     layout::{self, Rng},
     level::Level,
-    menu::{Choice, PauseMenu},
+    menu::{Choice, Game, MainMenu, PauseMenu, Start},
     platform,
     player::{Player, DROID_MODEL},
     survey,
@@ -102,8 +102,10 @@ const DELETED_FOR: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Phase {
-    /// Waiting for the maze model.
+    /// The main menu, before a game has been picked.
     #[default]
+    Title,
+    /// Waiting for the maze model.
     Loading,
     /// The model is in the scene; its colliders exist from the next physics step on.
     Settling(u8),
@@ -267,6 +269,14 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     menu: PauseMenu,
+    /// The main menu, where a game is picked; and the path of the fixed maze model being played,
+    /// if one is.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    main_menu: MainMenu,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    model_path: String,
     /// What the droids say, if it could be read, and how they sound saying it.
     #[visit(skip)]
     #[reflect(hidden)]
@@ -525,13 +535,63 @@ impl MazeGame {
         self.drone_model = Some(resources.request::<Model>(DRONE_MODEL));
         self.shot_model = Some(resources.request::<Model>(SHOT_MODEL));
         self.heart_model = Some(resources.request::<Model>(HEART_MODEL));
-        match platform::var("MAZE_MODEL") {
+    }
+
+    /// Starts `game`, picked in the main menu: loads its level, and plays it once it has. The
+    /// maze is random, unless MAZE_MODEL gives a model to play instead.
+    fn play(&mut self, ctx: &mut PluginContext, game: Game) {
+        let resources = &ctx.resource_manager;
+        let model = match game {
+            Game::CaptureTheFlag => Some(CTF_MAP.to_string()),
+            Game::Maze => platform::var("MAZE_MODEL"),
+        };
+        match model {
             Some(path) => {
-                self.model = Some(resources.request::<Model>(path));
+                self.model = Some(resources.request::<Model>(&path));
                 self.firewalls = Firewalls::request(resources);
+                self.model_path = path;
             }
             None => self.prefabs = Some(Prefabs::request(resources)),
         }
+        Log::info(format!("Playing {game:?}"));
+        self.main_menu.set_open(ctx.user_interfaces.first(), false);
+        self.phase = Phase::Loading;
+        self.want_mouse = true;
+    }
+
+    /// Leaves the game under way for the main menu: everything in it is taken out, and the
+    /// next game picked starts afresh.
+    fn to_main_menu(&mut self, ctx: &mut PluginContext) {
+        self.set_paused(ctx, false);
+        self.stop_talking(ctx);
+        self.stop_hacking(ctx);
+        self.barks.clear();
+        let scene = &mut ctx.scenes[self.scene];
+        self.inhabitants.clear(&mut scene.graph);
+        self.firewalls.clear(&mut scene.graph);
+        for computer in &mut self.computers {
+            computer.hide(&mut scene.graph);
+        }
+        for drone in &mut self.drones {
+            drone.hide(&mut scene.graph);
+        }
+        self.hearts.clear(&mut scene.graph);
+        if let Some(shots) = self.shots.as_mut() {
+            shots.clear(&mut scene.graph);
+        }
+        for bolts in self.side_bolts.iter_mut().flatten() {
+            bolts.clear(&mut scene.graph);
+        }
+        self.level.clear(scene);
+        self.model = None;
+        self.prefabs = None;
+        self.model_path.clear();
+        self.ctf = None;
+        self.set_banner(ctx, "");
+        self.phase = Phase::Title;
+        self.main_menu.set_open(ctx.user_interfaces.first(), true);
+        self.want_mouse = false;
+        self.set_mouse_captured(ctx, false);
     }
 
     fn rng(&mut self) -> &mut Rng {
@@ -549,8 +609,7 @@ impl MazeGame {
     /// random maze.
     fn place_level(&mut self, scene: &mut Scene) -> Result<(), String> {
         if let Some(model) = &self.model {
-            let fbx = platform::var("MAZE_MODEL")
-                .is_some_and(|path| path.to_ascii_lowercase().ends_with(".fbx"));
+            let fbx = self.model_path.to_ascii_lowercase().ends_with(".fbx");
             self.level = Level::from_model(model, fbx, scene, &mut self.doubled);
             return Ok(());
         }
@@ -692,7 +751,7 @@ impl MazeGame {
     fn update_hud(&mut self, ctx: &mut PluginContext) {
         let status = match self.phase {
             Phase::Loading | Phase::Settling(_) => Status::Loading,
-            Phase::Broken => Status::Blank,
+            Phase::Title | Phase::Broken => Status::Blank,
             Phase::Playing | Phase::Won | Phase::Deleted => Status::Round {
                 time: self.round_time,
                 best: self.best_time,
@@ -795,6 +854,8 @@ impl MazeGame {
 
     fn on_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
         match code {
+            // On the main menu, only its buttons do anything.
+            _ if self.phase == Phase::Title => (),
             // At the computer every key but Escape is for it: minus and the rest are typed.
             _ if self.hacking && !self.menu.is_open() && code != KeyCode::Escape => {
                 self.on_hacking_key(ctx, code)
@@ -2305,12 +2366,14 @@ impl Plugin for MazeGame {
             .and_then(|chirps| Ok((chirps, DroneLines::load(DRONE_LINES)?)))
             .inspect_err(|error| Log::err(format!("Maze: the drones are silent: {error}")))
             .ok();
-        let restart = if self.prefabs.is_some() {
-            "New maze"
+        self.menu = PauseMenu::build(ctx.user_interfaces.first_mut(), "Start again");
+        // Over the pause menu. With a model to play from MAZE_MODEL, straight into the maze.
+        self.main_menu = MainMenu::build(ctx.user_interfaces.first_mut());
+        if platform::var("MAZE_MODEL").is_some() {
+            self.play(&mut ctx, Game::Maze);
         } else {
-            "New round"
-        };
-        self.menu = PauseMenu::build(ctx.user_interfaces.first_mut(), restart);
+            self.main_menu.set_open(ctx.user_interfaces.first(), true);
+        }
         // An interface of its own, after the window's, which stays the first.
         self.screen_terminal = ScreenTerminal::build(ctx.user_interfaces);
         Ok(())
@@ -2325,7 +2388,7 @@ impl Plugin for MazeGame {
             ctx.loop_controller.exit();
             return Ok(());
         }
-        self.want_mouse = true;
+        self.want_mouse = self.phase != Phase::Title;
         Ok(())
     }
 
@@ -2350,11 +2413,11 @@ impl Plugin for MazeGame {
         match self.phase {
             // While the menu is open nothing happens: no loading, no clock, no player.
             _ if self.menu.is_open() => (),
+            Phase::Title => (),
             Phase::Loading => {
                 let models: Vec<(String, ModelResource)> = match (&self.model, &self.prefabs) {
                     (Some(model), _) => {
-                        let path = platform::var("MAZE_MODEL").unwrap_or_default();
-                        let mut models = vec![(path, model.clone())];
+                        let mut models = vec![(self.model_path.clone(), model.clone())];
                         models.extend(self.firewalls.models());
                         models
                     }
@@ -2550,7 +2613,13 @@ impl Plugin for MazeGame {
                 None => (),
             }
         }
+        match self.main_menu.choice(message) {
+            Some(Start::Play(game)) if self.phase == Phase::Title => self.play(ctx, game),
+            Some(Start::Quit) => platform::quit(ctx),
+            _ => (),
+        }
         match self.menu.choice(message) {
+            Some(Choice::MainMenu) => self.to_main_menu(ctx),
             Some(Choice::Resume) => self.set_paused(ctx, false),
             Some(Choice::Lights) => {
                 self.lights_off = !self.lights_off;
