@@ -80,6 +80,14 @@ const MAP: &str = "data/arena/combat_map.glb";
 const JUMP_CHANCE: f32 = 0.25;
 const JUMP_SPEED: (f32, f32) = (3.2, 4.4);
 const GRAVITY: f32 = 9.81;
+/// How far off the droid it is to hit a pistol can point, in radians, and the bolt still go onto
+/// them; and pointed further off, how near their chest its way has to pass to hit them, in meters.
+const AIM_SNAP: f32 = 0.1;
+/// How much of how far over the barrel pointed at a shot each droid takes off what it asks for
+/// next time, and the most it takes off either way, in radians.
+const AIM_LEARNING: f32 = 0.5;
+const AIM_BIAS_MOST: f32 = 0.6;
+const HIT_RADIUS: f32 = 0.4;
 /// How long, in seconds, a droid keeps its pistol out after it last had a target.
 const HOLSTER_AFTER: f32 = 6.0;
 /// The droids each team is made from: the same droid, in red and in cyan.
@@ -191,6 +199,9 @@ struct Droid {
     /// Whether it pulled the trigger this frame, and the shot it is waiting to fire.
     fired: bool,
     pending: Option<Shot>,
+    /// How far its pistol's barrel has been pointing above and to the left of where it asked it
+    /// to aim, in radians, as its last shots have shown: it asks that much the other way.
+    aim_bias: (f32, f32),
     /// Where the chest of the target it has is, if one.
     target_at: Option<Vector3<f32>>,
     /// How long since it last had a target, in seconds: it holsters its pistol a while after.
@@ -745,6 +756,7 @@ impl Battle {
             retreating: false,
             fired: false,
             pending: None,
+            aim_bias: (0.0, 0.0),
             target_at: None,
             calm_for: HOLSTER_AFTER,
             air: None,
@@ -1138,11 +1150,13 @@ impl Battle {
         let Some(mut bolts) = self.bolts.take() else { return };
         for i in 0..self.droids.len() {
             let Some(mut shot) = self.droids[i].pending else { continue };
-            // From the muzzle as the pistol fires; if it never does, from about where it is held.
-            let from = match self.droids[i].avatar.shot() {
-                Some((muzzle, _)) => muzzle,
+            // From the muzzle as the pistol fires, the way it points; if it never does, from about
+            // where it is held, the way the droid faces.
+            let (from, pointing) = match self.droids[i].avatar.shot() {
+                Some(shot) => shot,
                 None if shot.waited > 0.6 || !self.droids[i].alive() => {
-                    self.droids[i].eyes() - Vector3::y() * 0.35 + forward(self.droids[i].heading) * 0.4
+                    let from = self.droids[i].eyes() - Vector3::y() * 0.35 + forward(self.droids[i].heading) * 0.4;
+                    (from, (shot.end - from).try_normalize(1.0e-3).unwrap_or_else(|| forward(self.droids[i].heading)))
                 }
                 None => {
                     shot.waited += dt;
@@ -1154,22 +1168,59 @@ impl Battle {
             if !self.droids[i].alive() {
                 continue;
             }
-            let Some(way) = (shot.end - from).try_normalize(1.0e-3) else { continue };
-            let length = (shot.end - from).norm();
-            if shot.hits {
-                // Onto them, glowing there as it lands.
-                bolts.fire_for(graph, from, way, length, true);
-                self.arrivals.push(Arrival {
-                    shooter: i,
-                    target: shot.target,
-                    damage: shot.damage,
-                    from,
-                    to: shot.end,
-                    left: length / BOLT_SPEED,
-                });
+            // The bolt goes the way the pistol points. Pointed near enough at the droid it was to
+            // hit, it goes onto them; pointed further off, it hits them only if that way passes
+            // them, and nothing of the arena is in between.
+            let Some(pointing) = pointing.try_normalize(1.0e-3) else { continue };
+            let chest = self.droids[shot.target].chest();
+            let Some(aimed) = (chest - from).try_normalize(1.0e-3) else { continue };
+            // How far over the barrel was, for it to ask that much less next time.
+            if let (Some(pointed), Some(wanted)) = (heading_of(pointing), heading_of(aimed)) {
+                let over = (
+                    pointing.y.clamp(-1.0, 1.0).asin() - aimed.y.clamp(-1.0, 1.0).asin(),
+                    wrap(pointed - wanted),
+                );
+                let bias = &mut self.droids[i].aim_bias;
+                *bias = (
+                    (bias.0 + AIM_LEARNING * over.0).clamp(-AIM_BIAS_MOST, AIM_BIAS_MOST),
+                    (bias.1 + AIM_LEARNING * over.1).clamp(-AIM_BIAS_MOST, AIM_BIAS_MOST),
+                );
+            }
+            let onto = |to: Vector3<f32>| Some((to - from).norm()).filter(|_| Self::clear(graph, from, to));
+            let landing = if !shot.hits || !self.droids[shot.target].alive() {
+                None
+            } else if pointing.dot(&aimed) >= AIM_SNAP.cos() {
+                onto(chest).map(|length| (aimed, length))
             } else {
-                // Wide, or into cover: on till it hits the arena.
-                bolts.fire(graph, from, way);
+                // Where that way passes nearest their chest, if it is near enough to hit them.
+                let along = (chest - from).dot(&pointing);
+                let nearest = from + pointing * along;
+                (along > 0.0 && (nearest - chest).norm() < HIT_RADIUS)
+                    .then(|| onto(nearest))
+                    .flatten()
+                    .map(|length| (pointing, length))
+            };
+            match landing {
+                Some((way, length)) => {
+                    // Onto them, glowing there as it lands.
+                    bolts.fire_for(graph, from, way, length, true);
+                    self.arrivals.push(Arrival {
+                        shooter: i,
+                        target: shot.target,
+                        damage: shot.damage,
+                        from,
+                        to: from + way * length,
+                        left: length / BOLT_SPEED,
+                    });
+                }
+                None => {
+                    // Wide by as much as the miss it was to be, or straight on if it was to hit:
+                    // on till it hits the arena.
+                    let wide = (shot.end - from).try_normalize(1.0e-3).map_or(Vector3::zeros(), |w| w - aimed);
+                    let wide = if shot.hits { Vector3::zeros() } else { wide };
+                    let way = (pointing + wide).try_normalize(1.0e-3).unwrap_or(pointing);
+                    bolts.fire(graph, from, way);
+                }
             }
         }
         // Only the arena stops a bolt: a droid it misses, it passes.
@@ -1368,9 +1419,12 @@ impl Battle {
                 droid.air = (height > 0.0).then_some((height, up));
             }
             let lift = droid.air.map_or(0.0, |(height, _)| height);
+            // Its root turned the way it faces, as the player's body is turned the way they look:
+            // the droid takes which way it goes, and faces, from there.
             graph[droid.root]
                 .local_transform_mut()
-                .set_position(droid.position + Vector3::y() * lift);
+                .set_position(droid.position + Vector3::y() * lift)
+                .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), droid.heading));
             // How fast it went since last frame, which is what its feet keep pace with.
             let moved = flat(droid.position - droid.was_at);
             let speed = if dt > 0.0 { moved.norm() / dt } else { 0.0 };
@@ -1387,13 +1441,15 @@ impl Battle {
                 let to = at - (droid.position + Vector3::y() * if droid.crouched { EYES_CROUCHED } else { EYES_STANDING });
                 let up = (to.y / to.norm().max(1.0e-3)).clamp(-1.0, 1.0).asin();
                 let left = heading_of(to).map_or(0.0, |h| wrap(h - droid.heading));
-                (up, left)
+                // Less what its barrel has been pointing over by.
+                (up - droid.aim_bias.0, left - droid.aim_bias.1)
             });
-            // Facing a target, it strafes: going which way it goes, facing where it faces.
+            // Facing a target, it strafes: going which way it goes, facing where it faces. Which
+            // way it goes is from the way it faces.
             let strafing = raised && speed > 0.1;
             let way = heading_of(moved).map_or(0.0, |h| wrap(h - droid.heading));
             let going = Going {
-                heading: Some(droid.heading),
+                heading: Some(if strafing || speed > 0.1 { way } else { 0.0 }),
                 speed,
                 posture: if droid.crouched { Posture::Crouching } else { Posture::Standing },
                 gait: droid.gait,

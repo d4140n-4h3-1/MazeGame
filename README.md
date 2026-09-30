@@ -142,6 +142,11 @@ their animations; the crate decides what they make of what is round them.
   speed, lights up what it passes, and glows where it lands - on the droid it hits, whose harm it
   does when it gets there, or on the cover or wall it hits instead. The pistol's bolts now fly by
   themselves (`Bolts::fly`), for anyone to fire; the player's fly as before.
+- **The team battle's bolts leave straight out of the pistol**, the way its barrel points, as
+  the player's do in third person. The droids used to face the arena's fixed forward while they
+  strafed, so their pistols pointed well off to the side of whoever they shot at; each droid's
+  body now turns the way it faces, as the player's does with the camera. A droid also learns how
+  far its barrel ends up above or beside where it aims, and aims that much the other way.
 
 29 September 2026:
 
