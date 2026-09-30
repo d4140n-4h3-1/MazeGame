@@ -63,7 +63,7 @@ mod input;
 mod lean;
 mod movement;
 mod noise;
-mod pistol;
+pub mod pistol;
 pub use pistol::PISTOL_SOUNDS;
 pub mod posture;
 mod talk;
@@ -503,22 +503,34 @@ impl Player {
         direction: Vector3<f32>,
         reach: f32,
     ) -> Option<(f32, Handle<Collider>)> {
-        let mut hits = Vec::new();
-        graph.physics.cast_ray(
-            RayCastOptions {
-                ray_origin: Point3::from(from),
-                ray_direction: direction,
-                max_len: reach,
-                groups: Default::default(),
-                sort_results: true,
-            },
-            &mut hits,
-        );
-        hits.iter()
-            // The ray starts inside the player's own body.
-            .find(|hit| hit.collider != self.collider)
-            .map(|hit| ((hit.position.coords - from).norm(), hit.collider))
+        first_hit(graph, from, direction, reach, self.collider)
     }
+}
+
+/// The first thing a ray from `from` along `direction` hits within `reach`, but `skip` - the body
+/// it starts in: how far along, and what.
+fn first_hit(
+    graph: &Graph,
+    from: Vector3<f32>,
+    direction: Vector3<f32>,
+    reach: f32,
+    skip: Handle<Collider>,
+) -> Option<(f32, Handle<Collider>)> {
+    let mut hits = Vec::new();
+    graph.physics.cast_ray(
+        RayCastOptions {
+            ray_origin: Point3::from(from),
+            ray_direction: direction,
+            max_len: reach,
+            groups: Default::default(),
+            sort_results: true,
+        },
+        &mut hits,
+    );
+    hits.iter()
+        // The ray starts inside the body it skips.
+        .find(|hit| hit.collider != skip)
+        .map(|hit| ((hit.position.coords - from).norm(), hit.collider))
 }
 
 /// Holds Shift down long enough to sprint, with a few key-repeat presses along the way.

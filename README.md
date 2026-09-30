@@ -137,6 +137,11 @@ their animations; the crate decides what they make of what is round them.
   and to the side at the target, fired, and holstered once the fighting is over. Shot down, a
   droid falls limp, knocked back by the shot, and may lose what it was hit in, as in the game;
   it comes back as a new droid. Fallen droids and what they lost do not stop shots.
+- **The team battle's droids fire the game's green bolts**, as the player's pistol does, in
+  place of red and cyan beams: each leaves the muzzle as the pistol fires, flies at the bolt's
+  speed, lights up what it passes, and glows where it lands - on the droid it hits, whose harm it
+  does when it gets there, or on the cover or wall it hits instead. The pistol's bolts now fly by
+  themselves (`Bolts::fly`), for anyone to fire; the player's fly as before.
 
 29 September 2026:
 

@@ -51,7 +51,7 @@ pub const PISTOL_SOUNDS: &str = "data/sounds/pistol_formants.json";
 /// longest.
 const BOLTS: usize = 8;
 /// How fast a bolt flies, in meters per second.
-const BOLT_SPEED: f32 = 40.0;
+pub const BOLT_SPEED: f32 = 40.0;
 /// How far a bolt flies before it is gone, if it hits nothing, in meters.
 const BOLT_RANGE: f32 = 100.0;
 /// How long a bolt is, from end to end, and how thick, in meters.
@@ -84,14 +84,18 @@ struct Bolt {
     position: Vector3<f32>,
     /// Which way it flies, one meter long.
     direction: Vector3<f32>,
-    /// How much further it can fly, in meters.
+    /// How much further it can fly, in meters, and whether it glows there as if it had hit
+    /// something when it gets there.
     range: f32,
+    lands: bool,
     /// How much longer it glows where it hit something, in seconds, once it has.
     landed: Option<f32>,
 }
 
+/// The pistol's bolts: a few meshes, shown while they fly. Anyone with a pistol can have them -
+/// the player, or the droids in the examples.
 #[derive(Debug, Default, Clone, PartialEq)]
-pub(super) struct Bolts {
+pub struct Bolts {
     /// Every bolt's mesh, and the bolt if it is flying.
     bolts: Vec<(Handle<Node>, Option<Bolt>)>,
     /// Every bolt's hum, as `bolts` has them, if there is one to hum.
@@ -115,7 +119,7 @@ fn made(sounds: Option<&Sounds>, name: &str) -> Option<(SoundBufferResource, f32
 
 impl Bolts {
     /// Makes the bolts' meshes, out of sight until they are fired.
-    pub(super) fn new(graph: &mut Graph) -> Self {
+    pub fn new(graph: &mut Graph) -> Self {
         // Glowing all over: the standard shader glows by an emission texture, and by nothing
         // without one.
         let white = Texture::from_bytes(
@@ -210,7 +214,20 @@ impl Bolts {
     }
 
     /// Fires a bolt from `from` along `direction`, one meter long.
-    fn fire(&mut self, graph: &mut Graph, from: Vector3<f32>, direction: Vector3<f32>) {
+    pub fn fire(&mut self, graph: &mut Graph, from: Vector3<f32>, direction: Vector3<f32>) {
+        self.fire_for(graph, from, direction, BOLT_RANGE, false);
+    }
+
+    /// Fires a bolt from `from` along `direction`, one meter long, that flies no further than
+    /// `range` - and there, if it `lands`, glows as if it had hit something.
+    pub fn fire_for(
+        &mut self,
+        graph: &mut Graph,
+        from: Vector3<f32>,
+        direction: Vector3<f32>,
+        range: f32,
+        lands: bool,
+    ) {
         // A free one, or failing that the one that has flown furthest: the least range left.
         let left = |bolt: &Option<Bolt>| bolt.map_or(f32::NEG_INFINITY, |bolt| bolt.range);
         let Some((index, (mesh, bolt))) = self
@@ -224,7 +241,8 @@ impl Bolts {
         *bolt = Some(Bolt {
             position: from,
             direction,
-            range: BOLT_RANGE,
+            range: range.min(BOLT_RANGE),
+            lands,
             landed: None,
         });
         let node = &mut graph[*mesh];
@@ -248,8 +266,93 @@ impl Bolts {
         }
     }
 
+    /// Flies every bolt in the air on for another `dt`, stopping each at the first thing
+    /// `first_hit` - from where, which way, how far - says is in its way, if anything: how far
+    /// along, and what. What each hit, it returns.
+    pub fn fly(
+        &mut self,
+        graph: &mut Graph,
+        dt: f32,
+        first_hit: impl Fn(&Graph, Vector3<f32>, Vector3<f32>, f32) -> Option<(f32, Handle<Collider>)>,
+    ) -> Vec<Strike> {
+        let mut struck = Vec::new();
+        // How far each bolt gets this frame, and what it hits, if it does.
+        let flights: Vec<Option<(f32, Option<Handle<Collider>>, bool)>> = self
+            .bolts
+            .iter()
+            .map(|(_, bolt)| {
+                let bolt = bolt.filter(|bolt| bolt.landed.is_none())?;
+                let step = (BOLT_SPEED * dt).min(bolt.range);
+                Some(
+                    match first_hit(graph, bolt.position, bolt.direction, step) {
+                        Some((reach, hit)) => (reach, Some(hit), true),
+                        None => (step, None, step >= bolt.range),
+                    },
+                )
+            })
+            .collect();
+        for (index, flight) in flights.into_iter().enumerate() {
+            let (mesh, bolt) = &mut self.bolts[index];
+            let Some(flying) = bolt.as_mut() else {
+                continue;
+            };
+            // One that has hit something glows where it hit until its moment is up.
+            if let Some(left) = flying.landed.as_mut() {
+                *left -= dt;
+                if *left <= 0.0 {
+                    *bolt = None;
+                    graph[*mesh].set_visibility(false);
+                }
+                continue;
+            }
+            let Some((reach, hit, stopped)) = flight else {
+                continue;
+            };
+            struck.extend(hit.map(|collider| Strike {
+                collider,
+                at: flying.position + flying.direction * reach,
+                way: flying.direction,
+            }));
+            if hit.is_some() {
+                // Its tip against what it hit, its flash lighting it up; and quiet, and the first
+                // to go if another is fired.
+                flying.position += flying.direction * (reach - 0.5 * BOLT_LENGTH).max(0.0);
+                flying.range = 0.0;
+                flying.landed = Some(IMPACT);
+                graph[*mesh]
+                    .local_transform_mut()
+                    .set_position(flying.position);
+                self.hum(graph, index, false);
+                continue;
+            }
+            if stopped && flying.lands {
+                // At the end of the way it was sent, glowing there as if it had hit something.
+                flying.position += flying.direction * (reach - 0.5 * BOLT_LENGTH).max(0.0);
+                flying.range = 0.0;
+                flying.landed = Some(IMPACT);
+                graph[*mesh]
+                    .local_transform_mut()
+                    .set_position(flying.position);
+                self.hum(graph, index, false);
+                continue;
+            }
+            if stopped {
+                *bolt = None;
+                graph[*mesh].set_visibility(false);
+                self.hum(graph, index, false);
+                continue;
+            }
+            flying.position += flying.direction * reach;
+            flying.range -= reach;
+            graph[*mesh]
+                .local_transform_mut()
+                .set_position(flying.position);
+        }
+        struck
+    }
+
     /// Puts every bolt out of sight, and out of the air.
-    pub(super) fn clear(&mut self, graph: &mut Graph) {
+    pub fn clear(&mut self, graph: &mut Graph) {
         self.struck.clear();
         for index in 0..self.bolts.len() {
             let (mesh, bolt) = &mut self.bolts[index];
@@ -286,70 +389,17 @@ impl Player {
             self.bolts.fire(graph, muzzle, direction);
             self.make_noise(muzzle, noise::SHOT_NOISE);
         }
-        // How far each bolt gets this frame, and what it hits, if it does.
-        let flights: Vec<Option<(f32, Option<Handle<Collider>>, bool)>> = self
-            .bolts
-            .bolts
-            .iter()
-            .map(|(_, bolt)| {
-                let bolt = bolt.filter(|bolt| bolt.landed.is_none())?;
-                let step = (BOLT_SPEED * dt).min(bolt.range);
-                Some(
-                    match self.first_hit(graph, bolt.position, bolt.direction, step) {
-                        Some((reach, hit)) => (reach, Some(hit), true),
-                        None => (step, None, step >= bolt.range),
-                    },
-                )
-            })
-            .collect();
-        for (index, flight) in flights.into_iter().enumerate() {
-            let (mesh, bolt) = &mut self.bolts.bolts[index];
-            let Some(flying) = bolt.as_mut() else {
-                continue;
-            };
-            // One that has hit something glows where it hit until its moment is up.
-            if let Some(left) = flying.landed.as_mut() {
-                *left -= dt;
-                if *left <= 0.0 {
-                    *bolt = None;
-                    graph[*mesh].set_visibility(false);
-                }
-                continue;
-            }
-            let Some((reach, hit, stopped)) = flight else {
-                continue;
-            };
-            self.bolts.struck.extend(hit.map(|collider| Strike {
-                collider,
-                at: flying.position + flying.direction * reach,
-                way: flying.direction,
-            }));
-            if hit.is_some() {
-                // Its tip against what it hit, its flash lighting it up; and quiet, and the first
-                // to go if another is fired.
-                flying.position += flying.direction * (reach - 0.5 * BOLT_LENGTH).max(0.0);
-                flying.range = 0.0;
-                flying.landed = Some(IMPACT);
-                graph[*mesh]
-                    .local_transform_mut()
-                    .set_position(flying.position);
-                let at = flying.position;
-                self.bolts.hum(graph, index, false);
-                self.make_noise(at, noise::IMPACT_NOISE);
-                continue;
-            }
-            if stopped {
-                *bolt = None;
-                graph[*mesh].set_visibility(false);
-                self.bolts.hum(graph, index, false);
-                continue;
-            }
-            flying.position += flying.direction * reach;
-            flying.range -= reach;
-            graph[*mesh]
-                .local_transform_mut()
-                .set_position(flying.position);
+        // Each bolt on for another `dt`: what it hits, the droids hear, and the game is told.
+        let me = self.collider;
+        let strikes = self.bolts.fly(graph, dt, |graph, from, direction, reach| {
+            super::first_hit(graph, from, direction, reach, me)
+        });
+        for strike in &strikes {
+            // Where the bolt stops, its tip against what it hit.
+            let at = strike.at - strike.way * (0.5 * BOLT_LENGTH);
+            self.make_noise(at, noise::IMPACT_NOISE);
         }
+        self.bolts.struck.extend(strikes);
     }
 
     /// Where the pistol is pointed while it is out: from where the view is, along the middle of
@@ -421,6 +471,45 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bolt_flies_stops_at_what_it_hits_and_lands_where_it_was_sent() {
+        let mut graph = Graph::new();
+        let mut bolts = Bolts::new(&mut graph);
+        let ahead = Vector3::z();
+        let flying = |bolts: &Bolts| bolts.bolts.iter().filter_map(|(_, b)| *b).collect::<Vec<_>>();
+        // Nothing in the way: on it goes, at its speed.
+        bolts.fire(&mut graph, Vector3::zeros(), ahead);
+        assert!(bolts.fly(&mut graph, 0.1, |_, _, _, _| None).is_empty());
+        let bolt = flying(&bolts)[0];
+        assert!((bolt.position.z - BOLT_SPEED * 0.1).abs() < 1.0e-4);
+        // Something 1 m further on: it stops there, and says what it hit, and where.
+        let wall = Handle::<Collider>::new(7, 1);
+        let struck = bolts.fly(&mut graph, 0.1, |_, _, _, _| Some((1.0, wall)));
+        assert_eq!(struck.len(), 1);
+        assert_eq!(struck[0].collider, wall);
+        assert!((struck[0].at.z - (BOLT_SPEED * 0.1 + 1.0)).abs() < 1.0e-4);
+        assert!(flying(&bolts)[0].landed.is_some());
+        // It glows there a moment, and is gone.
+        bolts.fly(&mut graph, IMPACT + 0.01, |_, _, _, _| None);
+        assert!(flying(&bolts).is_empty());
+        // Sent 3 m to land: it glows where it gets to, having hit nothing.
+        bolts.fire_for(&mut graph, Vector3::zeros(), ahead, 3.0, true);
+        // 3 m at its speed is 0.075 s; after 0.1 s it is there, glowing.
+        for _ in 0..5 {
+            assert!(bolts.fly(&mut graph, 0.02, |_, _, _, _| None).is_empty());
+        }
+        let bolt = flying(&bolts)[0];
+        assert!(bolt.landed.is_some());
+        assert!((bolt.position.z - (3.0 - 0.5 * BOLT_LENGTH)).abs() < 1.0e-3);
+        // Sent 3 m not to land: gone when it gets there.
+        bolts.clear(&mut graph);
+        bolts.fire_for(&mut graph, Vector3::zeros(), ahead, 3.0, false);
+        for _ in 0..10 {
+            bolts.fly(&mut graph, 0.02, |_, _, _, _| None);
+        }
+        assert!(flying(&bolts).is_empty());
+    }
 
     #[test]
     fn the_first_pull_draws_and_the_next_fires() {

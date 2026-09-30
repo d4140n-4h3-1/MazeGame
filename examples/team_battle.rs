@@ -6,7 +6,9 @@
 //! animations: walking with no enemy about, jogging to one, running for cover and sprinting when
 //! falling back hurt - skidding as they stop and turn - strafing and crouch-strafing while they
 //! face a target, a jump now and then as they break for cover, the pistol drawn, raised, aimed up,
-//! down and to the side at the target and fired, and holstered once the fighting is over. Shot
+//! down and to the side at the target and fired - a glowing green bolt from its muzzle, the
+//! game's own (see `maze::player::pistol`), which does its harm when it gets there - and
+//! holstered once the fighting is over. Shot
 //! down, a droid falls limp, knocked back by the shot, and may lose what it was hit in; it comes
 //! back as a new droid. They cross the arena along the walk grid, see only in front
 //! of them (hydroxus-ai's sight), and fight from cover: a crouched droid behind a low block or a
@@ -22,7 +24,7 @@
 
 use fyrox::{
     core::{
-        algebra::{Matrix4, Point3, UnitQuaternion, Vector2, Vector3},
+        algebra::{Point3, UnitQuaternion, Vector2, Vector3},
         color::Color,
         log::Log,
         math::aabb::AxisAlignedBoundingBox,
@@ -52,10 +54,7 @@ use fyrox::{
         collider::{Collider, ColliderBuilder, ColliderShape, GeometrySource},
         graph::{physics::RayCastOptions, Graph},
         light::{point::PointLightBuilder, BaseLightBuilder},
-        mesh::{
-            surface::{SurfaceBuilder, SurfaceData, SurfaceResource},
-            Mesh, MeshBuilder,
-        },
+        mesh::Mesh,
         node::Node,
         pivot::PivotBuilder,
         rigidbody::{RigidBody, RigidBodyBuilder, RigidBodyType},
@@ -69,6 +68,7 @@ use maze::{
     dismember,
     player::{
         avatar::{Avatar, Going},
+        pistol::{Bolts, BOLT_SPEED},
         posture::{Gait, Posture},
     },
     ragdoll::{self, Ragdoll},
@@ -188,8 +188,9 @@ struct Droid {
     gait: Gait,
     /// Whether it is falling back, hurt, which it does at a sprint.
     retreating: bool,
-    /// Whether it fired this frame.
+    /// Whether it pulled the trigger this frame, and the shot it is waiting to fire.
     fired: bool,
+    pending: Option<Shot>,
     /// Where the chest of the target it has is, if one.
     target_at: Option<Vector3<f32>>,
     /// How long since it last had a target, in seconds: it holsters its pistol a while after.
@@ -247,9 +248,27 @@ impl Droid {
     }
 }
 
-#[derive(Debug)]
-struct Tracer {
-    node: Handle<Node>,
+/// A shot a droid has decided on, waiting for its pistol to fire: which droid it is at, where it
+/// is going - onto them, into the cover in the way, or wide - whether it hits them, and for how
+/// much; and how long it has waited.
+#[derive(Debug, Clone, Copy)]
+struct Shot {
+    target: usize,
+    end: Vector3<f32>,
+    hits: bool,
+    damage: f32,
+    waited: f32,
+}
+
+/// A bolt on its way to the droid it hits: who fired it, at whom, for how much, from where to
+/// where, and how long till it gets there.
+#[derive(Debug, Clone, Copy)]
+struct Arrival {
+    shooter: usize,
+    target: usize,
+    damage: f32,
+    from: Vector3<f32>,
+    to: Vector3<f32>,
     left: f32,
 }
 
@@ -276,7 +295,9 @@ struct Battle {
     spawns: [Vec<(usize, usize)>; 2],
     covers: Vec<CoverSpot>,
     droids: Vec<Droid>,
-    tracers: Vec<Tracer>,
+    /// The bolts everyone fires, and those on their way to someone they will hit.
+    bolts: Option<Bolts>,
+    arrivals: Vec<Arrival>,
     /// Where each team last saw each enemy, and how long ago.
     intel: [Vec<Option<(Vector3<f32>, f32)>>; 2],
     score: [u32; 2],
@@ -473,11 +494,10 @@ impl Battle {
             self.droids[i].target_at = at;
         }
         let graph = &mut ctx.scenes[self.scene].graph;
-        if !self.paused {
-            self.update_tracers(graph, dt);
-        }
         let dt = if self.paused { 0.0 } else { dt };
         self.show_droids(graph, dt);
+        self.fire_bolts(graph, dt);
+        self.bolts_arrive(graph, dt);
         self.move_camera(graph, dt);
         self.update_text(ctx);
     }
@@ -680,6 +700,11 @@ impl Battle {
 
     fn start_match(&mut self, scene: &mut Scene) {
         ragdoll::prepare(&mut scene.graph);
+        match self.bolts.as_mut() {
+            Some(bolts) => bolts.clear(&mut scene.graph),
+            None => self.bolts = Some(Bolts::new(&mut scene.graph)),
+        }
+        self.arrivals.clear();
         for mut droid in self.droids.drain(..) {
             Self::clear_body(&mut scene.graph, &mut droid);
         }
@@ -719,6 +744,7 @@ impl Battle {
             gait: Gait::Jogging,
             retreating: false,
             fired: false,
+            pending: None,
             target_at: None,
             calm_for: HOLSTER_AFTER,
             air: None,
@@ -1099,114 +1125,143 @@ impl Battle {
                 from + (to + wide - from).normalize() * (distance + 6.0)
             }
         };
-        self.tracer(graph, from, end, self.droids[i].team);
+        // It pulls the trigger; the bolt leaves when the pistol fires (see `fire_bolts`), and
+        // does its harm when it gets there (see `bolts_arrive`).
+        let damage = self.random(DAMAGE);
         self.droids[i].fired = true;
-        if hit {
-            let damage = self.random(DAMAGE);
-            let target = &mut self.droids[j];
-            target.health -= damage;
-            target.hurt_flash = 0.12;
-            if target.health <= 0.0 {
-                target.dead_for = Some(RESPAWN_TIME);
-                // It goes limp, knocked back by the shot, and may lose what it was hit in.
-                let way = (to - from).normalize();
-                target.avatar.set_eyes(Some(Color::BLACK));
-                let going = if target.route.is_empty() { Vector3::zeros() } else { forward(target.heading) * 2.0 };
-                target.ragdoll = Ragdoll::start(
-                    graph,
-                    target.avatar.root(),
-                    going,
-                    Some((way * ragdoll::STOPPING_BLOW, to)),
-                );
-                target.fallen = true;
-                target.air = None;
-                if let Some(ragdoll) = target.ragdoll.as_mut() {
-                    if let Some(body) = ragdoll.body_struck(graph, to, way) {
-                        if let Some(part) = dismember::break_for(body) {
-                            if target.avatar.break_off(graph, part) {
-                                ragdoll.let_loose(graph, part);
-                            }
+        self.droids[i].pending = Some(Shot { target: j, end, hits: hit, damage, waited: 0.0 });
+    }
+
+    /// Lets go the bolt of each droid whose pistol fired this frame, from its muzzle, and flies
+    /// every bolt on for `dt`: into what it hits of the arena, or onto the droid it is to hit.
+    fn fire_bolts(&mut self, graph: &mut Graph, dt: f32) {
+        let Some(mut bolts) = self.bolts.take() else { return };
+        for i in 0..self.droids.len() {
+            let Some(mut shot) = self.droids[i].pending else { continue };
+            // From the muzzle as the pistol fires; if it never does, from about where it is held.
+            let from = match self.droids[i].avatar.shot() {
+                Some((muzzle, _)) => muzzle,
+                None if shot.waited > 0.6 || !self.droids[i].alive() => {
+                    self.droids[i].eyes() - Vector3::y() * 0.35 + forward(self.droids[i].heading) * 0.4
+                }
+                None => {
+                    shot.waited += dt;
+                    self.droids[i].pending = Some(shot);
+                    continue;
+                }
+            };
+            self.droids[i].pending = None;
+            if !self.droids[i].alive() {
+                continue;
+            }
+            let Some(way) = (shot.end - from).try_normalize(1.0e-3) else { continue };
+            let length = (shot.end - from).norm();
+            if shot.hits {
+                // Onto them, glowing there as it lands.
+                bolts.fire_for(graph, from, way, length, true);
+                self.arrivals.push(Arrival {
+                    shooter: i,
+                    target: shot.target,
+                    damage: shot.damage,
+                    from,
+                    to: shot.end,
+                    left: length / BOLT_SPEED,
+                });
+            } else {
+                // Wide, or into cover: on till it hits the arena.
+                bolts.fire(graph, from, way);
+            }
+        }
+        // Only the arena stops a bolt: a droid it misses, it passes.
+        bolts.fly(graph, dt, |graph, from, way, reach| {
+            let end = from + way * reach;
+            Self::blocked(graph, from, end).map(|along| (along, Handle::NONE))
+        });
+        self.bolts = Some(bolts);
+    }
+
+    /// Does the harm of each bolt that has got to the droid it hits.
+    fn bolts_arrive(&mut self, graph: &mut Graph, dt: f32) {
+        let mut arrived = Vec::new();
+        self.arrivals.retain_mut(|arrival| {
+            arrival.left -= dt;
+            let here = arrival.left <= 0.0;
+            if here {
+                arrived.push(*arrival);
+            }
+            !here
+        });
+        for arrival in arrived {
+            let Arrival { shooter: i, target: j, damage, from, to, .. } = arrival;
+            if self.droids[j].alive() {
+                self.hit(graph, i, j, damage, from, to);
+            }
+        }
+    }
+
+    /// Droid `i`'s bolt, fired from `from`, gets to droid `j` at `to`, for `damage`.
+    fn hit(&mut self, graph: &mut Graph, i: usize, j: usize, damage: f32, from: Vector3<f32>, to: Vector3<f32>) {
+        let distance = (to - from).norm();
+        let target = &mut self.droids[j];
+        target.health -= damage;
+        target.hurt_flash = 0.12;
+        if target.health <= 0.0 {
+            target.dead_for = Some(RESPAWN_TIME);
+            // It goes limp, knocked back by the shot, and may lose what it was hit in.
+            let way = (to - from).normalize();
+            target.avatar.set_eyes(Some(Color::BLACK));
+            let going = if target.route.is_empty() { Vector3::zeros() } else { forward(target.heading) * 2.0 };
+            target.ragdoll = Ragdoll::start(
+                graph,
+                target.avatar.root(),
+                going,
+                Some((way * ragdoll::STOPPING_BLOW, to)),
+            );
+            target.fallen = true;
+            target.air = None;
+            if let Some(ragdoll) = target.ragdoll.as_mut() {
+                if let Some(body) = ragdoll.body_struck(graph, to, way) {
+                    if let Some(part) = dismember::break_for(body) {
+                        if target.avatar.break_off(graph, part) {
+                            ragdoll.let_loose(graph, part);
                         }
                     }
                 }
-                target.deaths += 1;
-                target.route.clear();
-                self.droids[i].kills += 1;
-                self.droids[i].target = None;
-                self.score[self.droids[i].team.index()] += 1;
-                Log::info(format!(
-                    "Team battle: {} {} downs {} {} from {:.0} m, {} - {} : {}",
-                    self.droids[i].team.name(),
-                    i % PER_TEAM + 1,
-                    self.droids[j].team.name(),
-                    j % PER_TEAM + 1,
-                    distance,
-                    self.droids[i].task.label(),
-                    self.score[0],
-                    self.score[1]
-                ));
-                for intel in &mut self.intel {
-                    intel[j] = None;
-                }
-            } else {
-                // Shot at out in the open: get to cover. Badly hurt anywhere: fall back.
-                let threat = self.droids[i].position;
-                let hurt = self.droids[j].health < RETREAT_HEALTH;
-                let exposed = matches!(self.droids[j].task, Task::Advance | Task::Standing { .. });
-                if exposed || hurt {
-                    self.take_cover(graph, j, threat, hurt);
-                } else if let Task::Peeking { spot, peek, .. } = self.droids[j].task {
-                    self.droids[j].crouched = true;
-                    self.droids[j].task = Task::Hidden { spot, peek, left: 0.8 };
-                }
+            }
+            target.deaths += 1;
+            target.route.clear();
+            self.droids[i].kills += 1;
+            self.droids[i].target = None;
+            self.score[self.droids[i].team.index()] += 1;
+            Log::info(format!(
+                "Team battle: {} {} downs {} {} from {:.0} m, {} - {} : {}",
+                self.droids[i].team.name(),
+                i % PER_TEAM + 1,
+                self.droids[j].team.name(),
+                j % PER_TEAM + 1,
+                distance,
+                self.droids[i].task.label(),
+                self.score[0],
+                self.score[1]
+            ));
+            for intel in &mut self.intel {
+                intel[j] = None;
+            }
+        } else {
+            // Shot at out in the open: get to cover. Badly hurt anywhere: fall back.
+            let threat = self.droids[i].position;
+            let hurt = self.droids[j].health < RETREAT_HEALTH;
+            let exposed = matches!(self.droids[j].task, Task::Advance | Task::Standing { .. });
+            if exposed || hurt {
+                self.take_cover(graph, j, threat, hurt);
+            } else if let Task::Peeking { spot, peek, .. } = self.droids[j].task {
+                self.droids[j].crouched = true;
+                self.droids[j].task = Task::Hidden { spot, peek, left: 0.8 };
             }
         }
     }
 
-    fn tracer(&mut self, graph: &mut Graph, from: Vector3<f32>, to: Vector3<f32>, team: Team) {
-        let way = to - from;
-        let length = way.norm();
-        if length < 0.01 {
-            return;
-        }
-        let color = team.color();
-        let mut material = Material::standard();
-        material.set_property("diffuseColor", color);
-        material.set_property(
-            "emissionStrength",
-            MaterialProperty::Vector3(Vector3::new(color.r as f32, color.g as f32, color.b as f32) / 255.0 * 6.0),
-        );
-        let rotation = UnitQuaternion::face_towards(&way, &Vector3::y());
-        let node = MeshBuilder::new(
-            BaseBuilder::new().with_cast_shadows(false).with_local_transform(
-                TransformBuilder::new()
-                    .with_local_position(from + way * 0.5)
-                    .with_local_rotation(rotation)
-                    .with_local_scale(Vector3::new(0.04, 0.04, length))
-                    .build(),
-            ),
-        )
-        .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(SurfaceData::make_cube(
-            Matrix4::identity(),
-        )))
-        .with_material(MaterialResource::new_embedded(material))
-        .build()])
-        .build(graph)
-        .to_base();
-        self.tracers.push(Tracer { node, left: 0.07 });
-    }
 
-    fn update_tracers(&mut self, graph: &mut Graph, dt: f32) {
-        self.tracers.retain_mut(|tracer| {
-            tracer.left -= dt;
-            if tracer.left <= 0.0 {
-                graph.remove_node(tracer.node);
-                false
-            } else {
-                true
-            }
-        });
-    }
 
     // ------------------------------------------------------------------ moving and showing
 

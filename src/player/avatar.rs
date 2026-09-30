@@ -2098,7 +2098,7 @@ impl Avatar {
     /// Where the pistol's muzzle was, across the world, as a shot left it this frame, and which way
     /// the shot went, one meter long: the way the barrel pointed as the trigger was pulled. None
     /// if no shot left.
-    pub(super) fn shot(&self) -> Option<(Vector3<f32>, Vector3<f32>)> {
+    pub fn shot(&self) -> Option<(Vector3<f32>, Vector3<f32>)> {
         self.shot
     }
 
