@@ -2383,7 +2383,7 @@ impl Plugin for MazeGame {
         let GraphicsContext::Initialized(graphics_context) = &*ctx.graphics_context else {
             return Ok(());
         };
-        graphics_context.window.set_title("Maze");
+        graphics_context.window.set_title("Ruptura Systematis");
         if !diagnostics::has_expected_backend(graphics_context) {
             ctx.loop_controller.exit();
             return Ok(());

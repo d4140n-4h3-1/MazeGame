@@ -1,4 +1,4 @@
-# Maze
+# Ruptura Systematis
 
 A small maze game in Rust, built on the [Fyrox](https://github.com/FyroxEngine/Fyrox)
 engine and rendered with Vulkan.

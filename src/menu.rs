@@ -77,7 +77,7 @@ impl MainMenu {
     /// Builds the menu, hidden, over everything else in `ui`, on a backdrop nothing shows through.
     pub fn build(ui: &mut UserInterface) -> Self {
         let ctx = &mut ui.build_ctx();
-        let heading = title(ctx, "Maze");
+        let heading = title(ctx, "Ruptura Systematis");
         let (maze, _) = button(ctx, "Maze");
         let (ctf, _) = button(ctx, "Capture the Flag");
         let (quit, _) = button(ctx, "Quit");

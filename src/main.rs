@@ -39,7 +39,7 @@ fn main() {
 /// the page's own style sees to.
 fn window_attributes() -> WindowAttributes {
     let mut attributes = WindowAttributes::default()
-        .with_title("Maze")
+        .with_title("Ruptura Systematis")
         .with_resizable(true);
     if platform::var("MAZE_WINDOWED").as_deref() != Some("1") && cfg!(not(target_arch = "wasm32")) {
         attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
