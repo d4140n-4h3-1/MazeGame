@@ -26,7 +26,8 @@
 //! `BATTLE_OLD=red` (or `cyan`, or `both`) has that side fight as they did before all that, one
 //! droid at a time, to see the difference: each match ends by saying which side won.
 //!
-//! Run with `cargo run --example team_battle`.
+//! Run with `cargo run --example team_battle`. `BATTLE_MAP=<path>` fights in another arena, such
+//! as the capture-the-flag map, `data/arena/ctf_map.glb`: the teams start at its two ends along x.
 //!
 //! The camera is free: WASD to fly, Q and E down and up, Shift to go faster, the right mouse
 //! button held to look round. Tab follows the next droid, F lets it go, Space pauses, R starts a
@@ -85,6 +86,10 @@ use maze::{
 };
 
 const MAP: &str = "data/arena/combat_map.glb";
+
+fn map_path() -> String {
+    std::env::var("BATTLE_MAP").unwrap_or_else(|_| MAP.to_string())
+}
 /// How often a droid breaking for cover jumps as it goes, out of 1; how fast it leaves the
 /// ground, in meters per second, for a short and a high jump; and how fast it falls.
 const JUMP_CHANCE: f32 = 0.25;
@@ -460,7 +465,7 @@ impl Battle {
         self.pitch = 22f32.to_radians();
         self.camera = CameraBuilder::new(BaseBuilder::new()).build(&mut scene.graph).to_base();
         self.scene = ctx.scenes.add(scene);
-        self.map = Some(ctx.resource_manager.request::<Model>(MAP));
+        self.map = Some(ctx.resource_manager.request::<Model>(map_path()));
         let old = std::env::var("BATTLE_OLD").unwrap_or_default();
         self.smart = [
             !matches!(old.as_str(), "red" | "both"),
@@ -531,7 +536,7 @@ impl Battle {
                 let Some(map) = self.map.clone() else { return };
                 let models = self.models.clone().map(|model| model.filter(|m| !m.is_failed_to_load()));
                 if map.is_failed_to_load() {
-                    self.set_text(ctx, self.scoreboard, format!("Could not load {MAP}"));
+                    self.set_text(ctx, self.scoreboard, format!("Could not load {}", map_path()));
                     self.map = None;
                 } else if models.iter().any(Option::is_none) {
                     self.set_text(ctx, self.scoreboard, format!("Could not load {MODELS:?}"));
@@ -691,6 +696,8 @@ impl Battle {
                 bounds.add_box(node.world_bounding_box());
             }
         }
+        // Keep the camera inside a narrower arena than the combat map, by its long side.
+        self.camera_position.z = self.camera_position.z.max(bounds.min.z + 1.5);
         let width = ((bounds.max.x - bounds.min.x) / CELL).ceil() as usize;
         let depth = ((bounds.max.z - bounds.min.z) / CELL).ceil() as usize;
         let origin = Vector3::new(bounds.min.x, 0.0, bounds.min.z);

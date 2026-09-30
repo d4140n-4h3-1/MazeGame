@@ -108,6 +108,9 @@ their animations; the crate decides what they make of what is round them.
 
 30 September 2026:
 
+- **A capture-the-flag map**, `data/arena/ctf_map.glb`: a red base at one end and a cyan base at
+  the other, each with its flag, joined by three lanes. The team battle can be fought in it
+  with `BATTLE_MAP`.
 - **The droids see only in front of them, always.** On ALERT too, and right next to them too: a
   droid or a drone can be crept up on from behind, or slipped round while it looks the other
   way. A hunting droid that loses you round its back has to search for you.
@@ -622,6 +625,21 @@ the arena or follow one droid (Tab).
 
 ```sh
 cargo run --release --example team_battle
+```
+
+`data/arena/ctf_map.glb` is an arena for capture the flag, 84 by 52 m. Red's base is at the -x
+end and cyan's at the +x end. Each base is a walled room with its team's colour round the walls
+and doorways. Its flag stands on a pad in the middle, and there are three ways in: a front door
+off the yard, and a door in each side wall off a corridor round the back. Between the bases, two
+long walls with doorways through them split the field into three lanes. The middle lane is open
+round a central tower, and each side lane is narrower, with a low wall across its middle. Both
+halves of the map are the same, mirrored, with low and tall cover and pillars throughout.
+`data/arena/ctf_map.py` builds it in Blender (`blender -b --python data/arena/ctf_map.py`).
+Played with `MAZE_MODEL`, the cyan flag is the something to find. The team battle fights in it
+with
+
+```sh
+BATTLE_MAP=data/arena/ctf_map.glb cargo run --release --example team_battle
 ```
 
 ## Tests
