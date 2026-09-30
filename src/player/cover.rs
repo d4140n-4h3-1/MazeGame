@@ -9,7 +9,7 @@
 //! Tab again lets go of the wall, and so does pushing away from it, jumping, or the wall coming
 //! to an end behind it rather than to one side.
 
-use super::Player;
+use super::{avatar::Wall, Player};
 use fyrox::{
     core::{
         algebra::{Point3, Vector3},
@@ -55,6 +55,8 @@ pub(super) struct Cover {
     /// Which way round the corner to lean, along the ground, while the droid is at the edge of
     /// the wall with a key held that would take it past.
     peek: Option<Vector3<f32>>,
+    /// Whether the wall ends just ahead, the way the droid faces: it is at the corner.
+    corner: bool,
 }
 
 /// `vector` along the ground.
@@ -126,6 +128,7 @@ impl Player {
                 normal,
                 facing,
                 peek: None,
+                corner: false,
             });
         }
     }
@@ -154,18 +157,22 @@ impl Player {
         let mut peek = None;
         if push.abs() > 0.1 {
             facing = push.signum();
-            // Only while the wall goes on that way. Where it ends is the corner, to lean round.
-            let ahead = middle + sideways * (facing * EDGE);
-            if self.wall(graph, ahead, -normal, HOLD).is_some() {
-                going = facing * speed * push.abs();
-            } else {
+        }
+        // Only while the wall goes on the way it faces. Where it ends is the corner, to lean round.
+        let ahead = middle + sideways * (facing * EDGE);
+        let corner = self.wall(graph, ahead, -normal, HOLD).is_none();
+        if push.abs() > 0.1 {
+            if corner {
                 peek = Some(sideways * facing);
+            } else {
+                going = facing * speed * push.abs();
             }
         }
         self.cover = Some(Cover {
             normal,
             facing,
             peek,
+            corner,
         });
         Some(sideways * going + normal * closing(gap, speed.max(1.0)))
     }
@@ -174,6 +181,21 @@ impl Player {
     /// the wall it is in cover against, with a key held that would take it on past.
     pub(super) fn cover_peek(&self) -> Option<Vector3<f32>> {
         self.cover?.peek
+    }
+
+    /// Whether the droid is in cover at the end of the wall, the way it faces: at the corner.
+    pub(super) fn at_cover_corner(&self) -> bool {
+        self.cover.is_some_and(|cover| cover.corner)
+    }
+
+    /// Which side of the droid the wall it is in cover against is, as it faces along it.
+    pub(super) fn cover_wall(&self) -> Option<Wall> {
+        let cover = self.cover?;
+        Some(if cover.facing > 0.0 {
+            Wall::Right
+        } else {
+            Wall::Left
+        })
     }
 
     /// Which way the droid faces in cover, like

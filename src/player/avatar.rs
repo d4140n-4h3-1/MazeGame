@@ -50,8 +50,12 @@
 //! off an edge it flies the same way, once it has been in the air long enough to be more than a
 //! step down. It lands hard or lightly as it was falling fast or not.
 //!
-//! In cover against a wall, it plays its cover idle and its cover walk, edging along the wall,
-//! in place of the usual ones - once it has them. Until then it idles and walks as ever.
+//! In cover against a wall, it leans back against it, GTA V style: its cover idle, and its cover
+//! walk and jog, shuffling sideways along the wall with its back to it, in place of the usual
+//! ones - each made twice, for the wall on its left and on its right. Without them it idles and
+//! walks as ever. At the corner, where the wall ends, raising the pistol reaches it out round the
+//! corner in one hand, the droid staying behind the wall; pushing on past the corner as well, it
+//! turns across the wall and leans out round it to aim one-handed, only as far out as it has to.
 //!
 //! It draws a pistol, holds it at the ready, raises it to aim and fires it, lowers it again a
 //! moment after the last shot unless it is held raised, and holsters it, with its upper body - from the
@@ -254,9 +258,18 @@ const IN_PLACE: f32 = 0.3;
 const FALLING_AFTER: f32 = 0.2;
 /// The droid's idle, played standing still. It stays where it is, so has no travel to take out.
 const IDLE: &str = "droid_idle_cycle";
-/// Its idle and its walk in cover, up against a wall, if it has them.
-const COVER_IDLE: &str = "droid_cover_idle";
-const COVER_WALK: &str = "droid_cover_walk";
+/// Its idle, walk and jog in cover, leaning back against a wall, if it has them: for the wall on
+/// its left, and on its right, like [`Wall::index`]. The droid faces along the wall in cover, and
+/// each is turned on that, its back to the wall.
+const COVER_IDLE: [&str; 2] = ["droid_lean_L", "droid_lean_R"];
+const COVER_WALK: [&str; 2] = ["droid_lean_walk_L", "droid_lean_walk_R"];
+const COVER_JOG: [&str; 2] = ["droid_lean_jog_L", "droid_lean_jog_R"];
+/// Aiming round the corner at the end of the wall it is in cover against, one-handed: turned to
+/// face across the wall, the barrel straight across it. For the wall on its left, and on its right.
+const COVER_AIM: [&str; 2] = ["droid_lean_aim_L", "droid_lean_aim_R"];
+/// Only the pistol arm reached out round the corner, the droid behind the wall, the barrel pointing
+/// back across it. For the wall on its left, and on its right.
+const COVER_REACH: [&str; 2] = ["droid_lean_reach_L", "droid_lean_reach_R"];
 /// How fast the crouch is played for each gait - walking, jogging, running, sprinting - crouched, and
 /// down on the floor crawling, as a multiple of how it was made. Each is slower than the one
 /// above it, as every gait is slower the lower the posture.
@@ -275,6 +288,9 @@ const PISTOL: &str = "pistol";
 /// The bone its upper body hangs off, which the pistol has from the moment it is drawn: the
 /// middle of its back, with the chest, the arms and the head above it.
 const UPPER_BODY: &str = "DEF-spine.002";
+/// The joints of its back, from the waist up to the chest, which share out any turn of the upper
+/// body between them, so that no one of them is wrung by all of it.
+const BACK: [&str; 3] = ["DEF-spine.001", UPPER_BODY, "DEF-spine.003"];
 /// The top of its left arm, which swings free at the ready - everything from the collarbone down
 /// to the fingertips goes on as the legs below have it, pumping in a run - while the right hand
 /// holds the pistol.
@@ -540,6 +556,23 @@ struct Cycle {
     way: f32,
     /// How far through it, from 0 to 1, the left foot is down, like [`left_step`].
     phase: f32,
+}
+
+/// Which side of the droid the wall it is in cover against is, as it faces along it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wall {
+    Left,
+    Right,
+}
+
+impl Wall {
+    /// Where its clips are in [`COVER_IDLE`], [`COVER_WALK`] and [`COVER_JOG`].
+    fn index(self) -> usize {
+        match self {
+            Wall::Left => 0,
+            Wall::Right => 1,
+        }
+    }
 }
 
 /// Which way the droid steps, strafing.
@@ -893,8 +926,9 @@ fn flash_glow(since: f32) -> f32 {
 /// The bones the droid squares its face and shoulders by, strafing, each from the top down.
 #[derive(Debug, Clone, PartialEq)]
 struct Square {
-    /// Down to the bone the upper body hangs off, which is turned to square the shoulders.
-    upper: Vec<Handle<Node>>,
+    /// Down to each joint of the back, waist first, which together turn the upper body to
+    /// square the shoulders, like [`BACK`].
+    back: Vec<Vec<Handle<Node>>>,
     /// Down to the head, which is turned to square the face.
     head: Vec<Handle<Node>>,
     /// Down to the tops of the arms, left and right.
@@ -940,6 +974,29 @@ fn rotate_bone(
     if let Some(pose) = target.get_mut(&bone) {
         pose.rotation = parent.inverse() * turn * own;
     }
+}
+
+/// Turns the upper body in `target` by `turn`, in the droid's own terms, shared out evenly
+/// between the joints of the back in `back`, waist first, so that the shoulders end up turned by
+/// all of it and no one joint is wrung.
+fn turn_back(
+    target: &mut FxHashMap<Handle<Node>, Bone>,
+    back: &[Vec<Handle<Node>>],
+    turn: UnitQuaternion<f32>,
+) {
+    let share = UnitQuaternion::identity().slerp(&turn, 1.0 / back.len().max(1) as f32);
+    for joint in back {
+        rotate_bone(target, joint, share);
+    }
+}
+
+/// Like [`turn_back`], by `angle` about the droid's up, left positive.
+fn twist_back(target: &mut FxHashMap<Handle<Node>, Bone>, back: &[Vec<Handle<Node>>], angle: f32) {
+    turn_back(
+        target,
+        back,
+        UnitQuaternion::from_axis_angle(&Vector3::y_axis(), angle),
+    );
 }
 
 /// The way `pitch` up and `yaw` to the left, in radians, points: one meter long, in the droid's
@@ -1141,8 +1198,12 @@ pub struct Going {
     pub low: bool,
     /// How fast it is falling, in meters per second.
     pub falling: f32,
-    /// Whether it is in cover, up against a wall.
-    pub cover: bool,
+    /// The wall it is in cover against, if it is: which side of it.
+    pub cover: Option<Wall>,
+    /// Whether, in cover, it is at the end of the wall, the way it faces: at the corner.
+    pub corner: bool,
+    /// Whether, at the corner, a key is held that would take it on past: leaning out round it.
+    pub peeking: bool,
     /// Whether the keys send it anywhere.
     pub pushing: bool,
     /// Whether it is strafing: keeping facing ahead whichever way it goes.
@@ -1174,17 +1235,31 @@ pub struct Avatar {
     gaited: usize,
     /// Played standing still, when the droid has one.
     idle: Option<Handle<Animation>>,
-    /// Played in cover in place of the idle, and of the walk, as an index into `cycles`, when
-    /// the droid has them.
-    cover_idle: Option<Handle<Animation>>,
-    cover_walk: Option<usize>,
+    /// Played in cover in place of the idle, and of the walk and the jog as indexes into
+    /// `cycles`, when the droid has them: for each side the wall can be on, like [`Wall::index`].
+    cover_idle: [Option<Handle<Animation>>; 2],
+    cover_walk: [Option<usize>; 2],
+    cover_jog: [Option<usize>; 2],
+    /// Held aiming round the corner, in place of the pistol's own aim, when the droid has them,
+    /// like [`COVER_AIM`].
+    cover_aim: [Option<Handle<Animation>>; 2],
+    /// Held with only the pistol arm reached out round the corner, like [`COVER_REACH`].
+    cover_reach: [Option<Handle<Animation>>; 2],
+    /// Which side the wall is on while it aims round the corner, if it does, and whether it
+    /// leans out to (or only reaches the pistol out); and how far it has gone over to that from
+    /// the pistol's own aim, from 0 to 1, and to reaching rather than leaning out.
+    cornered: Option<(Wall, bool)>,
+    corner_weight: f32,
+    reach_weight: f32,
+    /// The side the wall was last on aiming round the corner, to fade back from.
+    corner_side: Wall,
     /// Its strafes walking, jogging, running and crouched, each way, as indexes into `cycles`, as
     /// far as it has them: like [`STRAFES`].
     strafes: [[Option<usize>; 7]; 4],
     /// Which way it is stepping, strafing on the move.
     stepping: Option<Step>,
-    /// Whether it was in cover as of the last frame.
-    covered: bool,
+    /// The wall it was in cover against as of the last frame.
+    covered: Option<Wall>,
     /// Its skids by name, as far as it has them.
     skids: FxHashMap<&'static str, Skid>,
     skidding: Option<Skidding>,
@@ -1508,7 +1583,10 @@ impl Avatar {
             let head = chain(parent_of, root, find(HEAD)?);
             let face = place(&head, |bone| rest[&bone]).rotation.inverse() * Vector3::z();
             Some(Square {
-                upper: chain(parent_of, root, find(UPPER_BODY)?),
+                back: BACK
+                    .iter()
+                    .map(|&joint| Some(chain(parent_of, root, find(joint)?)))
+                    .collect::<Option<_>>()?,
                 head,
                 shoulders: [
                     chain(parent_of, root, left?),
@@ -1652,21 +1730,22 @@ impl Avatar {
                 .collect()
         };
         // In cover: made or not yet, so there is nothing to warn about without them.
-        let cover_walk = container
-            .find_by_name_mut(COVER_WALK)
-            .and_then(|(handle, animation)| {
-                let (pace, phase) = measure(animation);
-                let speed = pace.map(|pace| pace.z).filter(|s| *s > STILL)?;
-                info(format!("Droid: its {COVER_WALK} goes {speed:.2} m/s"));
-                cycles.push(Cycle {
-                    animation: handle,
-                    gait: Some(Gait::Walking),
-                    speed,
-                    way: 0.0,
-                    phase,
-                });
-                Some(cycles.len() - 1)
+        let mut cover_cycle = |name: &str, gait: Gait| {
+            let (handle, animation) = container.find_by_name_mut(name)?;
+            let (pace, phase) = measure(animation);
+            let speed = pace.map(|pace| pace.z).filter(|s| *s > STILL)?;
+            info(format!("Droid: its {name} goes {speed:.2} m/s"));
+            cycles.push(Cycle {
+                animation: handle,
+                gait: Some(gait),
+                speed,
+                way: 0.0,
+                phase,
             });
+            Some(cycles.len() - 1)
+        };
+        let cover_walk = COVER_WALK.map(|name| cover_cycle(name, Gait::Walking));
+        let cover_jog = COVER_JOG.map(|name| cover_cycle(name, Gait::Jogging));
         let strafes: [[Option<usize>; 7]; 4] = std::array::from_fn(|row| {
             STRAFES[row].map(|name| {
                 let Some((handle, animation)) = container.find_by_name_mut(name) else {
@@ -1694,16 +1773,30 @@ impl Avatar {
                 Some(cycles.len() - 1)
             })
         });
-        let cover_idle = container
-            .find_by_name_mut(COVER_IDLE)
-            .map(|(handle, animation)| {
+        let cover_idle = COVER_IDLE.map(|name| {
+            container.find_by_name_mut(name).map(|(handle, animation)| {
                 animation.set_loop(true);
                 handle
-            });
-        if cover_walk.is_none() || cover_idle.is_none() {
-            info(format!(
-                "Droid: in cover it walks and idles as usual, without {COVER_WALK} and {COVER_IDLE}"
-            ));
+            })
+        });
+        let mut held = |name: &str| {
+            container.find_by_name_mut(name).map(|(handle, animation)| {
+                animation.set_loop(true);
+                handle
+            })
+        };
+        let cover_aim = COVER_AIM.map(&mut held);
+        let cover_reach = COVER_REACH.map(&mut held);
+        if cover_walk.contains(&None)
+            || cover_jog.contains(&None)
+            || cover_idle.contains(&None)
+            || cover_aim.contains(&None)
+            || cover_reach.contains(&None)
+        {
+            info(
+                "Droid: in cover it idles, walks and jogs as usual where it has no droid_lean_* clips"
+                    .to_string(),
+            );
         }
         let idle = match container.find_by_name_mut(IDLE) {
             Some((handle, animation)) => {
@@ -1917,9 +2010,16 @@ impl Avatar {
             idle,
             cover_idle,
             cover_walk,
+            cover_jog,
+            cover_aim,
+            cover_reach,
+            cornered: None,
+            corner_weight: 0.0,
+            reach_weight: 0.0,
+            corner_side: Wall::Left,
             strafes,
             stepping: None,
-            covered: false,
+            covered: None,
             skids,
             skidding: None,
             leaps,
@@ -2360,8 +2460,11 @@ impl Avatar {
                 w
             }
         };
+        // Aiming round the corner, the pose it holds there is its own aim: the pistol's clips
+        // and aims give way to it.
+        let own_aim = 1.0 - smooth(self.corner_weight);
         if self.arms_weight > 0.0 {
-            let w = self.arms_weight * self.arms_weight * (3.0 - 2.0 * self.arms_weight);
+            let w = own_aim * smooth(self.arms_weight);
             for (bone, pose) in &self.arms_pose {
                 if let Some(target) = target.get_mut(bone) {
                     *target = target.towards(*pose, arm_weight(bone, w));
@@ -2399,20 +2502,20 @@ impl Avatar {
                 .each_ref()
                 .map(|chain| place(chain, |bone| target[&bone]).position);
             let off = wrap(ahead - shoulders_yaw(left, right));
-            turn_bone(&mut target, &square.upper, w * off);
+            twist_back(&mut target, &square.back, w * off);
             let face = place(&square.head, |bone| target[&bone]).rotation * square.face;
             turn_bone(&mut target, &square.head, w * wrap(ahead - yaw_of(face)));
         }
         // The pistol follows the camera, as far over to the pistol as the upper body has gone:
         // the aims' offsets laid on top, from where the droid itself faces.
         if let Some(aims) = self.aims.as_ref().filter(|_| self.arms_weight > 0.0) {
-            let w = self.arms_weight * self.arms_weight * (3.0 - 2.0 * self.arms_weight);
+            let w = smooth(self.arms_weight);
             // Squared up, the upper body already faces the body's ahead; otherwise the droid's.
             let facing = self.heading * (1.0 - self.square_weight);
             let (pitch, yaw) = (self.look.0, wrap(self.look.1 - facing));
             for (bone, offset) in aims.offset(pitch, yaw) {
                 if let Some(pose) = target.get_mut(&bone) {
-                    let offset = Bone::identity().towards(offset, arm_weight(&bone, w));
+                    let offset = Bone::identity().towards(offset, arm_weight(&bone, own_aim * w));
                     pose.position += offset.position;
                     pose.rotation *= offset.rotation;
                 }
@@ -2424,7 +2527,13 @@ impl Avatar {
                 (&self.square, aims.pitches.last(), aims.pitches.first())
             {
                 let (left, right) = (aims.yaws.last().copied(), aims.yaws.first().copied());
-                let yaw = yaw.clamp(right.unwrap_or(yaw), left.unwrap_or(yaw));
+                // Round the corner it faces across the wall, and aims as far either side of that.
+                let across = match self.corner_side {
+                    Wall::Left => std::f32::consts::FRAC_PI_2,
+                    Wall::Right => -std::f32::consts::FRAC_PI_2,
+                } * smooth(self.corner_weight);
+                let off = wrap(yaw - across);
+                let yaw = across + off.clamp(right.unwrap_or(off), left.unwrap_or(off));
                 let wanted = pointing(pitch.clamp(bottom, top), wrap(yaw + facing - self.heading));
                 if matches!(self.arms, Arms::Aiming | Arms::Ready) {
                     let barrel =
@@ -2434,8 +2543,11 @@ impl Avatar {
                         self.aim_fix = self.aim_fix.slerp(&needed, catch_up);
                     }
                 }
-                let turn = UnitQuaternion::identity().slerp(&self.aim_fix, w);
-                rotate_bone(&mut target, &square.upper, turn);
+                // Reaching round the corner, the arm is as far out as it goes: turning the back
+                // would only swing it into the wall.
+                let reach = smooth(self.reach_weight);
+                let turn = UnitQuaternion::identity().slerp(&self.aim_fix, w * (1.0 - reach));
+                turn_back(&mut target, &square.back, turn);
             }
         }
         // At the ready, running, the shoulders twist against the hips with each stride, the right
@@ -2445,7 +2557,7 @@ impl Avatar {
         if let (Some(square), Some((twist, drop))) = (self.square.as_ref(), stride) {
             if at_ready > 0.0 {
                 let twist = at_ready * READY_TWIST * twist;
-                turn_bone(&mut target, &square.upper, twist);
+                twist_back(&mut target, &square.back, twist);
                 turn_bone(&mut target, &square.shoulders[1], -PISTOL_STEADY * twist);
                 let dip = UnitQuaternion::from_axis_angle(
                     &Vector3::x_axis(),
@@ -2488,10 +2600,14 @@ impl Avatar {
 
         let crouched = going.posture != Posture::Standing;
         let mut wanted = choose(&self.gaits(), going.gait, crouched, going.speed >= STILL);
-        // In cover, edging along the wall in place of walking.
-        let walking = |i: usize| self.cycles[i].gait == Some(Gait::Walking);
-        if going.cover && !crouched && wanted.is_some_and(walking) {
-            wanted = self.cover_walk.or(wanted);
+        // In cover, shuffling along the wall in place of walking or jogging.
+        if let (Some(wall), Some(index), false) = (going.cover, wanted, crouched) {
+            let shuffle = match self.cycles[index].gait {
+                Some(Gait::Walking) => self.cover_walk[wall.index()],
+                Some(Gait::Jogging) => self.cover_jog[wall.index()],
+                _ => None,
+            };
+            wanted = shuffle.or(wanted);
         }
         // Strafing, sideways in a strafe, or back in the cycle played backwards.
         let mut backwards = false;
@@ -2502,13 +2618,39 @@ impl Avatar {
                 _ => (),
             }
         }
-        // Standing still, going into cover or out of it changes one idle for the other.
-        if wanted.is_none() && self.playing.is_none() && going.cover != self.covered {
+        // At the corner with the pistol up, it reaches it out round the corner - or, pushing on
+        // past, leans out round it to aim.
+        let raised = matches!(self.arms, Arms::Raising | Arms::Aiming | Arms::Firing(_));
+        let cornered = going
+            .cover
+            .filter(|_| going.corner && raised)
+            .map(|wall| (wall, going.peeking))
+            .filter(|&(wall, out)| self.corner_clip(wall, out).is_some());
+        if let Some((wall, _)) = cornered {
+            self.corner_side = wall;
+        }
+        let step = dt / ARMS_FADE;
+        let into_corner = if cornered.is_some() { 1.0 } else { 0.0 };
+        self.corner_weight += (into_corner - self.corner_weight).clamp(-step, step);
+        let reaching = if matches!(cornered, Some((_, false))) {
+            1.0
+        } else {
+            0.0
+        };
+        self.reach_weight += (reaching - self.reach_weight).clamp(-step, step);
+        // Standing still, going into cover or out of it, or round the corner to aim or back,
+        // changes one idle for the other.
+        if wanted.is_none()
+            && self.playing.is_none()
+            && (going.cover != self.covered || cornered != self.cornered)
+        {
             self.covered = going.cover;
+            self.cornered = cornered;
             self.rewind_idle(graph);
             self.fade_from_here(graph);
         }
         self.covered = going.cover;
+        self.cornered = cornered;
         if wanted != self.playing {
             // The new cycle picks up at the same point in the stride, with the same foot down, so
             // the feet carry on.
@@ -2613,12 +2755,37 @@ impl Avatar {
     }
 
     /// The idle to play standing still: the one for cover, in cover, if the droid has it.
-    fn idle_now(&self) -> Option<Handle<Animation>> {
-        if self.covered {
-            self.cover_idle.or(self.idle)
+    /// What it holds aiming round the corner with the wall on the `wall` side: leaning `out`
+    /// round it, or only reaching the pistol out.
+    fn corner_clip(&self, wall: Wall, out: bool) -> Option<Handle<Animation>> {
+        if out {
+            self.cover_aim[wall.index()]
         } else {
-            self.idle
+            self.cover_reach[wall.index()]
         }
+    }
+
+    fn idle_now(&self) -> Option<Handle<Animation>> {
+        let aiming = self
+            .cornered
+            .and_then(|(wall, out)| self.corner_clip(wall, out));
+        aiming
+            .or_else(|| self.covered.and_then(|wall| self.cover_idle[wall.index()]))
+            .or(self.idle)
+    }
+
+    /// How fast the droid shuffles along a wall at `gait` in cover against it, in meters per
+    /// second, with its feet keeping to the floor: the walk's pace, and the jog's for any faster
+    /// gait. None without the clip, or crouched.
+    pub fn cover_pace(&self, posture: Posture, wall: Wall, gait: Gait) -> Option<f32> {
+        if posture != Posture::Standing {
+            return None;
+        }
+        let shuffle = match gait {
+            Gait::Walking => self.cover_walk,
+            _ => self.cover_jog,
+        };
+        Some(self.cycles[shuffle[wall.index()]?].speed)
     }
 
     /// The idle starts from the top each time the droid comes to a stop.
@@ -2653,7 +2820,7 @@ impl Avatar {
         if going.posture != Posture::Standing
             || !going.grounded
             || going.strafing
-            || going.cover
+            || going.cover.is_some()
             || self.leaping.is_some()
         {
             return false;
@@ -2709,7 +2876,7 @@ impl Avatar {
             || !going.grounded
             || going.jumped
             || going.strafing
-            || going.cover
+            || going.cover.is_some()
             || going.posture != Posture::Standing
             || (skidding.kind == SkidKind::Stop && going.pushing)
         {
@@ -3387,6 +3554,33 @@ mod tests {
         let turned = shoulders_yaw(turn(0.4) * left, turn(0.4) * right);
         assert!((turned - 0.4).abs() < 1e-5, "{turned}");
         assert!((yaw_of(turn(-0.7) * Vector3::z()) + 0.7).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_turn_of_the_upper_body_is_shared_along_the_back() {
+        let bones: Vec<Handle<Node>> = (1..=4).map(|i| Handle::new(i, 1)).collect();
+        let mut target: FxHashMap<Handle<Node>, Bone> = bones
+            .iter()
+            .map(|&bone| {
+                let position = Vector3::new(0.0, 0.2, 0.0);
+                let rotation = UnitQuaternion::identity();
+                (bone, Bone { position, rotation })
+            })
+            .collect();
+        // Hips, then three joints of the back.
+        let back: Vec<Vec<Handle<Node>>> = (2..=4).map(|n| bones[..n].to_vec()).collect();
+        twist_back(&mut target, &back, 0.9);
+        assert_eq!(
+            target[&bones[0]].rotation,
+            UnitQuaternion::identity(),
+            "hips stay"
+        );
+        for joint in &bones[1..] {
+            let own = target[joint].rotation.angle();
+            assert!((own - 0.3).abs() < 1e-5, "each joint a third: {own}");
+        }
+        let top = place(&bones, |bone| target[&bone]).rotation;
+        assert!((top.angle() - 0.9).abs() < 1e-5, "the shoulders all of it");
     }
 
     #[test]

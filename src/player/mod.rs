@@ -443,7 +443,9 @@ impl Player {
             grounded: self.grounded,
             jumped,
             low,
-            cover: self.in_cover(),
+            cover: self.cover_wall(),
+            corner: self.at_cover_corner(),
+            peeking: self.cover_peek().is_some(),
             pushing,
             falling: self.fall_speed,
             // In cover, the wall sets which way the droid faces.
@@ -475,9 +477,12 @@ impl Player {
     /// fast as the droid's feet go (see [`Avatar::pace`]), or without the droid, the posture's
     /// own speeds.
     fn top_speed(&self, gait: posture::Gait) -> f32 {
+        // In cover, as fast as the droid shuffles along the wall.
+        let shuffle =
+            |avatar: &avatar::Avatar| avatar.cover_pace(self.posture, self.cover_wall()?, gait);
         self.avatar
             .as_ref()
-            .and_then(|avatar| avatar.pace(self.posture, gait))
+            .and_then(|avatar| shuffle(avatar).or_else(|| avatar.pace(self.posture, gait)))
             .unwrap_or_else(|| self.posture.speed(gait))
     }
 
