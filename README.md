@@ -103,6 +103,9 @@ shadows (its `raytracing` feature).
 - **The engine fork is now Hydroxus.** The fork of Fyrox the game is built on has a name, and a
   README of its own crediting Fyrox. Its crates keep their Fyrox names, so nothing in the game
   changes but where Cargo fetches it from.
+- **Upstream Fyrox merged into Hydroxus**, up to 27 September: Dmitry Stepanov's markdown and
+  inline text elements in the UI, and fixes to the editor and inspector. Nothing in the game's
+  rendering changes.
 
 29 September 2026:
 
