@@ -46,6 +46,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Where the droids' conversations are.
 pub const SCRIPT: &str = "data/dialogue/droids.json";
+/// What the droids say in capture the flag, where they only call out, and are not talked to.
+pub const CTF_SCRIPT: &str = "data/dialogue/ctf.json";
 
 /// A skill check on a reply: which skill, and the chance it succeeds, in percent.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -151,8 +153,10 @@ pub struct Threatened {
 pub struct Character {
     /// What it is called, before its code.
     pub name: String,
-    /// The line it opens with.
+    /// The line it opens with, and its lines; none, for one that is not talked to.
+    #[serde(default)]
     pub start: String,
+    #[serde(default)]
     pub lines: HashMap<String, Line>,
     /// What it says by itself, by when: as it hunts the player, `spotted`, `lost`, `heard`,
     /// `alarmed` or `gave_up`; with the pistol pointed at it, `warned`, `warned_again`,
@@ -195,7 +199,7 @@ impl Script {
         for character in &self.characters {
             let name = &character.name;
             let lines = &character.lines;
-            if !lines.contains_key(&character.start) {
+            if !lines.is_empty() && !lines.contains_key(&character.start) {
                 problems.push(format!(
                     "{name} starts with {}, which it does not have",
                     character.start
@@ -615,6 +619,23 @@ mod tests {
     fn the_droids_conversations_load() {
         let script = Script::load(SCRIPT).unwrap();
         assert!(!script.characters.is_empty());
+    }
+
+    #[test]
+    fn capture_the_flags_droids_only_call_out_each_side_in_a_voice_of_its_own() {
+        let script = Script::load(CTF_SCRIPT).unwrap();
+        let voices = crate::formants::speech::Voices::load(crate::formants::speech::VOICES).unwrap();
+        let [red, blue] = &script.characters[..] else {
+            panic!("a kind of droid for each side");
+        };
+        let mut pitches = Vec::new();
+        for character in [red, blue] {
+            assert!(character.lines.is_empty(), "{} is not talked to", character.name);
+            assert!(character.barks.contains_key("engaged"), "{} calls out", character.name);
+            let voice = voices.voices.get(&character.name).expect("a voice of its own");
+            pitches.push(voice.pitch);
+        }
+        assert!(pitches[0] > 2.0 * pitches[1], "told apart by ear");
     }
 
     fn bribable() -> Script {

@@ -111,6 +111,18 @@ their animations; the crate decides what they make of what is round them.
 - **A capture-the-flag map**, `data/arena/ctf_map.glb`: a red base at one end and a cyan base at
   the other, each with its flag, joined by three lanes. The team battle can be fought in it
   with `BATTLE_MAP`.
+- **Sides in capture the flag.** Each side has two droids and a drone. Red's are yours: they
+  pay you no heed and go after blue's. Blue's guard their end, watching for you all the while,
+  and go after you or red's, whichever they see. The first droid of each side keeps to its own
+  flag and the second makes for the other side's; each drone patrols round its flag. Droids
+  shoot with their pistols and drones fire as ever, and each side's shots harm only the other
+  side, yours included. Your own bolts pass red's by.
+- **Capture the flag's droids say their own things**, from `data/dialogue/ctf.json`: red's
+  Protegators and blue's Obstruators call out as they fight, and are not talked to. Each side
+  has a voice of its own, red's high and quick, blue's deep, slow and rasping, to tell them
+  apart by ear.
+- **The firewall's shell no longer turns solid up close.** It does not bend what is seen through
+  it, as glass does, and glows less, so what is inside it shows through from any distance.
 - **Flags in firewalls.** Each flag stands in a firewall, a flickering shell of orange glass that
   nothing gets through, until the computer it answers to, in the same base, is hacked. Take
   blue's flag to win the round. The flags and the firewall are the models made in Blender,

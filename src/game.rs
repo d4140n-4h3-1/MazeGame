@@ -1,8 +1,17 @@
 //! The game itself: loading a level, playing rounds in it, and the player's input.
 
+use crate::player::{
+    pistol::{Bolts, Strike},
+    posture::Posture,
+};
+use fyrox::{
+    core::algebra::Point3,
+    scene::{collider::Collider, graph::physics::RayCastOptions},
+};
 use crate::{
     credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
+    ctf::{Bases, Side},
     firewall::{self, Firewalls},
     drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
@@ -13,7 +22,7 @@ use crate::{
     diagnostics::{self, FrameStats},
     dialogue::{
         screen::{self, DialogueScreen, Pointer, Subtitles},
-        Conversation, Facts, Mood, Provoked, Script, SCRIPT,
+        Conversation, Facts, Mood, Provoked, Script, CTF_SCRIPT, SCRIPT,
     },
     formants::{
         self,
@@ -262,6 +271,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     script: Option<Script>,
+    /// Which file `script` is from.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    script_path: &'static str,
     #[visit(skip)]
     #[reflect(hidden)]
     voices: Option<Voices>,
@@ -297,6 +310,14 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     firewalls: Firewalls,
+    /// In capture the flag, where the flags are - None in the maze; and each side's bolts, red's
+    /// and blue's, from its droids' pistols.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    ctf: Option<Bases>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    side_bolts: Option<[Bolts; 2]>,
     /// The drone, as its model loads and once it is in the scene, and whether it has been put in
     /// front of the player this round.
     #[visit(skip)]
@@ -327,6 +348,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     drones: Vec<Drone>,
+    /// In capture the flag, what each drone went after last.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    drone_targets: Vec<Option<Target>>,
     #[visit(skip)]
     #[reflect(hidden)]
     drone_placed: bool,
@@ -573,6 +598,22 @@ impl MazeGame {
         if let Some((grid, origin)) = self.level.grid.as_mut() {
             let scene = &mut ctx.scenes[self.scene];
             self.firewalls.place(scene, &self.level.markers, grid, *origin);
+        }
+        // A map with both flags is played as capture the flag.
+        let flag = |side: Side| {
+            let name = format!("flag_{}", side.name());
+            self.level.markers.iter().find(|m| m.name == name).map(|m| m.position)
+        };
+        self.ctf = flag(Side::Red).zip(flag(Side::Blue)).map(|(red, blue)| Bases { red, blue });
+        // Capture the flag has droids of its own, which say other things.
+        let script = if self.ctf.is_some() { CTF_SCRIPT } else { SCRIPT };
+        if script != self.script_path {
+            self.use_script(&ctx.resource_manager, script);
+        }
+        if let (Some(bolts), Ok(scene)) = (self.side_bolts.as_mut(), ctx.scenes.try_get_mut(self.scene)) {
+            for bolts in bolts {
+                bolts.clear(&mut scene.graph);
+            }
         }
         let Some((grid, origin)) = self.level.grid.as_ref() else {
             return;
@@ -870,6 +911,35 @@ impl MazeGame {
         )
     }
 
+    /// Has the droids say what the file at `path` has them say, each kind of droid made from its
+    /// own model: loaded, for droids put into a maze from now on.
+    fn use_script(&mut self, resources: &fyrox::asset::manager::ResourceManager, path: &'static str) {
+        self.script_path = path;
+        self.script = match Script::load(path) {
+            Ok(script) => Some(script),
+            Err(error) => {
+                Log::err(format!("Maze: the droids have nothing to say: {error}"));
+                None
+            }
+        };
+        // Each kind of droid in its own colours, and any of them in the hostile droid's.
+        self.kind_models = self.script.as_ref().map_or_else(Vec::new, |script| {
+            let models = script
+                .characters
+                .iter()
+                .map(|character| character.model.as_ref());
+            models
+                .map(|path| path.map(|path| resources.request::<Model>(path)))
+                .collect()
+        });
+        // Only loaded for a kind that changes into its colours.
+        let recoloured = self
+            .script
+            .as_ref()
+            .is_some_and(|script| script.characters.iter().any(|c| c.hostile_colours));
+        self.hostile_model = recoloured.then(|| resources.request::<Model>(HOSTILE_MODEL));
+    }
+
     /// Puts the maze's inhabitants into it once there are droids to make them from, and moves
     /// them along. Whether any caught the player, and whose phase changed.
     fn update_inhabitants(&mut self, ctx: &mut PluginContext) -> News {
@@ -886,8 +956,24 @@ impl MazeGame {
         let scene = &mut ctx.scenes[self.scene];
         let player = self.player.feet(&scene.graph);
         if let Some(liveries) = liveries {
-            self.inhabitants
-                .populate(scene, liveries, (grid, *origin), player, self.player.yaw(), rng);
+            match self.ctf {
+                // Each side's droids of its own kind: red's the first in the conversations, blue's
+                // the second.
+                Some(bases) => self.inhabitants.populate_sides(
+                    scene,
+                    liveries,
+                    (grid, *origin),
+                    bases,
+                    |side| match side {
+                        Side::Red => 0,
+                        Side::Blue => 1,
+                    },
+                    rng,
+                ),
+                None => self
+                    .inhabitants
+                    .populate(scene, liveries, (grid, *origin), player, self.player.yaw(), rng),
+            }
         }
         let graph = &scene.graph;
         // With the lights off, the player is hard to see, unless their flashlight gives them
@@ -929,8 +1015,37 @@ impl MazeGame {
         }
         let mut provoked = Vec::new();
         let mut droid_shot = false;
+        // In capture the flag, each side's droids' bolts, which harm only the other side.
+        if let Some(bolts) = self.side_bolts.as_mut() {
+            let mut landed = Vec::new();
+            for (index, bolts) in bolts.iter_mut().enumerate() {
+                let side = if index == 0 { Side::Red } else { Side::Blue };
+                // Through its own side, the droid that fired among them.
+                let own: Vec<Handle<Collider>> = self
+                    .inhabitants
+                    .standing()
+                    .into_iter()
+                    .filter(|d| d.1 == Some(side))
+                    .map(|d| d.4)
+                    .chain(self.drones.iter().filter(|d| d.side() == Some(side)).map(Drone::collider))
+                    .collect();
+                let strikes = bolts.fly(graph, ctx.dt, |graph, from, way, reach| first_hit(graph, from, way, reach, &own));
+                landed.extend(strikes.into_iter().map(|strike| (side, strike)));
+            }
+            for (side, strike) in landed {
+                self.side_strike(ctx, side, strike);
+            }
+        }
+        let graph = &mut ctx.scenes[self.scene].graph;
         for strike in self.player.struck() {
             let collider = strike.collider;
+            // In capture the flag, the player's bolts pass their own side by.
+            let friendly = self.inhabitants.hit(collider).and_then(|n| self.inhabitants.side(n))
+                .or_else(|| self.drones.iter().find(|d| d.collider() == collider).and_then(Drone::side))
+                .is_some_and(Side::is_players);
+            if friendly {
+                continue;
+            }
             // A drone, shot: it takes the hit, and goes down after enough of them.
             let hit = self
                 .drones
@@ -964,6 +1079,42 @@ impl MazeGame {
         }
         for n in provoked {
             self.on_threat(ctx, n, Threat::Provoked);
+        }
+    }
+
+    /// A bolt from `side`'s droid, or drone, has struck something: the player, one of the other
+    /// side's droids or its drone takes the hit; anything of its own side, nothing.
+    fn side_strike(&mut self, ctx: &mut PluginContext, side: Side, strike: Strike) {
+        let graph = &mut ctx.scenes[self.scene].graph;
+        let from = strike.at - strike.way * 5.0;
+        if strike.collider == self.player.collider() {
+            if side.is_players() || self.phase != Phase::Playing {
+                return;
+            }
+            let last = self.health.hit();
+            let at = self.player.position(graph);
+            self.health_sounds.play(graph, Heard::Hit, at);
+            if last {
+                self.delete_player(ctx, &format!("{}'s side", side.name()));
+            }
+            return;
+        }
+        if let Some(n) = self.drones.iter().position(|d| d.collider() == strike.collider) {
+            if self.drones[n].side() != Some(side) {
+                if let Some(true) = self.drones[n].shot(graph, strike.collider, from) {
+                    self.drone_says.push((n, "down"));
+                }
+            }
+            return;
+        }
+        let victim = self.inhabitants.hit(strike.collider).and_then(|n| self.inhabitants.side(n));
+        if victim == Some(side) {
+            return;
+        }
+        if let Some(n) = self.inhabitants.shot(graph, strike, from) {
+            Log::info(format!("Capture the flag: droid {n} is down"));
+            let whose = self.inhabitants.side(n).map_or("A", |s| if s.is_players() { "One of yours" } else { "One of blue's" });
+            self.hud.show_note(format!("{whose} droids is down"));
         }
     }
 
@@ -1114,7 +1265,23 @@ impl MazeGame {
             alerts,
             heard,
             alarmed,
+            engaged,
+            shots,
         } = self.update_inhabitants(ctx);
+        // In capture the flag, a droid going after one of the other side says so, and the
+        // droids' shots leave their pistols.
+        for n in engaged {
+            let side = self.inhabitants.side(n).map_or("", Side::name);
+            Log::info(format!("Capture the flag: {side}'s droid {n} goes after one of the other side"));
+            self.bark(n, "engaged", Mood::Hostile);
+        }
+        if !shots.is_empty() {
+            let graph = &mut ctx.scenes[self.scene].graph;
+            let bolts = self.side_bolts.get_or_insert_with(|| [Bolts::new(graph), Bolts::new(graph)]);
+            for (from, way, side) in shots {
+                bolts[side_index(side)].fire(graph, from, way);
+            }
+        }
         for (n, alert) in alerts {
             // The eyes show the phase: red after the player, orange searching, yellow wary, and
             // their own colour once it is calm again.
@@ -1288,7 +1455,8 @@ impl MazeGame {
     /// screen. Nobody, while the player cannot talk.
     fn look_for_someone(&mut self, ctx: &mut PluginContext) {
         let can_use_computer = self.phase == Phase::Playing && !self.busy() && !self.menu.is_open();
-        let can_talk = can_use_computer && self.script.is_some();
+        // In capture the flag, the droids are not talked to.
+        let can_talk = can_use_computer && self.script.is_some() && self.ctf.is_none();
         let found = if can_talk {
             let graph = &ctx.scenes[self.scene].graph;
             let (player, feet, ahead) =
@@ -1813,20 +1981,35 @@ impl MazeGame {
         // Shots fly, and hurt, only while the round is being played - through the drones.
         if self.phase == Phase::Playing && !self.menu.is_open() {
             let graph = &mut ctx.scenes[self.scene].graph;
-            let drones: Vec<_> = self.drones.iter().map(|drone| drone.collider()).collect();
-            let hits = self.shots.as_mut().map_or(0, |shots| {
-                shots.update(graph, ctx.dt, self.player.collider(), &drones)
-            });
-            for _ in 0..hits {
+            // In the maze, through every drone; in capture the flag, only through the one that
+            // fired, so that the sides' drones can hit each other.
+            let drones: Vec<_> = match self.ctf {
+                Some(_) => Vec::new(),
+                None => self.drones.iter().map(|drone| drone.collider()).collect(),
+            };
+            let hits = self.shots.as_mut().map_or_else(Vec::new, |shots| shots.update(graph, ctx.dt, &drones));
+            for hit in hits {
                 if self.phase != Phase::Playing {
                     break;
                 }
-                let last = self.health.hit();
-                let at = self.player.position(graph);
-                self.health_sounds.play(graph, Heard::Hit, at);
-                if last {
-                    self.delete_player(ctx, "a security drone");
-                    break;
+                let side = self.drones.iter().find(|d| d.collider() == hit.by).and_then(Drone::side);
+                match (self.ctf, side) {
+                    // A drone on a side harms whatever of the other side it hits.
+                    (Some(_), Some(side)) => {
+                        let strike = Strike { collider: hit.collider, at: hit.at, way: hit.way };
+                        self.side_strike(ctx, side, strike);
+                    }
+                    _ if hit.collider == self.player.collider() => {
+                        let graph = &mut ctx.scenes[self.scene].graph;
+                        let last = self.health.hit();
+                        let at = self.player.position(graph);
+                        self.health_sounds.play(graph, Heard::Hit, at);
+                        if last {
+                            self.delete_player(ctx, "a security drone");
+                            break;
+                        }
+                    }
+                    _ => (),
                 }
             }
         }
@@ -1841,7 +2024,17 @@ impl MazeGame {
                 for drone in &mut self.drones {
                     drone.hide(graph);
                 }
-                self.drones[0].place(graph, (grid, *origin), feet, rng);
+                match self.ctf {
+                    // One for each side, by its flag; the rest wait to be called in.
+                    Some(bases) => {
+                        for (drone, side) in self.drones.iter_mut().zip(Side::BOTH) {
+                            drone.place_for(graph, (grid, *origin), side, bases.flag(side), rng);
+                        }
+                    }
+                    None => {
+                        self.drones[0].place(graph, (grid, *origin), feet, rng);
+                    }
+                }
             }
             // Tried once a round, found or not.
             self.drone_placed = true;
@@ -1862,21 +2055,49 @@ impl MazeGame {
             return;
         };
         let graph = &mut ctx.scenes[self.scene].graph;
-        let target = Target {
+        let player = Target {
             feet: self.player.feet(graph),
             middle: self.player.position(graph),
             collider: self.player.collider(),
             posture: self.player.posture(),
             in_the_dark: self.lights_off && !self.player.flashlight_on(),
         };
+        // In capture the flag, whoever of the other side each drone on a side sees, nearest
+        // first - the player among them for blue's; or, seeing none, the one it went after last.
+        let targets: Vec<Target> = (0..self.drones.len())
+            .map(|n| {
+                let drone = &self.drones[n];
+                let Some(side) = drone.side().filter(|_| self.ctf.is_some()) else {
+                    return player;
+                };
+                let droids = self.inhabitants.standing().into_iter().filter(|d| d.1 == Some(side.other())).map(|(_, _, feet, middle, collider)| Target {
+                    feet,
+                    middle,
+                    collider,
+                    posture: Posture::Standing,
+                    in_the_dark: false,
+                });
+                let drones = self.drones.iter().filter(|d| d.side() == Some(side.other())).filter_map(Drone::as_target);
+                let player = (!side.is_players()).then_some(player);
+                let away = |t: &Target| (t.feet - drone.at()).norm();
+                let seen = droids
+                    .chain(drones)
+                    .chain(player)
+                    .filter(|t| drone.sees(graph, t))
+                    .min_by(|a, b| away(a).total_cmp(&away(b)));
+                seen.or(self.drone_targets.get(n).copied().flatten()).unwrap_or(NOBODY)
+            })
+            .collect();
+        self.drone_targets = targets.iter().map(|&t| (t != NOBODY).then_some(t)).collect();
         let live = self.phase == Phase::Playing && !self.menu.is_open();
         let mut says = std::mem::take(&mut self.drone_says);
         for (n, drone) in self.drones.iter_mut().enumerate() {
+            let target = targets[n];
             let doing = drone.update(graph, (grid, *origin), &target, rng, ctx.dt, live);
             says.extend(doing.says.map(|said| (n, said)));
-            // At the player's middle, wherever they are as it fires.
+            // At its target's middle, wherever they are as it fires.
             if let (Some((from, colour)), Some(shots)) = (doing.fired, self.shots.as_mut()) {
-                shots.fire(graph, from, target.middle, colour);
+                shots.fire(graph, from, target.middle, colour, drone.collider());
             }
         }
         for &(n, said) in &says {
@@ -2073,30 +2294,7 @@ impl Plugin for MazeGame {
         // Under the menu, which is built after it.
         self.dialogue = DialogueScreen::build(ctx.user_interfaces.first_mut());
         self.terminal = Terminal::build(ctx.user_interfaces.first_mut());
-        self.script = match Script::load(SCRIPT) {
-            Ok(script) => Some(script),
-            Err(error) => {
-                Log::err(format!("Maze: the droids have nothing to say: {error}"));
-                None
-            }
-        };
-        // Each kind of droid in its own colours, and any of them in the hostile droid's.
-        let resources = &ctx.resource_manager;
-        self.kind_models = self.script.as_ref().map_or_else(Vec::new, |script| {
-            let models = script
-                .characters
-                .iter()
-                .map(|character| character.model.as_ref());
-            models
-                .map(|path| path.map(|path| resources.request::<Model>(path)))
-                .collect()
-        });
-        // Only loaded for a kind that changes into its colours.
-        let recoloured = self
-            .script
-            .as_ref()
-            .is_some_and(|script| script.characters.iter().any(|c| c.hostile_colours));
-        self.hostile_model = recoloured.then(|| resources.request::<Model>(HOSTILE_MODEL));
+        self.use_script(&ctx.resource_manager, SCRIPT);
         self.notes = Notes::load(NOTES)
             .inspect_err(|error| Log::err(format!("Maze: the computers hold no notes: {error}")))
             .ok();
@@ -2500,4 +2698,47 @@ impl Plugin for MazeGame {
         }
         Ok(())
     }
+}
+
+/// A target for a drone on the player's side with no one of the other side to go after: no one,
+/// far out of sight.
+const NOBODY: Target = Target {
+    feet: Vector3::new(0.0, -1000.0, 0.0),
+    middle: Vector3::new(0.0, -1000.0, 0.0),
+    collider: Handle::NONE,
+    posture: Posture::Standing,
+    in_the_dark: true,
+};
+
+/// Which of the sides' bolts `side`'s are.
+fn side_index(side: Side) -> usize {
+    match side {
+        Side::Red => 0,
+        Side::Blue => 1,
+    }
+}
+
+/// What a bolt from `from` along `way` hits first within `reach`, but for anything `passed`, if
+/// anything: how far along, and what.
+fn first_hit(
+    graph: &Graph,
+    from: Vector3<f32>,
+    way: Vector3<f32>,
+    reach: f32,
+    passed: &[Handle<Collider>],
+) -> Option<(f32, Handle<Collider>)> {
+    let mut hits = Vec::new();
+    graph.physics.cast_ray(
+        RayCastOptions {
+            ray_origin: Point3::from(from),
+            ray_direction: way,
+            max_len: reach,
+            groups: Default::default(),
+            sort_results: true,
+        },
+        &mut hits,
+    );
+    hits.iter()
+        .find(|hit| !passed.contains(&hit.collider))
+        .map(|hit| (hit.toi, hit.collider))
 }

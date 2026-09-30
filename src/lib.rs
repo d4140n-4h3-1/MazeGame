@@ -25,6 +25,7 @@
 mod alarm;
 mod computer;
 mod credits;
+mod ctf;
 mod culling;
 mod diagnostics;
 mod dialogue;

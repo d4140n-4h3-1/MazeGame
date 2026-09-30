@@ -1,5 +1,5 @@
 {
-  "about": "The droids' voices, made from formants as each line is spoken: see src/formants/speech.rs. 'phones' are the sounds of speech, one per letter as System Latin reads it (j is the y of 'iam', w the u of 'qu'): where the three formants sit, in Hz, how long it lasts, in seconds, how much buzz (voice) and noise (hiss) it is made of, and how loud it is. A 'stop' is a moment's silence and then a burst of its noise; a voiced one murmurs while it is closed. 'widths' is how wide each of the three formants is, in Hz, and 'gains' how loud. 'pauses' are the gaps between words, at a comma and at the end of a sentence, in seconds. 'voices' are each kind of droid's voice, by the name it has in data/dialogue/droids.json, with 'default' for any other: its 'pitch' in Hz, its 'speed' (2 is twice as fast), its 'size' (every formant is this many times as high, so under 1 sounds bigger), how far each vowel's note steps up or down ('lilt'), how far a sentence falls over its length ('fall') and a question rises at its end ('rise'), each as a part of the pitch, how much hiss goes along with its voice ('breath'), how loud it is at its loudest ('volume', from 0 to 1), and how far off, in meters, it is heard at full volume ('reach'). Each droid speaks a little higher or lower than the rest of its kind. 'moods' is how many times its usual pitch a droid speaks at in each mood a line can have (see data/dialogue/droids.json): higher when pleased, questioning or agitated, lower when hostile; any not given is 1.",
+  "about": "The droids' voices, made from formants as each line is spoken: see src/formants/speech.rs. 'phones' are the sounds of speech, one per letter as System Latin reads it (j is the y of 'iam', w the u of 'qu'): where the three formants sit, in Hz, how long it lasts, in seconds, how much buzz (voice) and noise (hiss) it is made of, and how loud it is. A 'stop' is a moment's silence and then a burst of its noise; a voiced one murmurs while it is closed. 'widths' is how wide each of the three formants is, in Hz, and 'gains' how loud. 'pauses' are the gaps between words, at a comma and at the end of a sentence, in seconds. 'voices' are each kind of droid's voice, by the name it has in data/dialogue/droids.json or data/dialogue/ctf.json, with 'default' for any other: its 'pitch' in Hz, its 'speed' (2 is twice as fast), its 'size' (every formant is this many times as high, so under 1 sounds bigger), how far each vowel's note steps up or down ('lilt'), how far a sentence falls over its length ('fall') and a question rises at its end ('rise'), each as a part of the pitch, how much hiss goes along with its voice ('breath'), how loud it is at its loudest ('volume', from 0 to 1), and how far off, in meters, it is heard at full volume ('reach'). Each droid speaks a little higher or lower than the rest of its kind. 'moods' is how many times its usual pitch a droid speaks at in each mood a line can have (see data/dialogue/droids.json): higher when pleased, questioning or agitated, lower when hostile; any not given is 1.",
   "sample_rate": 22050,
   "widths": [100.0, 140.0, 220.0],
   "gains": [1.0, 0.55, 0.35],
@@ -46,6 +46,14 @@
     "Reparator": {
       "pitch": 105.0, "speed": 1.0, "size": 1.0, "lilt": 0.1, "fall": 0.2, "rise": 0.35,
       "breath": 0.12, "volume": 0.75, "reach": 3.0
+    },
+    "Protegator": {
+      "pitch": 160.0, "speed": 1.2, "size": 1.1, "lilt": 0.14, "fall": 0.12, "rise": 0.4,
+      "breath": 0.02, "volume": 0.8, "reach": 4.0
+    },
+    "Obstruator": {
+      "pitch": 68.0, "speed": 0.82, "size": 0.84, "lilt": 0.04, "fall": 0.3, "rise": 0.25,
+      "breath": 0.1, "volume": 0.85, "reach": 4.0
     }
   }
 }

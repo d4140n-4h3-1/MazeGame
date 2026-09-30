@@ -73,6 +73,7 @@ use hydroxus_ai::{
     steer::{make_way, step_aside},
 };
 use crate::{
+    ctf::{self, Side},
     dismember,
     layout::{Rng, WalkGrid},
     level::Level,
@@ -187,6 +188,24 @@ const ALARM_RANGE: f32 = 40.0;
 const REPLAN: f32 = 0.4;
 /// How far it looks for a way to the player, in steps across the grid's half-meter cells.
 const CHASE_REACH: f32 = 200.0;
+/// In capture the flag: how far from where it keeps to a droid wanders, and from its flag it is
+/// put down, in meters; how long it keeps after one of the other side it has lost sight of, and
+/// how long it keeps its pistol out once there is no one to shoot at, in seconds.
+const POST_REACH: f32 = 7.0;
+const SPAWN_REACH: f32 = 4.0;
+const FOE_MEMORY: f32 = 6.0;
+const ARMED_FOR: f32 = 5.0;
+/// In capture the flag, a droid shoots at whoever it sees of the other side - the player too,
+/// for blue's - from as far as [`FIRE_RANGE`], in meters, coming on to [`ENGAGE`] and standing
+/// there; once every so many seconds, as [`FIRE_EVERY`] says; wide by up to [`SPREAD`] meters
+/// every ten meters away; and only facing within [`FIRE_CONE`] radians of them.
+const FIRE_RANGE: f32 = 24.0;
+const ENGAGE: f32 = 11.0;
+const FIRE_EVERY: (f32, f32) = (0.7, 1.3);
+const SPREAD: f32 = 0.55;
+const FIRE_CONE: f32 = 0.3;
+/// How high over the player's feet a droid aims.
+const PLAYER_CHEST: f32 = 1.0;
 /// How far out from the middle of the player's body it goes, standing, in meters (see
 /// `crate::player::posture`).
 const PLAYER_RADIUS: f32 = 0.35;
@@ -234,6 +253,10 @@ pub struct News {
     pub heard: Vec<usize>,
     /// The droids that answered an alarm, and are searching where the player was.
     pub alarmed: Vec<usize>,
+    /// In capture the flag, the droids that have just gone after one of the other side; and the
+    /// shots fired: from where, which way, one meter long, and by which side.
+    pub engaged: Vec<usize>,
+    pub shots: Vec<(Vector3<f32>, Vector3<f32>, Side)>,
 }
 
 /// How much breath a droid has left, for its stamina bar: where its feet and face are, how much
@@ -320,6 +343,26 @@ struct Inhabitant {
     down: bool,
     /// Its body gone limp, once it has been stopped, if it has a ragdoll.
     ragdoll: Option<Ragdoll>,
+    /// In capture the flag, its side, and where it keeps to (see [`crate::ctf`]); the droid of
+    /// the other side it is after, if any, how long since it last saw it, in seconds, and how
+    /// long before it can strike again.
+    side: Option<Side>,
+    post: Option<Vector3<f32>>,
+    foe: Option<usize>,
+    foe_unseen: f32,
+    /// How long before it can fire again, and before it puts its pistol away, in seconds; and
+    /// what it last aimed at.
+    reload: f32,
+    armed_left: f32,
+    aimed_at: Option<Vector3<f32>>,
+}
+
+impl Inhabitant {
+    /// Whether it has anything to do with the player's being found: not one of the player's
+    /// own side in capture the flag.
+    fn hunts_player(&self) -> bool {
+        self.side.is_none_or(|side| !side.is_players())
+    }
 }
 
 impl Inhabitant {
@@ -515,6 +558,25 @@ fn joiners(
 
 /// Whether nothing is in the way of `watcher` seeing `seen`: a ray from its face to the other's
 /// chest meets the other before anything else - aside from its own body, which the ray starts in.
+/// Somewhere on the floor of `grid`, whose corner is at `origin`, within `reach` of `at` as the
+/// crow flies, picked by `rng` - or, with nowhere there, the floor nearest `at`.
+pub(crate) fn spot_near(
+    (grid, origin): (&WalkGrid, Vector3<f32>),
+    at: Vector3<f32>,
+    reach: f32,
+    rng: &mut Rng,
+) -> Option<Vector3<f32>> {
+    for _ in 0..24 {
+        let angle = between(rng, (-std::f32::consts::PI, std::f32::consts::PI));
+        let away = between(rng, (0.0, reach));
+        let spot = at + Vector3::new(angle.sin(), 0.0, angle.cos()) * away;
+        if let Some(cell) = survey::cell_at(grid, origin, spot).filter(|&(x, z)| grid.is_walkable(x, z)) {
+            return Some(grid.on_floor(origin, cell));
+        }
+    }
+    survey::nearest_walkable(grid, origin, at).map(|cell| grid.on_floor(origin, cell))
+}
+
 fn in_sight_of(graph: &Graph, watcher: &Inhabitant, seen: &Inhabitant) -> bool {
     let from = watcher.feet + Vector3::new(0.0, FACE_HEIGHT, 0.0);
     let way = seen.feet + Vector3::new(0.0, CHEST, 0.0) - from;
@@ -694,79 +756,167 @@ impl Inhabitants {
                 false => places.swap_remove(rng.below(places.len())),
             };
             let feet = grid.on_floor(origin, place);
-            let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
-                .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
-                .with_collision_groups(ragdoll::character_groups())
-                .build(&mut scene.graph);
-            let body = RigidBodyBuilder::new(
-                BaseBuilder::new()
-                    .with_child(collider)
-                    .with_local_transform(
-                        TransformBuilder::new()
-                            .with_local_position(feet + Vector3::new(0.0, MIDDLE, 0.0))
-                            .build(),
-                    ),
-            )
-            .with_body_type(RigidBodyType::KinematicPositionBased)
-            .build(&mut scene.graph)
-            .to_base();
-            let character = (first + n) % characters;
-            let model = &self.liveries[character].model;
-            let Some(avatar) = Avatar::spawn(model, scene, body, -MIDDLE, true) else {
-                scene.graph.remove_node(body);
-                break;
+            let heading = match close {
+                true => {
+                    let to_player = flat(player - feet);
+                    to_player.x.atan2(to_player.z)
+                }
+                false => between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
             };
-            self.droids.push(Inhabitant {
-                body,
-                collider,
-                avatar,
-                feet,
-                speed: 0.0,
-                heading: match close {
-                    true => {
-                        let to_player = flat(player - feet);
-                        to_player.x.atan2(to_player.z)
-                    }
-                    false => between(rng, (-std::f32::consts::PI, std::f32::consts::PI)),
-                },
-                route: Vec::new(),
-                // Not all setting off at once, and the one near the player not for a while.
-                resting: match close {
-                    true => NEAR_REST,
-                    false => between(rng, REST),
-                },
-                waiting: 0.0,
-                last_seen: None,
-                character,
-                code: 10 + rng.below(90) as u32,
-                looks_hostile: false,
-                talking: false,
-                alert: None,
-                sees_player: false,
-                lost_at: feet,
-                lost_going: Vector3::zeros(),
-                search_left: 0.0,
-                searched: 0,
-                looking: None,
-                look_from: 0.0,
-                deaf: 0.0,
-                threat: 0.0,
-                warned: 0,
-                unaimed: 0.0,
-                replan: 0.0,
-                windup: 0.0,
-                sprint_in: -1.0,
-                sprinting: 0.0,
-                stamina: SENTRY_STAMINA,
-                winded: false,
-                most: SENTRY_STAMINA,
-                sentry: false,
-                hits: 0,
-                down: false,
-                ragdoll: None,
-            });
+            // Not all setting off at once, and the one near the player not for a while.
+            let resting = match close {
+                true => NEAR_REST,
+                false => between(rng, REST),
+            };
+            let character = (first + n) % characters;
+            if !self.spawn_one(scene, feet, heading, resting, character, rng) {
+                break;
+            }
         }
         Log::info(format!("Maze: {} inhabitants", self.droids.len()));
+    }
+
+    /// Puts one droid, of kind `character`, into `scene` with its feet at `feet`, facing
+    /// `heading`, to stand `resting` seconds before it sets off. Whether it could be.
+    fn spawn_one(
+        &mut self,
+        scene: &mut Scene,
+        feet: Vector3<f32>,
+        heading: f32,
+        resting: f32,
+        character: usize,
+        rng: &mut Rng,
+    ) -> bool {
+        let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
+            .with_shape(ColliderShape::capsule_y(MIDDLE - RADIUS, RADIUS))
+            .with_collision_groups(ragdoll::character_groups())
+            .build(&mut scene.graph);
+        let body = RigidBodyBuilder::new(
+            BaseBuilder::new()
+                .with_child(collider)
+                .with_local_transform(
+                    TransformBuilder::new()
+                        .with_local_position(feet + Vector3::new(0.0, MIDDLE, 0.0))
+                        .build(),
+                ),
+        )
+        .with_body_type(RigidBodyType::KinematicPositionBased)
+        .build(&mut scene.graph)
+        .to_base();
+        let model = &self.liveries[character].model;
+        let Some(avatar) = Avatar::spawn(model, scene, body, -MIDDLE, true) else {
+            scene.graph.remove_node(body);
+            return false;
+        };
+        self.droids.push(Inhabitant {
+            body,
+            collider,
+            avatar,
+            feet,
+            speed: 0.0,
+            heading,
+            route: Vec::new(),
+            resting,
+            waiting: 0.0,
+            last_seen: None,
+            character,
+            code: 10 + rng.below(90) as u32,
+            looks_hostile: false,
+            talking: false,
+            alert: None,
+            sees_player: false,
+            lost_at: feet,
+            lost_going: Vector3::zeros(),
+            search_left: 0.0,
+            searched: 0,
+            looking: None,
+            look_from: 0.0,
+            deaf: 0.0,
+            threat: 0.0,
+            warned: 0,
+            unaimed: 0.0,
+            replan: 0.0,
+            windup: 0.0,
+            sprint_in: -1.0,
+            sprinting: 0.0,
+            stamina: SENTRY_STAMINA,
+            winded: false,
+            most: SENTRY_STAMINA,
+            sentry: false,
+            hits: 0,
+            down: false,
+            ragdoll: None,
+            side: None,
+            post: None,
+            foe: None,
+            foe_unseen: 0.0,
+            reload: 0.0,
+            armed_left: 0.0,
+            aimed_at: None,
+        });
+        true
+    }
+
+    /// Puts each side's droids into `scene` for capture the flag, on the floor of `grid` whose
+    /// corner is at `origin`, by their flags in `bases`: the first of each by its own flag to
+    /// keep to it, the rest making for the other side's (see [`ctf::Bases::post`]). Each looks
+    /// as its side's kind of droid does, as `kind` says, of `liveries`. Blue's watch for the
+    /// player from the start.
+    pub fn populate_sides(
+        &mut self,
+        scene: &mut Scene,
+        liveries: Vec<Livery>,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        bases: ctf::Bases,
+        kind: impl Fn(Side) -> usize,
+        rng: &mut Rng,
+    ) {
+        self.clear(&mut scene.graph);
+        self.populated = true;
+        self.liveries = liveries;
+        if self.liveries.is_empty() {
+            return;
+        }
+        ragdoll::prepare(&mut scene.graph);
+        for side in Side::BOTH {
+            let flag = bases.flag(side);
+            let facing = flat(bases.flag(side.other()) - flag);
+            for n in 0..ctf::DROIDS {
+                let Some(feet) = spot_near((grid, origin), flag, SPAWN_REACH, rng) else {
+                    continue;
+                };
+                let character = kind(side).min(self.liveries.len() - 1);
+                let heading = facing.x.atan2(facing.z);
+                if !self.spawn_one(scene, feet, heading, between(rng, (0.5, 2.0)), character, rng) {
+                    break;
+                }
+                let m = self.droids.len() - 1;
+                let droid = &mut self.droids[m];
+                droid.side = Some(side);
+                droid.post = Some(bases.post(side, n));
+                if !side.is_players() {
+                    droid.alert = Some(Alert::Caution);
+                    droid.search_left = CAUTION;
+                }
+            }
+        }
+        Log::info(format!("Capture the flag: {} droids", self.droids.len()));
+    }
+
+    /// The side of the `n`th droid, in capture the flag.
+    pub fn side(&self, n: usize) -> Option<Side> {
+        self.droids.get(n).and_then(|droid| droid.side)
+    }
+
+    /// Each droid standing, as a target for a drone: which it is, its side, its feet, the middle
+    /// of its body, and its collider.
+    pub fn standing(&self) -> Vec<(usize, Option<Side>, Vector3<f32>, Vector3<f32>, Handle<Collider>)> {
+        self.droids
+            .iter()
+            .enumerate()
+            .filter(|(_, droid)| !droid.down)
+            .map(|(n, droid)| (n, droid.side, droid.feet, droid.feet + Vector3::new(0.0, CHEST, 0.0), droid.collider))
+            .collect()
     }
 
     /// Moves everyone along for another `dt`, over `grid` whose corner is at `origin`, making
@@ -802,6 +952,32 @@ impl Inhabitants {
         let the_player = everyone.len() - 1;
         // Those lying where they went down are in no one's way.
         let down: Vec<bool> = self.droids.iter().map(|droid| droid.down).collect();
+        // In capture the flag, which of the other side each is after, and whether it sees it:
+        // the nearest it sees, or else the one it was after, for a while after losing sight of it.
+        let foes: Vec<(Option<usize>, bool)> = (0..self.droids.len())
+            .map(|m| {
+                let droid = &self.droids[m];
+                let Some(side) = droid.side.filter(|_| !droid.down) else {
+                    return (None, false);
+                };
+                let enemy = |n: usize| !self.droids[n].down && self.droids[n].side == Some(side.other());
+                let away = |n: usize| flat(self.droids[n].feet - droid.feet).norm();
+                let seen = (0..self.droids.len())
+                    .filter(|&n| enemy(n))
+                    .filter(|&n| {
+                        could_see_droid(Some(Alert::Alert), droid.feet, droid.heading, self.droids[n].feet, false)
+                            && in_sight_of(graph, droid, &self.droids[n])
+                    })
+                    .min_by(|&a, &b| away(a).total_cmp(&away(b)));
+                match (seen, droid.foe.filter(|&n| enemy(n))) {
+                    (Some(n), _) => (Some(n), true),
+                    (None, Some(n)) if droid.foe_unseen < FOE_MEMORY => (Some(n), false),
+                    _ => (None, false),
+                }
+            })
+            .collect();
+        let mut engaged = Vec::new();
+        let mut shots = Vec::new();
 
         // The search: lost from sight, the player could be anywhere they could have got to since,
         // and wherever the searchers look and do not see them, they are not.
@@ -860,7 +1036,7 @@ impl Inhabitants {
             // In the hostile droid's colours while it is after the player; it goes down in
             // whichever it had on.
             let hostile = droid.alert.is_some();
-            if !droid.down && hostile != droid.looks_hostile {
+            if !droid.down && droid.side.is_none() && hostile != droid.looks_hostile {
                 if let Some(livery) = self.liveries.get(droid.character) {
                     recolour(graph, droid.avatar.root(), livery, hostile);
                 }
@@ -883,8 +1059,18 @@ impl Inhabitants {
                     continue;
                 }
             }
-            // After the player, it goes straight for them rather than round them.
+            let (foe, sees_foe) = foes[me];
+            if foe.is_some() && droid.foe.is_none() {
+                engaged.push(me);
+            }
+            droid.foe = foe;
+            droid.foe_unseen = if sees_foe { 0.0 } else { droid.foe_unseen + dt };
+            droid.reload = (droid.reload - dt).max(0.0);
+            droid.armed_left = (droid.armed_left - dt).max(0.0);
+            // After the player, it goes straight for them rather than round them; after one of
+            // the other side, straight for it - the player coming first.
             let hunting = droid.alert == Some(Alert::Alert);
+            let fighting = droid.foe.filter(|_| !hunting);
             let others = everyone
                 .iter()
                 .enumerate()
@@ -892,8 +1078,22 @@ impl Inhabitants {
                     other != me
                         && !down.get(other).copied().unwrap_or(false)
                         && !(hunting && other == the_player)
+                        && Some(other) != fighting
                 })
                 .map(|(_, &other)| other);
+            // In capture the flag, whoever of the other side it sees to shoot at: the player
+            // first, for blue's; and near enough, it stands to shoot.
+            let target = match droid.side {
+                Some(_) if hunting && droid.sees_player => Some(player + Vector3::new(0.0, PLAYER_CHEST, 0.0)),
+                Some(_) if sees_foe => fighting.map(|n| everyone[n].0 + Vector3::new(0.0, CHEST, 0.0)),
+                _ => None,
+            }
+            .filter(|&at| flat(at - droid.feet).norm() < FIRE_RANGE);
+            let standing_to_shoot = target.is_some_and(|at| flat(at - droid.feet).norm() < ENGAGE);
+            if target.is_some() {
+                droid.armed_left = ARMED_FOR;
+                droid.aimed_at = target;
+            }
             droid.resting = (droid.resting - dt).max(0.0);
             droid.windup = (droid.windup - dt).max(0.0);
             droid.deaf = (droid.deaf - dt).max(0.0);
@@ -911,6 +1111,14 @@ impl Inhabitants {
                     droid.search_left -= dt;
                 }
                 let next = alert.next(droid.sees_player, droid.search_left);
+                // One guarding its side's end never calms down.
+                let next = match next {
+                    None if droid.side.is_some() => {
+                        droid.search_left = CAUTION;
+                        Some(Alert::Caution)
+                    }
+                    next => next,
+                };
                 droid.enter(me, next, &mut alerts);
             }
             // Stopped, it stays where it went down.
@@ -941,6 +1149,13 @@ impl Inhabitants {
                         .map(|going| player + going * (away * 0.6).min(CUT_OFF))
                         .filter(|&ahead| (1..=4).all(|i| floor_at(player + (ahead - player) * (i as f32 / 4.0))));
                     droid.route = route_to((grid, origin), droid.feet, cut_off.unwrap_or(player), CHASE_REACH);
+                }
+            } else if let Some(foe) = fighting {
+                // After one of the other side, the way to it worked out again every so often.
+                droid.replan -= dt;
+                if droid.replan <= 0.0 || droid.route.is_empty() {
+                    droid.replan = REPLAN;
+                    droid.route = route_to((grid, origin), droid.feet, everyone[foe].0, CHASE_REACH);
                 }
             } else if droid.alert == Some(Alert::Evasion) {
                 if droid.route.is_empty() {
@@ -1000,14 +1215,27 @@ impl Inhabitants {
                 if let Some(aside) = step_aside(droid.feet, others.clone(), floor_at) {
                     droid.route = vec![aside];
                 } else if droid.resting == 0.0 {
-                    droid.route = plan((grid, origin), droid.feet, TRIP, rng);
+                    droid.route = match droid.post {
+                        // In capture the flag, about where it keeps to.
+                        Some(post) => spot_near((grid, origin), post, POST_REACH, rng)
+                            .map(|to| route_to((grid, origin), droid.feet, to, CHASE_REACH))
+                            .unwrap_or_default(),
+                        None => plan((grid, origin), droid.feet, TRIP, rng),
+                    };
                     if droid.route.is_empty() {
                         droid.resting = REST.0;
                     }
                 }
             }
+            // Near enough to shoot, it stands and faces them.
+            if standing_to_shoot && !droid.down {
+                droid.route.clear();
+                if let Some(to) = target.map(|at| flat(at - droid.feet)).filter(|to| to.norm() > 1.0e-3) {
+                    droid.heading = to.x.atan2(to.z);
+                }
+            }
             // Running after the player, and jogging to where it lost them.
-            let after = droid.alert == Some(Alert::Alert);
+            let after = droid.alert == Some(Alert::Alert) || fighting.is_some();
             let hurrying = after || (droid.alert == Some(Alert::Evasion) && droid.searched <= 1);
             // After the player, it sprints now and then, when it is not to be told.
             let chasing = droid.alert == Some(Alert::Alert) && droid.windup == 0.0 && !droid.down;
@@ -1101,6 +1329,7 @@ impl Inhabitants {
 
             let to_player = player - droid.feet;
             if droid.alert == Some(Alert::Alert)
+                && droid.side.is_none()
                 && droid.windup == 0.0
                 && droid.sees_player
                 && flat(to_player).norm() < CATCH
@@ -1115,6 +1344,23 @@ impl Inhabitants {
             if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(droid.body) {
                 body.set_next_kinematic_translation(droid.feet + Vector3::new(0.0, MIDDLE, 0.0));
             }
+            // Firing when it can, facing them near enough; looking up or down at them.
+            let facing_them = target.and_then(|at| {
+                let to = flat(at - droid.feet);
+                let off = (to.x.atan2(to.z) - droid.heading + std::f32::consts::PI)
+                    .rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI;
+                (off.abs() < FIRE_CONE).then_some(at)
+            });
+            let trigger = facing_them.is_some() && droid.reload == 0.0 && !droid.down;
+            if trigger {
+                droid.reload = between(rng, FIRE_EVERY);
+            }
+            let look = target.map_or((0.0, 0.0), |at| {
+                let from = droid.feet + Vector3::new(0.0, FACE_HEIGHT, 0.0);
+                let to = at - from;
+                (to.y.atan2(flat(to).norm()), 0.0)
+            });
             let going = Going {
                 heading: Some(droid.heading),
                 speed: droid.speed,
@@ -1132,13 +1378,25 @@ impl Inhabitants {
                 peeking: false,
                 pushing: true,
                 strafing: false,
-                armed: false,
-                trigger: false,
-                raised: false,
-                look: (0.0, 0.0),
+                armed: droid.armed_left > 0.0 && !droid.down,
+                trigger,
+                raised: target.is_some(),
+                look,
                 way: 0.0,
             };
             droid.avatar.animate(graph, going, dt);
+            // A shot leaves the muzzle as the pistol fires, at what it aimed at, give or take.
+            if let (Some((from, _)), Some(at), Some(side)) = (droid.avatar.shot(), droid.aimed_at, droid.side) {
+                let wide = SPREAD * (at - from).norm() / 10.0;
+                let miss = Vector3::new(
+                    between(rng, (-wide, wide)),
+                    between(rng, (-0.6 * wide, 0.6 * wide)),
+                    between(rng, (-wide, wide)),
+                );
+                if let Some(way) = (at + miss - from).try_normalize(1.0e-3) {
+                    shots.push((from, way, side));
+                }
+            }
         }
         self.search = Some(search);
         News {
@@ -1146,6 +1404,8 @@ impl Inhabitants {
             alerts,
             heard,
             alarmed,
+            engaged,
+            shots,
         }
     }
 
@@ -1161,7 +1421,7 @@ impl Inhabitants {
     ) {
         for droid in &mut self.droids {
             droid.sees_player = match droid.alert {
-                Some(alert) if !droid.down => {
+                Some(alert) if !droid.down && droid.hunts_player() => {
                     Sight::default().could_see(
                         Some(alert),
                         droid.feet,
@@ -1195,7 +1455,7 @@ impl Inhabitants {
                 sentry: sentry(droid.character),
                 alert: droid.alert,
                 sees_player: droid.sees_player,
-                busy: droid.down || droid.talking,
+                busy: droid.down || droid.talking || !droid.hunts_player(),
                 windup: droid.windup,
                 feet: droid.feet,
                 heading: droid.heading,
@@ -1231,7 +1491,7 @@ impl Inhabitants {
     ) -> Vec<(usize, Threat)> {
         let mut stages = Vec::new();
         for (n, droid) in self.droids.iter_mut().enumerate() {
-            let Some(patience) = patience(droid.character) else {
+            let Some(patience) = patience(droid.character).filter(|_| droid.hunts_player()) else {
                 continue;
             };
             let minding = droid.alert.is_none() && !droid.down && !droid.talking;
@@ -1296,6 +1556,7 @@ impl Inhabitants {
         };
         for (m, droid) in self.droids.iter_mut().enumerate() {
             let answering = m != n
+                && droid.hunts_player()
                 && answers(droid.character)
                 && !droid.down
                 && matches!(droid.alert, None | Some(Alert::Caution))
@@ -1334,7 +1595,7 @@ impl Inhabitants {
         loudness: f32,
     ) {
         let listening = |droid: &Inhabitant| {
-            !droid.down && matches!(droid.alert, Some(Alert::Evasion | Alert::Caution))
+            !droid.down && droid.hunts_player() && matches!(droid.alert, Some(Alert::Evasion | Alert::Caution))
         };
         if !self.droids.iter().any(listening) {
             return;
@@ -1366,10 +1627,13 @@ impl Inhabitants {
     /// The most urgent phase any droid is in, and the longest any of them in it has left to
     /// search or stay wary, in seconds.
     pub fn alarm(&self) -> Option<(Alert, f32)> {
-        let alert = self.droids.iter().filter_map(|droid| droid.alert).max()?;
+        // A guard's standing watch in capture the flag is no alarm.
+        let raised = |droid: &&Inhabitant| !(droid.side.is_some() && droid.alert == Some(Alert::Caution));
+        let alert = self.droids.iter().filter(raised).filter_map(|droid| droid.alert).max()?;
         let left = self
             .droids
             .iter()
+            .filter(raised)
             .filter(|droid| droid.alert == Some(alert))
             .map(|droid| droid.search_left)
             .fold(0.0, f32::max);
@@ -1398,7 +1662,7 @@ impl Inhabitants {
     /// Turns the `n`th droid on the player: after a moment it hunts them, and it cannot be
     /// talked to any more.
     pub fn set_hostile(&mut self, n: usize) {
-        if let Some(droid) = self.droids.get_mut(n).filter(|droid| !droid.down) {
+        if let Some(droid) = self.droids.get_mut(n).filter(|droid| !droid.down && droid.hunts_player()) {
             droid.alert = Some(Alert::Alert);
             droid.windup = WINDUP;
             droid.replan = 0.0;
@@ -1470,12 +1734,18 @@ impl Inhabitants {
             .iter_mut()
             .enumerate()
             .find(|(_, droid)| droid.collider == collider)?;
-        if droid.alert.is_none() || droid.down {
+        if (droid.alert.is_none() && droid.side.is_none()) || droid.down {
             return None;
         }
         droid.hits += 1;
         if droid.hits < HITS {
-            if droid.alert != Some(Alert::Alert) {
+            if droid.side.is_some() {
+                // In capture the flag, it turns to whoever it was, to see them.
+                let to = flat(player - droid.feet);
+                if to.norm() > 1.0e-3 && droid.alert != Some(Alert::Alert) {
+                    droid.heading = to.x.atan2(to.z);
+                }
+            } else if droid.alert != Some(Alert::Alert) {
                 // After whoever fired, paying no heed to the bolt's own noise hitting it.
                 droid.deaf = HEARING_REST;
                 droid.lost_at = player;

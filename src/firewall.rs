@@ -62,8 +62,8 @@ pub const REACH: f32 = 2.0;
 /// The shell's colour: how strongly it colours what is seen through it, and how brightly it glows
 /// at most; and the light it gives off, how far, and how brightly at most.
 const COLOUR: Color = Color::opaque(255, 46, 0);
-const TINT: f32 = 0.55;
-const GLOW: f32 = 1.2;
+const TINT: f32 = 0.4;
+const GLOW: f32 = 0.3;
 const LIGHT_RADIUS: f32 = 6.0;
 const LIGHT: f32 = 1.0;
 
@@ -231,9 +231,11 @@ impl Firewall {
             tint_strength: TINT,
             emission: COLOUR,
             emission_strength: GLOW,
-            // A heat shimmer.
-            waviness: 0.12,
-            wave_scale: 3.0,
+            // It does not bend what is seen through it, as glass does: the bend is so many meters
+            // behind the surface, which close up is most of the screen, and smears what is behind
+            // into one colour. Nor does it reflect.
+            index_of_refraction: 1.0,
+            reflectivity: 0.0,
             ..Default::default()
         }
         .build_resource();

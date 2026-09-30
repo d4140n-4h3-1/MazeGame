@@ -35,6 +35,7 @@
 //! and buzzes (see [`crate::formants::chirps`]), which no one would take for speech.
 
 use crate::{
+    ctf::Side,
     dialogue::{screen, Mood},
     fixtures::{glow_strength, DIFFUSE_COLOR, EMISSION_STRENGTH},
     formants::Curve,
@@ -119,6 +120,8 @@ pub const ANSWERS_WITHIN: f32 = 25.0;
 /// How far it goes on patrol each time it sets off, and how far between the spots it searches,
 /// in steps across the grid, from least to most; and how long it waits between trips, in seconds.
 const TRIP: (f32, f32) = (30.0, 120.0);
+/// On a side in capture the flag, how far from its flag it patrols, in meters.
+const POST_REACH: f32 = 9.0;
 const SEARCH_TRIP: (f32, f32) = (10.0, 40.0);
 const REST: (f32, f32) = (3.0, 8.0);
 /// How fast it flies, in meters per second: patrolling, and hostile; how quickly it gets up to
@@ -311,6 +314,11 @@ pub struct Drone {
     replan: f32,
     /// How many of the pistol's bolts have hit it.
     hits: u32,
+    /// In capture the flag, its side, and where it patrols round: its side's flag. On a side,
+    /// it watches all the while, patrolling too, and what it goes after is whichever of the other
+    /// side the game shows it (see [`crate::ctf`]).
+    side: Option<Side>,
+    post: Option<Vector3<f32>>,
 }
 
 impl Drone {
@@ -395,6 +403,8 @@ impl Drone {
             fire_in: 0.0,
             replan: 0.0,
             hits: 0,
+            side: None,
+            post: None,
         };
         drone.play(graph, IDLE);
         Some(drone)
@@ -409,7 +419,53 @@ impl Drone {
         feet: Vector3<f32>,
         rng: &mut Rng,
     ) -> bool {
+        self.side = None;
+        self.post = None;
         self.put_down(graph, (grid, origin), feet, f32::INFINITY, rng)
+    }
+
+    /// Puts it down for `side` in capture the flag, by `post`, its side's flag, to patrol round
+    /// it. Whether there was anywhere to put it.
+    pub fn place_for(
+        &mut self,
+        graph: &mut Graph,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        side: Side,
+        post: Vector3<f32>,
+        rng: &mut Rng,
+    ) -> bool {
+        let Some(at) = inhabitants::spot_near((grid, origin), post, POST_REACH, rng) else {
+            return false;
+        };
+        // Put down anywhere, and then where it should be.
+        if !self.put_down(graph, (grid, origin), at, f32::INFINITY, rng) {
+            return false;
+        }
+        self.side = Some(side);
+        self.post = Some(post);
+        self.at = at + Vector3::new(0.0, HOVER, 0.0);
+        if let Ok(hull) = graph.try_get_mut_of_type::<RigidBody>(self.hull) {
+            hull.local_transform_mut().set_position(self.at);
+        }
+        self.pose(graph);
+        Log::info(format!("Drone: {}'s, by its flag", side.name()));
+        true
+    }
+
+    /// Its side in capture the flag, if it has one.
+    pub fn side(&self) -> Option<Side> {
+        self.side
+    }
+
+    /// What it would go after, as a target, for another drone: its body, where it hovers.
+    pub fn as_target(&self) -> Option<Target> {
+        (self.placed && self.state != State::Down).then(|| Target {
+            feet: self.at - Vector3::new(0.0, HOVER, 0.0),
+            middle: self.at,
+            collider: self.collider,
+            posture: Posture::Standing,
+            in_the_dark: false,
+        })
     }
 
     /// Puts it down as [`Drone::place`] does, no more than `within` steps from the player's
@@ -556,6 +612,8 @@ impl Drone {
         match self.state {
             State::Down | State::Alert => None,
             _ if !self.placed => None,
+            // The player's own side's pays the alarm no heed.
+            _ if self.side.is_some_and(Side::is_players) => None,
             was => {
                 self.search(at);
                 (was == State::Patrol).then_some("alarm")
@@ -637,7 +695,11 @@ impl Drone {
 
     /// Whether it can see the `player`: in front of it, as a sentry sees - from as far as it sees
     /// at all on Alert - and with nothing in the way from its eye to the middle of their body.
-    fn sees(&self, graph: &Graph, player: &Target) -> bool {
+    /// Whether it can see `player` - or whoever else it is shown as a target - from where it is.
+    pub fn sees(&self, graph: &Graph, player: &Target) -> bool {
+        if !self.placed || self.state == State::Down {
+            return false;
+        }
         let alert = match self.state {
             State::Alert => Alert::Alert,
             _ => Alert::Evasion,
@@ -742,16 +804,30 @@ impl Drone {
         rng: &mut Rng,
         dt: f32,
     ) -> Option<&'static str> {
-        let hostile = matches!(self.state, State::Alert | State::Search { .. });
+        // On a side, it watches all the while.
+        let hostile = matches!(self.state, State::Alert | State::Search { .. }) || self.side.is_some();
         let sees = hostile && self.sees(graph, player);
         let under = self.at - Vector3::new(0.0, HOVER, 0.0);
         match self.state {
             State::Down => None,
+            State::Patrol if sees => {
+                self.state = State::Alert;
+                self.fire_in = FIRST_SHOT;
+                self.replan = 0.0;
+                self.scanning = 0.0;
+                Some("spotted")
+            }
             State::Patrol => {
                 if self.route.is_empty() {
                     self.resting -= dt;
                     if self.resting <= 0.0 {
-                        self.route = inhabitants::plan((grid, origin), under, TRIP, rng);
+                        self.route = match self.post {
+                            // On a side, round its flag.
+                            Some(post) => inhabitants::spot_near((grid, origin), post, POST_REACH, rng)
+                                .map(|to| inhabitants::route_to((grid, origin), under, to, f32::INFINITY))
+                                .unwrap_or_default(),
+                            None => inhabitants::plan((grid, origin), under, TRIP, rng),
+                        };
                         self.resting = inhabitants::between(rng, REST);
                     }
                 }

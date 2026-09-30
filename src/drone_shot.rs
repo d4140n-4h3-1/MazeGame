@@ -70,6 +70,17 @@ struct Flight {
     range: f32,
     /// How much longer it glows where it hit something, in seconds, once it has.
     landed: Option<f32>,
+    /// What fired it, which it flies through.
+    from: Handle<Collider>,
+}
+
+/// Something a shot hit: its collider, where, and which way the shot was going; and what fired it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hit {
+    pub collider: Handle<Collider>,
+    pub at: Vector3<f32>,
+    pub way: Vector3<f32>,
+    pub by: Handle<Collider>,
 }
 
 /// One of the shots made: its model, the light and hum it carries, its own copies of its glowing
@@ -169,7 +180,14 @@ impl Shots {
     }
 
     /// Fires a shot from `from` at `at`, glowing `colour` (strength 1 at its brightest).
-    pub fn fire(&mut self, graph: &mut Graph, from: Vector3<f32>, at: Vector3<f32>, colour: Vector3<f32>) {
+    pub fn fire(
+        &mut self,
+        graph: &mut Graph,
+        from: Vector3<f32>,
+        at: Vector3<f32>,
+        colour: Vector3<f32>,
+        by: Handle<Collider>,
+    ) {
         let Some(direction) = (at - from).try_normalize(1.0e-4) else {
             return;
         };
@@ -183,6 +201,7 @@ impl Shots {
             direction,
             range: RANGE,
             landed: None,
+            from: by,
         });
         for (material, strength) in &shot.glows {
             let mut material = material.data_ref();
@@ -213,16 +232,10 @@ impl Shots {
         }
     }
 
-    /// Flies every shot in the air on for another `dt`, through the `drones`' bodies. How many
-    /// hit `player`, the player's collider, this time.
-    pub fn update(
-        &mut self,
-        graph: &mut Graph,
-        dt: f32,
-        player: Handle<Collider>,
-        drones: &[Handle<Collider>],
-    ) -> usize {
-        let mut hits = 0;
+    /// Flies every shot in the air on for another `dt`, through whatever fired it - and, in the
+    /// maze, through all the `drones`' bodies. What they hit this time.
+    pub fn update(&mut self, graph: &mut Graph, dt: f32, drones: &[Handle<Collider>]) -> Vec<Hit> {
+        let mut hits = Vec::new();
         for shot in &mut self.shots {
             let Some(flight) = shot.flight.as_mut() else {
                 continue;
@@ -248,8 +261,14 @@ impl Shots {
                 },
                 &mut found,
             );
-            if let Some(hit) = found.iter().find(|hit| !drones.contains(&hit.collider)) {
-                hits += usize::from(hit.collider == player);
+            let from = flight.from;
+            if let Some(hit) = found.iter().find(|hit| hit.collider != from && !drones.contains(&hit.collider)) {
+                hits.push(Hit {
+                    collider: hit.collider,
+                    at: hit.position.coords,
+                    way: flight.direction,
+                    by: from,
+                });
                 let reach = (hit.position.coords - flight.position).norm();
                 flight.position += flight.direction * (reach - STOP_SHORT).max(0.0);
                 flight.range = 0.0;
