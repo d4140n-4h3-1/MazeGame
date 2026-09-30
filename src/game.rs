@@ -5,6 +5,7 @@ use crate::{
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
     drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
+    alarm::AlarmSound,
     health::{Health, HealthSounds, Healing, Heard},
     hearts::{self, Hearts, HEART_MODEL},
     notes::{self, Notes, NOTES},
@@ -310,6 +311,10 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     health_sounds: HealthSounds,
+    /// The alarm's klaxon.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    alarm_sound: AlarmSound,
     #[visit(skip)]
     #[reflect(hidden)]
     hearts_placed: bool,
@@ -414,6 +419,7 @@ impl MazeGame {
             moving,
             area_lights,
             health_sounds: HealthSounds::make(),
+            alarm_sound: AlarmSound::make(),
             ..Default::default()
         }
     }
@@ -961,6 +967,8 @@ impl MazeGame {
     /// failing that, with every drone already out, the patrolling one nearest there however far,
     /// or the searching one nearest, to look there instead. Some drone always comes.
     fn call_drone(&mut self, graph: &mut Graph, at: Vector3<f32>) {
+        // The klaxon, from where the drone is called to.
+        self.alarm_sound.sound(graph, at + Vector3::new(0.0, 1.5, 0.0));
         let (Some((grid, origin)), Some(rng)) = (self.level.grid.as_ref(), self.rng.as_mut()) else {
             return;
         };
@@ -1062,6 +1070,11 @@ impl MazeGame {
                 };
                 self.inhabitants
                     .raise_alarm(n, player, |character| is_sentry(script, character));
+                // The klaxon, from the droid that sounded it.
+                let graph = &mut ctx.scenes[self.scene].graph;
+                if let Some(face) = self.inhabitants.face(graph, n) {
+                    self.alarm_sound.sound(graph, face);
+                }
                 // The drone answers the alarm too.
                 self.alert_drone(player);
                 let name = self.name_of(n).unwrap_or_else(|| "A droid".into());

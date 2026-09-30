@@ -68,6 +68,7 @@ pub(crate) use hydroxus_ai::route::{between, plan, route_to};
 use hydroxus_ai::{
     flat, forward,
     hearing::Heard,
+    search::SearchMap,
     sight::{Sight, Stance},
     steer::{make_way, step_aside},
 };
@@ -427,7 +428,29 @@ pub struct Inhabitants {
     alarmed: Vec<usize>,
     /// Whether they have been put into this round's maze yet.
     populated: bool,
+    /// Where the player could be, since they were last seen, shared by everyone searching for
+    /// them (see [`hydroxus_ai::search`]); and where and which way they were going when last seen,
+    /// while a droid after them can see them.
+    search: Option<SearchMap>,
+    last_sight: Option<(Vector3<f32>, Vector3<f32>)>,
+    /// Where a noise or an alarm has sent droids to search, to search from.
+    search_from: Option<Vector3<f32>>,
+    /// How long till the searchers next look over the map, in seconds.
+    look_in: f32,
 }
+
+/// How fast the player is taken to get away, in meters per second, for where they could be.
+const PLAYER_SPEED: f32 = 4.0;
+/// How far a searcher is taken to see, in meters, for clearing the map - no further than it sees
+/// at all - and how often it looks it over, in seconds.
+const SEARCH_SIGHT: f32 = 16.0;
+const LOOK_EVERY: f32 = 0.25;
+/// How far apart, in meters, the searchers keep where they are going.
+const SEARCH_APART: f32 = 4.0;
+/// How far ahead of the player, at most, a droid after them that is not the nearest makes for, to
+/// cut them off, in meters; and how near it has to be to go straight at them instead.
+const CUT_OFF: f32 = 10.0;
+const CLOSE_IN: f32 = 4.0;
 
 /// Whether a droid at `feet`, facing `heading`, in `alert` - or calm, with none - could see
 /// another droid at `other`, if nothing were in the way: as it would see the player standing
@@ -601,6 +624,9 @@ impl Inhabitants {
             }
         }
         self.populated = false;
+        self.search = None;
+        self.last_sight = None;
+        self.search_from = None;
     }
 
     /// Puts the maze's inhabitants into `scene` on the floor of `grid` whose corner is at
@@ -776,6 +802,60 @@ impl Inhabitants {
         let the_player = everyone.len() - 1;
         // Those lying where they went down are in no one's way.
         let down: Vec<bool> = self.droids.iter().map(|droid| droid.down).collect();
+
+        // The search: lost from sight, the player could be anywhere they could have got to since,
+        // and wherever the searchers look and do not see them, they are not.
+        let seeing = self
+            .droids
+            .iter()
+            .find(|droid| droid.alert == Some(Alert::Alert) && droid.sees_player && !droid.down);
+        let cell_of = |at: Vector3<f32>| survey::cell_at(grid, origin, at).filter(|&(x, z)| grid.is_walkable(x, z));
+        let mut search = self.search.take().unwrap_or_else(|| SearchMap::new(grid));
+        if let Some(seeing) = seeing {
+            self.last_sight = Some((seeing.lost_at, seeing.lost_going));
+            self.search_from = None;
+        } else if let Some((at, going)) = self.last_sight.take() {
+            if let Some(cell) = cell_of(at) {
+                let going = (going.norm() > 1.0e-3).then_some((going.x, going.z));
+                search.lose(grid, cell, going);
+            }
+        } else if let Some(at) = self.search_from.take() {
+            // Something new about where they are: search from there.
+            if let Some(cell) = cell_of(at) {
+                search.lose(grid, cell, None);
+            }
+        }
+        let searching = self.droids.iter().any(|d| d.alert == Some(Alert::Evasion) && !d.down);
+        if searching && !search.is_empty() {
+            search.spread(grid, PLAYER_SPEED / grid.cell_size * dt);
+            self.look_in -= dt;
+            if self.look_in <= 0.0 {
+                self.look_in = LOOK_EVERY;
+                let sight = Sight::default();
+                for droid in self.droids.iter().filter(|d| d.alert == Some(Alert::Evasion) && !d.down) {
+                    if let Some(cell) = cell_of(droid.feet) {
+                        let reach = SEARCH_SIGHT.min(sight.range) / grid.cell_size;
+                        search.look(grid, cell, droid.heading, (reach, sight.cone, 2.0));
+                    }
+                }
+            }
+        }
+        // Where each searcher is making for, to keep the others clear of it.
+        let goals: Vec<Option<(usize, usize)>> = self
+            .droids
+            .iter()
+            .map(|d| (d.alert == Some(Alert::Evasion)).then(|| d.route.first().and_then(|&g| cell_of(g))).flatten())
+            .collect();
+        // The droid after the player that is nearest them goes straight at them; the others make
+        // for somewhere ahead of them, to cut them off.
+        let nearest_chaser = self
+            .droids
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.alert == Some(Alert::Alert) && !d.down && d.windup == 0.0)
+            .min_by(|(_, a), (_, b)| flat(a.feet - player).norm().total_cmp(&flat(b.feet - player).norm()))
+            .map(|(n, _)| n);
+        let player_going = seeing.map(|d| d.lost_going);
         for (me, droid) in self.droids.iter_mut().enumerate() {
             // In the hostile droid's colours while it is after the player; it goes down in
             // whichever it had on.
@@ -854,7 +934,13 @@ impl Inhabitants {
                 droid.replan -= dt;
                 if droid.replan <= 0.0 || droid.route.is_empty() {
                     droid.replan = REPLAN;
-                    droid.route = route_to((grid, origin), droid.feet, player, CHASE_REACH);
+                    let away = flat(player - droid.feet).norm();
+                    let cut_off = player_going
+                        .filter(|_| Some(me) != nearest_chaser && away > CLOSE_IN)
+                        .and_then(|going| going.try_normalize(1.0e-3))
+                        .map(|going| player + going * (away * 0.6).min(CUT_OFF))
+                        .filter(|&ahead| (1..=4).all(|i| floor_at(player + (ahead - player) * (i as f32 / 4.0))));
+                    droid.route = route_to((grid, origin), droid.feet, cut_off.unwrap_or(player), CHASE_REACH);
                 }
             } else if droid.alert == Some(Alert::Evasion) {
                 if droid.route.is_empty() {
@@ -865,11 +951,28 @@ impl Inhabitants {
                             let turn = std::f32::consts::TAU * (LOOK_ABOUT - left) / LOOK_ABOUT;
                             droid.heading = droid.look_from + LOOK_SWEEP * turn.sin();
                         }
-                        // Done looking: on to another spot nearby.
+                        // Done looking: on to where the player is likeliest to be, of where it
+                        // can get to, clear of where the others are going - or, with nowhere
+                        // likelier than anywhere else, another spot nearby.
                         Some(_) => {
                             droid.looking = None;
                             droid.searched += 1;
-                            droid.route = plan((grid, origin), droid.feet, SEARCH_TRIP, rng);
+                            let taken: Vec<(usize, usize)> = goals
+                                .iter()
+                                .enumerate()
+                                .filter(|&(n, _)| n != me)
+                                .filter_map(|(_, g)| *g)
+                                .collect();
+                            let next = cell_of(droid.feet).filter(|_| !search.is_empty()).and_then(|from| {
+                                search.best(grid, from, &taken, SEARCH_APART / grid.cell_size, CHASE_REACH)
+                            });
+                            droid.route = match next {
+                                Some(cell) => route_to((grid, origin), droid.feet, grid.on_floor(origin, cell), CHASE_REACH),
+                                None => Vec::new(),
+                            };
+                            if droid.route.is_empty() {
+                                droid.route = plan((grid, origin), droid.feet, SEARCH_TRIP, rng);
+                            }
                         }
                         // First where the player was going when it last saw them, if there is
                         // floor all the way there, or else where it saw them.
@@ -1035,6 +1138,7 @@ impl Inhabitants {
             };
             droid.avatar.animate(graph, going, dt);
         }
+        self.search = Some(search);
         News {
             hit: caught,
             alerts,
@@ -1205,6 +1309,8 @@ impl Inhabitants {
             droid.alert = None;
             droid.enter(m, Some(Alert::Evasion), &mut self.alerts);
             self.alarmed.push(m);
+            // Where the player was, as the alarm had it, is where the search starts from.
+            self.search_from = Some(player);
         }
     }
 
@@ -1250,6 +1356,8 @@ impl Inhabitants {
             droid.alert = None;
             droid.enter(n, Some(Alert::Evasion), &mut self.alerts);
             self.heard.push(n);
+            // Where the noise was is where the search starts from.
+            self.search_from = Some(at);
         }
     }
 

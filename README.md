@@ -147,6 +147,26 @@ their animations; the crate decides what they make of what is round them.
   strafed, so their pistols pointed well off to the side of whoever they shot at; each droid's
   body now turns the way it faces, as the player's does with the camera. A droid also learns how
   far its barrel ends up above or beside where it aims, and aims that much the other way.
+- **The maze's droids search together, and cut you off.** Once they lose sight of you - or
+  hear you, or answer an alarm - they share one picture of where you could be by now, spreading
+  along the corridors as fast as you could run, and cleared wherever one of them looks and does
+  not see you. Each goes to look where you are likeliest to be, clear of where the others are
+  going, instead of wandering off at random (hydroxus-ai's `search`). In a simulated maze, three
+  of them find a player who has run off and hidden 98% of the time this way, against 83% before.
+  While several of them are after you, only the nearest runs straight at you; the others make
+  for somewhere ahead of where you are going, to cut you off.
+- **An alarm you can hear.** A droid sounding the alarm, and a failed hack calling a drone in,
+  set off a klaxon - three rising whoops - that carries through the maze
+  (`data/sounds/alarm_formants.json`).
+- **The team battle's sides fight as teams.** Each droid picks its target - whoever is shooting
+  at it, hurt, or in the open, before whoever is merely nearest - and takes cover from every
+  enemy its side knows of, spread out from its teammates. They move out of the enemy's sight
+  where they can, two of each five go round the side, they leave cover only while a teammate is
+  firing, and they fire at where an enemy was just seen to keep their head down, which does. A
+  droid getting nowhere finds somewhere else to go, and one caught without cover sidesteps
+  rather than stand there. `BATTLE_OLD=red` (or `cyan`, `both`) has a side fight as before:
+  against the old way, fighting as a team took 64% of the kills over two runs, one from each
+  end of the arena.
 
 29 September 2026:
 

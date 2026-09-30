@@ -1,0 +1,33 @@
+{
+  "about": "The alarm, sounded by a droid that has had enough of the player, or by a computer whose hack failed: see src/alarm.rs, and data/sounds/pistol_formants.json's 'about' for what everything means. It sounds from where it is raised, and carries through the maze.",
+  "sample_rate": 44100,
+  "sounds": {
+    "alarm": {
+      "about": "A klaxon: three whoops, each rising from a low buzz to a high wail, with a harsh edge.",
+      "length": 2.4,
+      "pitch": [[0.0, 380.0], [0.7, 1150.0], [0.85, 380.0], [1.55, 1150.0], [1.7, 380.0], [2.4, 1150.0]],
+      "buzz": [[0.0, 1.0]],
+      "noise": [[0.0, 0.08]],
+      "loudness": [[0.0, 0.0], [0.05, 0.8], [0.6, 1.0], [0.7, 0.0], [0.85, 0.0], [0.9, 0.8], [1.45, 1.0], [1.55, 0.0], [1.7, 0.0], [1.75, 0.8], [2.3, 1.0], [2.4, 0.0]],
+      "formants": [
+        {
+          "frequency": [[0.0, 570.0], [0.7, 1725.0], [0.85, 570.0], [1.55, 1725.0], [1.7, 570.0], [2.4, 1725.0]],
+          "width": 300.0,
+          "gain": 1.0
+        },
+        {
+          "frequency": [[0.0, 1140.0], [0.7, 3450.0], [0.85, 1140.0], [1.55, 3450.0], [1.7, 1140.0], [2.4, 3450.0]],
+          "width": 600.0,
+          "gain": 0.5
+        },
+        {
+          "frequency": [[0.0, 2600.0]],
+          "width": 800.0,
+          "gain": 0.3
+        }
+      ],
+      "volume": 0.8,
+      "reach": 40.0
+    }
+  }
+}

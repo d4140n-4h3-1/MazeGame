@@ -22,6 +22,7 @@
 //! The game is this library, which `src/main.rs` runs; the examples (see `examples/`) use it too,
 //! such as the droids the player and the maze's inhabitants are made from ([`player::avatar`]).
 
+mod alarm;
 mod computer;
 mod credits;
 mod culling;
