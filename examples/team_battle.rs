@@ -1,6 +1,9 @@
 //! Team battle: red droids against cyan droids in the combat arena, `data/arena/combat_map.glb`.
 //!
-//! Five a side, all played by the AI. They cross the arena along the walk grid, see only in front
+//! Five a side, all played by the AI, each one of the game's own droids (see
+//! `maze::player::avatar`): red in the hostile droid's colours, `data/droid_hostile.glb`, and cyan
+//! in the full deform droid's, `data/droid_full_deform.glb`, walking, running and crouching as the
+//! game's droids do. They cross the arena along the walk grid, see only in front
 //! of them (hydroxus-ai's sight), and fight from cover: a crouched droid behind a low block or a
 //! pillar is out of the line of fire, and stands up or steps round it to shoot. Hurt, a droid
 //! falls back to cover further from the enemy. The dead come back at their own end of the arena
@@ -57,8 +60,14 @@ use fyrox::{
     window::WindowAttributes,
 };
 use hydroxus_ai::prelude::*;
+use maze::player::{
+    avatar::{Avatar, Going},
+    posture::{Gait, Posture},
+};
 
 const MAP: &str = "data/arena/combat_map.glb";
+/// The droids each team is made from: the same droid, in red and in cyan.
+const MODELS: [&str; 2] = ["data/droid_hostile.glb", "data/droid_full_deform.glb"];
 const PER_TEAM: usize = 5;
 const KILL_LIMIT: u32 = 30;
 
@@ -66,8 +75,10 @@ const KILL_LIMIT: u32 = 30;
 const CELL: f32 = 0.5;
 const BODY_RADIUS: f32 = 0.4;
 
-const WALK_SPEED: f32 = 3.5;
-const RUN_SPEED: f32 = 5.5;
+/// How fast a droid goes advancing and running for cover, in meters per second, if its model has
+/// no jog or run to go by; with them it goes at their own pace, so its feet keep to the floor.
+const WALK_SPEED: f32 = 1.8;
+const RUN_SPEED: f32 = 3.0;
 const TURN_SPEED: f32 = 8.0;
 
 /// Eye and chest heights, standing and crouched. Low cover is about 1.1 m tall, so a crouched
@@ -153,10 +164,12 @@ impl Task {
 struct Droid {
     team: Team,
     root: Handle<Node>,
-    /// The part that squashes down when crouching.
-    body: Handle<Node>,
-    material: MaterialResource,
+    /// The droid it is shown as.
+    avatar: Avatar,
     position: Vector3<f32>,
+    /// Where it was last frame, for how fast it is going, and how its feet are going there.
+    was_at: Vector3<f32>,
+    gait: Gait,
     heading: f32,
     health: f32,
     /// Seconds until it comes back, while dead.
@@ -222,6 +235,8 @@ enum Phase {
 struct Battle {
     scene: Handle<Scene>,
     map: Option<ModelResource>,
+    /// The droids' models, red's and cyan's.
+    models: [Option<ModelResource>; 2],
     level: Handle<Collider>,
     grid: Option<(WalkGrid, Vector3<f32>)>,
     /// Walkable cells at each end of the arena: red's and cyan's.
@@ -313,6 +328,7 @@ impl Battle {
         self.camera = CameraBuilder::new(BaseBuilder::new()).build(&mut scene.graph).to_base();
         self.scene = ctx.scenes.add(scene);
         self.map = Some(ctx.resource_manager.request::<Model>(MAP));
+        self.models = MODELS.map(|path| Some(ctx.resource_manager.request::<Model>(path)));
 
         ctx.user_interfaces.add(UserInterface::new(Vector2::new(1280.0, 720.0)));
         let ui = ctx.user_interfaces.first_mut();
@@ -332,7 +348,7 @@ impl Battle {
                 .with_horizontal_alignment(HorizontalAlignment::Center)
                 .with_foreground(Brush::Solid(Color::WHITE).into()),
         )
-        .with_font_size(44.0.into())
+        .with_font_size(24.0.into())
         .with_horizontal_text_alignment(HorizontalAlignment::Center)
         .build(&mut ui.build_ctx());
         self.help = TextBuilder::new(
@@ -374,10 +390,14 @@ impl Battle {
         match self.phase {
             Phase::Loading => {
                 let Some(map) = self.map.clone() else { return };
+                let models = self.models.clone().map(|model| model.filter(|m| !m.is_failed_to_load()));
                 if map.is_failed_to_load() {
                     self.set_text(ctx, self.scoreboard, format!("Could not load {MAP}"));
                     self.map = None;
-                } else if map.is_ok() {
+                } else if models.iter().any(Option::is_none) {
+                    self.set_text(ctx, self.scoreboard, format!("Could not load {MODELS:?}"));
+                    self.map = None;
+                } else if map.is_ok() && models.iter().flatten().all(|m| m.is_ok()) {
                     self.place_level(&mut ctx.scenes[self.scene], &map);
                     self.phase = Phase::Settling(0);
                 }
@@ -388,7 +408,7 @@ impl Battle {
                 let graph = &ctx.scenes[self.scene].graph;
                 self.survey(graph);
                 self.find_cover(graph);
-                self.start_match(&mut ctx.scenes[self.scene].graph);
+                self.start_match(&mut ctx.scenes[self.scene]);
                 self.phase = Phase::Playing;
             }
             Phase::Playing if !self.paused => {
@@ -404,7 +424,7 @@ impl Battle {
             }
             Phase::Won(team, left) if !self.paused => {
                 if left - dt <= 0.0 {
-                    self.start_match(&mut ctx.scenes[self.scene].graph);
+                    self.start_match(&mut ctx.scenes[self.scene]);
                     self.phase = Phase::Playing;
                 } else {
                     self.phase = Phase::Won(team, left - dt);
@@ -607,16 +627,17 @@ impl Battle {
 
     // ------------------------------------------------------------------ the match
 
-    fn start_match(&mut self, graph: &mut Graph) {
+    fn start_match(&mut self, scene: &mut Scene) {
         for droid in self.droids.drain(..) {
-            graph.remove_node(droid.root);
+            scene.graph.remove_node(droid.root);
         }
         self.score = [0, 0];
         self.following = None;
         for team in [Team::Red, Team::Cyan] {
             for _ in 0..PER_TEAM {
-                let droid = self.make_droid(graph, team);
-                self.droids.push(droid);
+                if let Some(droid) = self.make_droid(scene, team) {
+                    self.droids.push(droid);
+                }
             }
         }
         for i in 0..self.droids.len() {
@@ -625,48 +646,25 @@ impl Battle {
         self.intel = [vec![None; self.droids.len()], vec![None; self.droids.len()]];
     }
 
-    fn make_droid(&mut self, graph: &mut Graph, team: Team) -> Droid {
-        let mut material = Material::standard();
-        material.set_property("diffuseColor", team.color());
-        let material = MaterialResource::new_embedded(material);
-        let mut dark = Material::standard();
-        dark.set_property("diffuseColor", Color::opaque(30, 30, 34));
-        let dark = MaterialResource::new_embedded(dark);
-        let mut visor = Material::standard();
-        visor.set_property("diffuseColor", Color::WHITE);
-        visor.set_property(
-            "emissionStrength",
-            MaterialProperty::Vector3(Vector3::new(team.color().r as f32, team.color().g as f32, team.color().b as f32) / 255.0 * 3.0),
-        );
-        let visor = MaterialResource::new_embedded(visor);
-
-        let part = |data: SurfaceData, material: &MaterialResource| {
-            SurfaceBuilder::new(SurfaceResource::new_embedded(data))
-                .with_material(material.clone())
-                .build()
+    /// One of the team's droids, made from its model, standing where it is put. None if the
+    /// model is not the droid it should be.
+    fn make_droid(&mut self, scene: &mut Scene, team: Team) -> Option<Droid> {
+        let model = self.models[team.index()].clone()?;
+        let root = PivotBuilder::new(BaseBuilder::new()).build(&mut scene.graph).to_base();
+        // Its feet at the root; only the first droid says what it finds in the model.
+        let quiet = !self.droids.is_empty();
+        let Some(avatar) = Avatar::spawn(&model, scene, root, 0.0, quiet) else {
+            scene.graph.remove_node(root);
+            return None;
         };
-        let at = |x: f32, y: f32, z: f32| Matrix4::new_translation(&Vector3::new(x, y, z));
-        let scaled = |x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32| {
-            Matrix4::new_translation(&Vector3::new(x, y, z)) * Matrix4::new_nonuniform_scaling(&Vector3::new(sx, sy, sz))
-        };
-        let body = MeshBuilder::new(BaseBuilder::new())
-            .with_surfaces(vec![
-                // Torso and legs.
-                part(SurfaceData::make_cylinder(12, 0.32, 1.25, true, &at(0.0, 0.0, 0.0)), &material),
-                // Head, visor and gun.
-                part(SurfaceData::make_sphere(12, 12, 0.24, &at(0.0, 1.45, 0.0)), &material),
-                part(SurfaceData::make_cube(scaled(0.0, 1.47, 0.18, 0.34, 0.1, 0.12)), &visor),
-                part(SurfaceData::make_cube(scaled(0.28, 1.1, 0.35, 0.1, 0.12, 0.7)), &dark),
-            ])
-            .build(graph)
-            .to_base();
-        let root = PivotBuilder::new(BaseBuilder::new().with_child(body)).build(graph).to_base();
-        Droid {
+        avatar.set_eyes(Some(team.color()));
+        Some(Droid {
             team,
             root,
-            body,
-            material,
+            avatar,
             position: Vector3::zeros(),
+            was_at: Vector3::zeros(),
+            gait: Gait::Jogging,
             heading: 0.0,
             health: HEALTH,
             dead_for: None,
@@ -681,7 +679,7 @@ impl Battle {
             hurt_flash: 0.0,
             kills: 0,
             deaths: 0,
-        }
+        })
     }
 
     fn respawn(&mut self, i: usize) {
@@ -1123,15 +1121,19 @@ impl Battle {
             if !self.droids[i].alive() {
                 continue;
             }
+            // At the pace of what its feet are doing: jogging as it advances, running for cover,
+            // and crouched, the crouch walk.
             let running = matches!(self.droids[i].task, Task::ToCover { .. });
-            let speed = if self.droids[i].crouched {
-                WALK_SPEED * 0.5
+            let (posture, gait, fallback) = if self.droids[i].crouched {
+                (Posture::Crouching, Gait::Walking, WALK_SPEED * 0.5)
             } else if running {
-                RUN_SPEED
+                (Posture::Standing, Gait::Running, RUN_SPEED)
             } else {
-                WALK_SPEED
+                (Posture::Standing, Gait::Jogging, WALK_SPEED)
             };
             let droid = &mut self.droids[i];
+            droid.gait = gait;
+            let speed = droid.avatar.pace(posture, gait).unwrap_or(fallback);
             let mut way = Vector3::zeros();
             let mut step = speed * dt;
             while let Some(&next) = droid.route.last() {
@@ -1166,15 +1168,36 @@ impl Battle {
     fn show_droids(&mut self, graph: &mut Graph, dt: f32) {
         for droid in &mut self.droids {
             droid.hurt_flash -= dt;
-            let color = if droid.hurt_flash > 0.0 { Color::WHITE } else { droid.team.color() };
-            droid.material.data_ref().set_property("diffuseColor", color);
-            let root = &mut graph[droid.root];
-            root.set_visibility(droid.alive());
-            root.local_transform_mut()
-                .set_position(droid.position)
-                .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), droid.heading));
-            let squash = if droid.crouched { 0.6 } else { 1.0 };
-            graph[droid.body].local_transform_mut().set_scale(Vector3::new(1.0, squash, 1.0));
+            // Its eyes in its team's colour, and white for a moment when hit.
+            let eyes = if droid.hurt_flash > 0.0 { Color::WHITE } else { droid.team.color() };
+            droid.avatar.set_eyes(Some(eyes));
+            droid.avatar.set_visible(graph, droid.alive());
+            graph[droid.root].local_transform_mut().set_position(droid.position);
+            // How fast it went since last frame, which is what its feet keep pace with.
+            let speed = if dt > 0.0 { flat(droid.position - droid.was_at).norm() / dt } else { 0.0 };
+            // Coming back to life is a jump across the arena, not a step.
+            let speed = if speed > RUN_SPEED { 0.0 } else { speed };
+            droid.was_at = droid.position;
+            let fighting = droid.target.is_some() && droid.alive();
+            let going = Going {
+                heading: Some(droid.heading),
+                speed,
+                posture: if droid.crouched { Posture::Crouching } else { Posture::Standing },
+                gait: droid.gait,
+                grounded: true,
+                jumped: false,
+                low: false,
+                falling: 0.0,
+                cover: false,
+                pushing: speed > 0.1,
+                strafing: false,
+                armed: fighting,
+                trigger: false,
+                raised: fighting,
+                look: (0.0, 0.0),
+                way: 0.0,
+            };
+            droid.avatar.animate(graph, going, dt);
         }
     }
 
@@ -1289,7 +1312,7 @@ impl Battle {
                             self.following = Some(self.following.map_or(0, |i| (i + 1) % self.droids.len()));
                         }
                         KeyCode::KeyR if self.grid.is_some() => {
-                            self.start_match(&mut ctx.scenes[self.scene].graph);
+                            self.start_match(&mut ctx.scenes[self.scene]);
                             self.phase = Phase::Playing;
                         }
                         _ => (),

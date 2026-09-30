@@ -1126,42 +1126,42 @@ struct Skidding {
 
 /// What the body is doing, for the droid to go along with.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Going {
+pub struct Going {
     /// Which way the keys send it, like [`heading`]; none while the player cannot move.
-    pub(crate) heading: Option<f32>,
+    pub heading: Option<f32>,
     /// How fast it is going along the ground, in meters per second.
-    pub(crate) speed: f32,
-    pub(crate) posture: Posture,
-    pub(crate) gait: Gait,
+    pub speed: f32,
+    pub posture: Posture,
+    pub gait: Gait,
     /// Whether its feet are on the ground.
-    pub(crate) grounded: bool,
+    pub grounded: bool,
     /// Whether it pushed off the ground to jump this frame.
-    pub(crate) jumped: bool,
+    pub jumped: bool,
     /// Whether the jump it is in was cut short this frame, into a low one.
-    pub(crate) low: bool,
+    pub low: bool,
     /// How fast it is falling, in meters per second.
-    pub(crate) falling: f32,
+    pub falling: f32,
     /// Whether it is in cover, up against a wall.
-    pub(crate) cover: bool,
+    pub cover: bool,
     /// Whether the keys send it anywhere.
-    pub(crate) pushing: bool,
+    pub pushing: bool,
     /// Whether it is strafing: keeping facing ahead whichever way it goes.
-    pub(crate) strafing: bool,
+    pub strafing: bool,
     /// Whether it wants its pistol out.
-    pub(crate) armed: bool,
+    pub armed: bool,
     /// Whether the trigger was pulled this frame.
-    pub(crate) trigger: bool,
+    pub trigger: bool,
     /// Whether it wants the pistol raised to aim, rather than held at the ready.
-    pub(crate) raised: bool,
+    pub raised: bool,
     /// Which way the camera looks, in radians from the body's ahead: up, and to the left.
-    pub(crate) look: (f32, f32),
+    pub look: (f32, f32),
     /// Which way it is actually going along the ground, in radians from the way it faces, left
     /// positive. Only strafing goes by it.
-    pub(crate) way: f32,
+    pub way: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Avatar {
+pub struct Avatar {
     root: Handle<Node>,
     /// Its meshes, which cast its shadows.
     meshes: Vec<Handle<Node>>,
@@ -1414,7 +1414,7 @@ impl Avatar {
     /// Puts the droid into `scene` from its `model`, standing on `feet` below `body`'s origin,
     /// facing the way the body does. None if the model is not the droid it is expected to be.
     /// `quiet` keeps what it finds in the model out of the log, for every droid after the first.
-    pub(crate) fn spawn(
+    pub fn spawn(
         model: &ModelResource,
         scene: &mut Scene,
         body: Handle<Node>,
@@ -1972,7 +1972,7 @@ impl Avatar {
 
     /// How fast the droid goes at `gait` in `posture`, in meters per second, with its feet
     /// keeping to the floor. None without a cycle to go by.
-    pub(crate) fn pace(&self, posture: Posture, gait: Gait) -> Option<f32> {
+    pub fn pace(&self, posture: Posture, gait: Gait) -> Option<f32> {
         let gaits = self.gaits();
         let (index, rate) = match posture {
             Posture::Standing => {
@@ -1997,7 +1997,7 @@ impl Avatar {
     }
 
     /// The model's root, which every bone hangs off.
-    pub(crate) fn root(&self) -> Handle<Node> {
+    pub fn root(&self) -> Handle<Node> {
         self.root
     }
 
@@ -2023,7 +2023,7 @@ impl Avatar {
 
     /// Where the middle of the droid's face is, across the world, as of the last frame: a little
     /// above its head bone, which sits at the bottom of the head. None without the bone.
-    pub(crate) fn face_at(&self, graph: &Graph) -> Option<Vector3<f32>> {
+    pub fn face_at(&self, graph: &Graph) -> Option<Vector3<f32>> {
         let &head = self.square.as_ref()?.head.last()?;
         let point =
             graph[head]
@@ -2034,7 +2034,7 @@ impl Avatar {
 
     /// Has the droid's eyes glow `colour`, as brightly as they were made to, or as they were made
     /// to with none.
-    pub(crate) fn set_eyes(&self, colour: Option<Color>) {
+    pub fn set_eyes(&self, colour: Option<Color>) {
         let Some(eyes) = &self.eyes else {
             return;
         };
@@ -2071,7 +2071,7 @@ impl Avatar {
         }
     }
 
-    pub(crate) fn set_visible(&self, graph: &mut Graph, visible: bool) {
+    pub fn set_visible(&self, graph: &mut Graph, visible: bool) {
         if graph[self.root].visibility() != visible {
             graph[self.root].set_visibility(visible);
         }
@@ -2462,7 +2462,7 @@ impl Avatar {
     }
 
     /// Poses the droid for what the body is doing, turning it to face the way it is going.
-    pub(crate) fn animate(&mut self, graph: &mut Graph, going: Going, dt: f32) {
+    pub fn animate(&mut self, graph: &mut Graph, going: Going, dt: f32) {
         self.light_eyes(graph);
         self.travel = None;
         self.arm(graph, going, dt);

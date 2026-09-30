@@ -124,6 +124,12 @@ their animations; the crate decides what they make of what is round them.
   so all it showed was the ceiling; now it starts inside, looking across the arena from one long
   side. Its scoreboard is at the top in the middle and its help along the bottom, instead of on
   top of each other.
+- **The team battle is fought with the game's own droids.** Each side is one of the game's
+  droids - red in `droid_hostile`, cyan in `droid_full_deform` - animated as the maze's droids
+  are: jogging as they advance, running for cover, crouching behind it, pistol raised at a target,
+  eyes in their team's colour and flashing white when hit. They go at the pace of their own
+  animations, so their feet keep to the floor, which makes a match slower than it was. For this,
+  the game is a library as well as a program (`src/lib.rs`), which the examples can use.
 
 29 September 2026:
 

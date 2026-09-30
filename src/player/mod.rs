@@ -55,7 +55,7 @@
 //!
 //! Each of these has a file of its own here, adding to [`Player`] what it needs.
 
-pub(crate) mod avatar;
+pub mod avatar;
 pub(crate) mod breath;
 mod cover;
 mod head;
@@ -65,7 +65,7 @@ mod movement;
 mod noise;
 mod pistol;
 pub use pistol::PISTOL_SOUNDS;
-pub(crate) mod posture;
+pub mod posture;
 mod talk;
 mod third_person;
 mod view;
