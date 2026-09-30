@@ -130,6 +130,13 @@ their animations; the crate decides what they make of what is round them.
   eyes in their team's colour and flashing white when hit. They go at the pace of their own
   animations, so their feet keep to the floor, which makes a match slower than it was. For this,
   the game is a library as well as a program (`src/lib.rs`), which the examples can use.
+- **Every one of the droid's animations in the team battle.** Walking with no enemy known of,
+  jogging to one, running for cover and sprinting when falling back hurt, with the skids that
+  come with stopping and turning; strafing and crouch-strafing while facing a target; a short or
+  high jump now and then as a droid breaks for cover; the pistol drawn, raised, aimed up, down
+  and to the side at the target, fired, and holstered once the fighting is over. Shot down, a
+  droid falls limp, knocked back by the shot, and may lose what it was hit in, as in the game;
+  it comes back as a new droid. Fallen droids and what they lost do not stop shots.
 
 29 September 2026:
 

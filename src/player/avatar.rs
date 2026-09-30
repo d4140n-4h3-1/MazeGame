@@ -2003,14 +2003,14 @@ impl Avatar {
 
     /// Breaks off the part the ragdoll body `body` carries, as [`Dismember::break_off`] does.
     /// Whether it came off.
-    pub(crate) fn break_off(&mut self, graph: &mut Graph, body: &str) -> bool {
+    pub fn break_off(&mut self, graph: &mut Graph, body: &str) -> bool {
         self.dismember
             .as_mut()
             .is_some_and(|parts| parts.break_off(graph, body))
     }
 
     /// Takes the loose voxels its breaks have spilt out of the scene.
-    pub(crate) fn sweep_up(&mut self, graph: &mut Graph) {
+    pub fn sweep_up(&mut self, graph: &mut Graph) {
         if let Some(parts) = self.dismember.as_mut() {
             parts.sweep_up(graph);
         }

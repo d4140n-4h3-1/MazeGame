@@ -2,8 +2,13 @@
 //!
 //! Five a side, all played by the AI, each one of the game's own droids (see
 //! `maze::player::avatar`): red in the hostile droid's colours, `data/droid_hostile.glb`, and cyan
-//! in the full deform droid's, `data/droid_full_deform.glb`, walking, running and crouching as the
-//! game's droids do. They cross the arena along the walk grid, see only in front
+//! in the full deform droid's, `data/droid_full_deform.glb`, with every one of the game's droid's
+//! animations: walking with no enemy about, jogging to one, running for cover and sprinting when
+//! falling back hurt - skidding as they stop and turn - strafing and crouch-strafing while they
+//! face a target, a jump now and then as they break for cover, the pistol drawn, raised, aimed up,
+//! down and to the side at the target and fired, and holstered once the fighting is over. Shot
+//! down, a droid falls limp, knocked back by the shot, and may lose what it was hit in; it comes
+//! back as a new droid. They cross the arena along the walk grid, see only in front
 //! of them (hydroxus-ai's sight), and fight from cover: a crouched droid behind a low block or a
 //! pillar is out of the line of fire, and stands up or steps round it to shoot. Hurt, a droid
 //! falls back to cover further from the enemy. The dead come back at their own end of the arena
@@ -53,19 +58,30 @@ use fyrox::{
         },
         node::Node,
         pivot::PivotBuilder,
-        rigidbody::{RigidBodyBuilder, RigidBodyType},
+        rigidbody::{RigidBody, RigidBodyBuilder, RigidBodyType},
         transform::TransformBuilder,
         EnvironmentLightingSource, Scene,
     },
     window::WindowAttributes,
 };
 use hydroxus_ai::prelude::*;
-use maze::player::{
-    avatar::{Avatar, Going},
-    posture::{Gait, Posture},
+use maze::{
+    dismember,
+    player::{
+        avatar::{Avatar, Going},
+        posture::{Gait, Posture},
+    },
+    ragdoll::{self, Ragdoll},
 };
 
 const MAP: &str = "data/arena/combat_map.glb";
+/// How often a droid breaking for cover jumps as it goes, out of 1; how fast it leaves the
+/// ground, in meters per second, for a short and a high jump; and how fast it falls.
+const JUMP_CHANCE: f32 = 0.25;
+const JUMP_SPEED: (f32, f32) = (3.2, 4.4);
+const GRAVITY: f32 = 9.81;
+/// How long, in seconds, a droid keeps its pistol out after it last had a target.
+const HOLSTER_AFTER: f32 = 6.0;
 /// The droids each team is made from: the same droid, in red and in cyan.
 const MODELS: [&str; 2] = ["data/droid_hostile.glb", "data/droid_full_deform.glb"];
 const PER_TEAM: usize = 5;
@@ -170,6 +186,23 @@ struct Droid {
     /// Where it was last frame, for how fast it is going, and how its feet are going there.
     was_at: Vector3<f32>,
     gait: Gait,
+    /// Whether it is falling back, hurt, which it does at a sprint.
+    retreating: bool,
+    /// Whether it fired this frame.
+    fired: bool,
+    /// Where the chest of the target it has is, if one.
+    target_at: Option<Vector3<f32>>,
+    /// How long since it last had a target, in seconds: it holsters its pistol a while after.
+    calm_for: f32,
+    /// How high off the floor it is and how fast it is going up, while in a jump; whether it
+    /// has just jumped, and whether a short jump.
+    air: Option<(f32, f32)>,
+    jumped: bool,
+    low_jump: bool,
+    /// Its body gone limp, while it lies where it fell; and whether its body is spent, to be made
+    /// again when it comes back.
+    ragdoll: Option<Ragdoll>,
+    fallen: bool,
     heading: f32,
     health: f32,
     /// Seconds until it comes back, while dead.
@@ -344,7 +377,7 @@ impl Battle {
         .build(&mut ui.build_ctx());
         self.banner = TextBuilder::new(
             WidgetBuilder::new()
-                .with_margin(Thickness::top(60.0))
+                .with_margin(Thickness::top(96.0))
                 .with_horizontal_alignment(HorizontalAlignment::Center)
                 .with_foreground(Brush::Solid(Color::WHITE).into()),
         )
@@ -432,10 +465,18 @@ impl Battle {
             }
             _ => (),
         }
+        if matches!(self.phase, Phase::Playing | Phase::Won(..)) {
+            self.raise_the_fallen(&mut ctx.scenes[self.scene]);
+        }
+        for i in 0..self.droids.len() {
+            let at = self.droids[i].target.map(|j| self.droids[j].chest());
+            self.droids[i].target_at = at;
+        }
         let graph = &mut ctx.scenes[self.scene].graph;
         if !self.paused {
             self.update_tracers(graph, dt);
         }
+        let dt = if self.paused { 0.0 } else { dt };
         self.show_droids(graph, dt);
         self.move_camera(graph, dt);
         self.update_text(ctx);
@@ -513,7 +554,17 @@ impl Battle {
             },
             &mut hits,
         );
-        hits.first().map(|hit| (hit.position.coords - from).norm())
+        // Only the arena itself stands in the way: not a droid lying there, nor what it lost.
+        let arena = |collider: Handle<Collider>| {
+            graph
+                .try_get::<Node>(collider.to_base())
+                .ok()
+                .and_then(|c: &Node| graph.try_get_of_type::<RigidBody>(c.parent()).ok())
+                .is_some_and(|body| body.body_type() == RigidBodyType::Static)
+        };
+        hits.iter()
+            .find(|hit| arena(hit.collider))
+            .map(|hit| (hit.position.coords - from).norm())
     }
 
     fn clear(graph: &Graph, from: Vector3<f32>, to: Vector3<f32>) -> bool {
@@ -628,8 +679,9 @@ impl Battle {
     // ------------------------------------------------------------------ the match
 
     fn start_match(&mut self, scene: &mut Scene) {
-        for droid in self.droids.drain(..) {
-            scene.graph.remove_node(droid.root);
+        ragdoll::prepare(&mut scene.graph);
+        for mut droid in self.droids.drain(..) {
+            Self::clear_body(&mut scene.graph, &mut droid);
         }
         self.score = [0, 0];
         self.following = None;
@@ -665,6 +717,15 @@ impl Battle {
             position: Vector3::zeros(),
             was_at: Vector3::zeros(),
             gait: Gait::Jogging,
+            retreating: false,
+            fired: false,
+            target_at: None,
+            calm_for: HOLSTER_AFTER,
+            air: None,
+            jumped: false,
+            low_jump: false,
+            ragdoll: None,
+            fallen: false,
             heading: 0.0,
             health: HEALTH,
             dead_for: None,
@@ -972,6 +1033,17 @@ impl Battle {
             };
             if let Some(peek) = peek {
                 self.droids[i].task = Task::ToCover { spot: s, peek };
+                self.droids[i].retreating = retreat;
+                // Now and then it jumps as it breaks for cover: a short hop or a high one.
+                if self.droids[i].air.is_none() && self.random((0.0, 1.0)) < JUMP_CHANCE {
+                    let low = self.random((0.0, 1.0)) < 0.5;
+                    let speed = if low { JUMP_SPEED.0 } else { JUMP_SPEED.1 };
+                    let droid = &mut self.droids[i];
+                    droid.air = Some((0.0, speed));
+                    droid.jumped = true;
+                    droid.low_jump = low;
+                    droid.crouched = false;
+                }
                 return true;
             }
         }
@@ -1028,6 +1100,7 @@ impl Battle {
             }
         };
         self.tracer(graph, from, end, self.droids[i].team);
+        self.droids[i].fired = true;
         if hit {
             let damage = self.random(DAMAGE);
             let target = &mut self.droids[j];
@@ -1035,6 +1108,27 @@ impl Battle {
             target.hurt_flash = 0.12;
             if target.health <= 0.0 {
                 target.dead_for = Some(RESPAWN_TIME);
+                // It goes limp, knocked back by the shot, and may lose what it was hit in.
+                let way = (to - from).normalize();
+                target.avatar.set_eyes(Some(Color::BLACK));
+                let going = if target.route.is_empty() { Vector3::zeros() } else { forward(target.heading) * 2.0 };
+                target.ragdoll = Ragdoll::start(
+                    graph,
+                    target.avatar.root(),
+                    going,
+                    Some((way * ragdoll::STOPPING_BLOW, to)),
+                );
+                target.fallen = true;
+                target.air = None;
+                if let Some(ragdoll) = target.ragdoll.as_mut() {
+                    if let Some(body) = ragdoll.body_struck(graph, to, way) {
+                        if let Some(part) = dismember::break_for(body) {
+                            if target.avatar.break_off(graph, part) {
+                                ragdoll.let_loose(graph, part);
+                            }
+                        }
+                    }
+                }
                 target.deaths += 1;
                 target.route.clear();
                 self.droids[i].kills += 1;
@@ -1123,13 +1217,20 @@ impl Battle {
             }
             // At the pace of what its feet are doing: jogging as it advances, running for cover,
             // and crouched, the crouch walk.
+            // Walking with no enemy known of, jogging to one, running for cover, sprinting when
+            // falling back hurt.
             let running = matches!(self.droids[i].task, Task::ToCover { .. });
+            let knows = self.nearest_known_enemy(i).is_some() || self.droids[i].target.is_some();
             let (posture, gait, fallback) = if self.droids[i].crouched {
                 (Posture::Crouching, Gait::Walking, WALK_SPEED * 0.5)
+            } else if running && self.droids[i].retreating {
+                (Posture::Standing, Gait::Sprinting, RUN_SPEED * 1.4)
             } else if running {
                 (Posture::Standing, Gait::Running, RUN_SPEED)
-            } else {
+            } else if knows {
                 (Posture::Standing, Gait::Jogging, WALK_SPEED)
+            } else {
+                (Posture::Standing, Gait::Walking, WALK_SPEED * 0.5)
             };
             let droid = &mut self.droids[i];
             droid.gait = gait;
@@ -1165,37 +1266,94 @@ impl Battle {
         }
     }
 
+    /// Takes away a droid's body - its model, and its limp bodies and what it lost, if it fell.
+    fn clear_body(graph: &mut Graph, droid: &mut Droid) {
+        if let Some(ragdoll) = droid.ragdoll.take() {
+            ragdoll.remove(graph);
+        }
+        droid.avatar.sweep_up(graph);
+        if graph.is_valid_handle(droid.root) {
+            graph.remove_node(droid.root);
+        }
+    }
+
+    /// Gives each droid that has come back, but still lies where it fell, a new body.
+    fn raise_the_fallen(&mut self, scene: &mut Scene) {
+        for i in 0..self.droids.len() {
+            if !(self.droids[i].fallen && self.droids[i].alive()) {
+                continue;
+            }
+            let team = self.droids[i].team;
+            let Some(new) = self.make_droid(scene, team) else { continue };
+            let droid = &mut self.droids[i];
+            Self::clear_body(&mut scene.graph, droid);
+            droid.root = new.root;
+            droid.avatar = new.avatar;
+            droid.fallen = false;
+            droid.was_at = droid.position;
+        }
+    }
+
     fn show_droids(&mut self, graph: &mut Graph, dt: f32) {
         for droid in &mut self.droids {
+            // Lying where it fell, the physics has it.
+            if let Some(ragdoll) = droid.ragdoll.as_mut().filter(|_| droid.fallen) {
+                ragdoll.update(graph);
+                continue;
+            }
             droid.hurt_flash -= dt;
             // Its eyes in its team's colour, and white for a moment when hit.
             let eyes = if droid.hurt_flash > 0.0 { Color::WHITE } else { droid.team.color() };
             droid.avatar.set_eyes(Some(eyes));
-            droid.avatar.set_visible(graph, droid.alive());
-            graph[droid.root].local_transform_mut().set_position(droid.position);
+            // In a jump, up and back down onto the floor.
+            let mut falling = 0.0;
+            if let Some((height, up)) = droid.air {
+                let (height, up) = (height + up * dt, up - GRAVITY * dt);
+                falling = (-up).max(0.0);
+                droid.air = (height > 0.0).then_some((height, up));
+            }
+            let lift = droid.air.map_or(0.0, |(height, _)| height);
+            graph[droid.root]
+                .local_transform_mut()
+                .set_position(droid.position + Vector3::y() * lift);
             // How fast it went since last frame, which is what its feet keep pace with.
-            let speed = if dt > 0.0 { flat(droid.position - droid.was_at).norm() / dt } else { 0.0 };
+            let moved = flat(droid.position - droid.was_at);
+            let speed = if dt > 0.0 { moved.norm() / dt } else { 0.0 };
             // Coming back to life is a jump across the arena, not a step.
-            let speed = if speed > RUN_SPEED { 0.0 } else { speed };
+            let (speed, moved) = if speed > RUN_SPEED * 2.0 { (0.0, Vector3::zeros()) } else { (speed, moved) };
             droid.was_at = droid.position;
-            let fighting = droid.target.is_some() && droid.alive();
+            // The pistol out while fighting, raised and aimed at the target it has, and put away
+            // a while after the last.
+            droid.calm_for = if droid.target.is_some() { 0.0 } else { droid.calm_for + dt };
+            let target = droid.target_at;
+            let raised = target.is_some();
+            // Up, and to the left of ahead, to the target.
+            let look = target.map_or((0.0, 0.0), |at| {
+                let to = at - (droid.position + Vector3::y() * if droid.crouched { EYES_CROUCHED } else { EYES_STANDING });
+                let up = (to.y / to.norm().max(1.0e-3)).clamp(-1.0, 1.0).asin();
+                let left = heading_of(to).map_or(0.0, |h| wrap(h - droid.heading));
+                (up, left)
+            });
+            // Facing a target, it strafes: going which way it goes, facing where it faces.
+            let strafing = raised && speed > 0.1;
+            let way = heading_of(moved).map_or(0.0, |h| wrap(h - droid.heading));
             let going = Going {
                 heading: Some(droid.heading),
                 speed,
                 posture: if droid.crouched { Posture::Crouching } else { Posture::Standing },
                 gait: droid.gait,
-                grounded: true,
-                jumped: false,
-                low: false,
-                falling: 0.0,
+                grounded: droid.air.is_none(),
+                jumped: std::mem::take(&mut droid.jumped),
+                low: droid.low_jump,
+                falling,
                 cover: false,
                 pushing: speed > 0.1,
-                strafing: false,
-                armed: fighting,
-                trigger: false,
-                raised: fighting,
-                look: (0.0, 0.0),
-                way: 0.0,
+                strafing,
+                armed: droid.calm_for < HOLSTER_AFTER,
+                trigger: std::mem::take(&mut droid.fired),
+                raised,
+                look,
+                way,
             };
             droid.avatar.animate(graph, going, dt);
         }
