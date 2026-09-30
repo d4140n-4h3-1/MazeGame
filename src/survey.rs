@@ -6,7 +6,7 @@
 use crate::layout::WalkGrid;
 use fyrox::{
     core::{
-        algebra::{Point3, Vector2, Vector3},
+        algebra::{Point3, Vector3},
         log::Log,
         pool::Handle,
     },
@@ -43,7 +43,7 @@ pub fn survey(
     }
     let width = ((max.x - min.x) / CELL_SIZE).ceil() as usize;
     let depth = ((max.z - min.z) / CELL_SIZE).ceil() as usize;
-    let mut grid = WalkGrid::new(width, depth);
+    let mut grid = WalkGrid::new(width, depth, CELL_SIZE);
     let origin = Vector3::new(min.x, 0.0, min.z);
     let mut walkable = 0;
     for z in 0..depth {
@@ -64,13 +64,9 @@ pub fn survey(
     Some((grid, origin))
 }
 
+/// The middle of cell `(x, z)` of the survey's grid, whose corner is at `origin`.
 pub fn cell_center(origin: Vector3<f32>, x: usize, z: usize) -> Vector3<f32> {
-    origin
-        + Vector3::new(
-            (x as f32 + 0.5) * CELL_SIZE,
-            0.0,
-            (z as f32 + 0.5) * CELL_SIZE,
-        )
+    hydroxus_ai::grid::cell_center(origin, CELL_SIZE, x, z)
 }
 
 /// The cell of `grid` that `position` is in, if it is on the grid at all.
@@ -79,10 +75,7 @@ pub fn cell_at(
     origin: Vector3<f32>,
     position: Vector3<f32>,
 ) -> Option<(usize, usize)> {
-    let x = ((position.x - origin.x) / CELL_SIZE).floor();
-    let z = ((position.z - origin.z) / CELL_SIZE).floor();
-    (x >= 0.0 && z >= 0.0 && (x as usize) < grid.width && (z as usize) < grid.depth)
-        .then_some((x as usize, z as usize))
+    grid.cell_at(origin, position)
 }
 
 /// The walkable cell nearest to a point, which is where the player can stand to reach it.
@@ -91,13 +84,7 @@ pub fn nearest_walkable(
     origin: Vector3<f32>,
     point: Vector3<f32>,
 ) -> Option<(usize, usize)> {
-    grid.walkable_cells().min_by(|&a, &b| {
-        let distance = |cell: (usize, usize)| {
-            let center = cell_center(origin, cell.0, cell.1);
-            Vector2::new(center.x - point.x, center.z - point.z).norm_squared()
-        };
-        distance(a).total_cmp(&distance(b))
-    })
+    grid.nearest_walkable(origin, point)
 }
 
 /// The direction from `cell` towards the walkable floor around it, reached by walking.

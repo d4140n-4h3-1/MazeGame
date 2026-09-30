@@ -68,6 +68,7 @@ use fyrox::{
         Scene,
     },
 };
+use hydroxus_ai::sight::Sight;
 use serde::Deserialize;
 use std::{collections::HashMap, f32::consts::PI};
 
@@ -634,15 +635,16 @@ impl Drone {
             .set_rotation(UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.heading));
     }
 
-    /// Whether it can see the `player`: in front of it as a sentry sees, or all round on Alert,
-    /// and with nothing in the way from its eye to the middle of their body.
+    /// Whether it can see the `player`: in front of it, as a sentry sees - from as far as it sees
+    /// at all on Alert - and with nothing in the way from its eye to the middle of their body.
     fn sees(&self, graph: &Graph, player: &Target) -> bool {
         let alert = match self.state {
             State::Alert => Alert::Alert,
             _ => Alert::Evasion,
         };
         let under = self.at - Vector3::new(0.0, HOVER, 0.0);
-        if !inhabitants::could_see(alert, under, self.heading, player.feet, player.posture, player.in_the_dark) {
+        let stance = player.posture.into();
+        if !Sight::default().could_see(Some(alert), under, self.heading, player.feet, stance, player.in_the_dark) {
             return false;
         }
         let from = graph[self.body].global_position();
@@ -749,7 +751,7 @@ impl Drone {
                 if self.route.is_empty() {
                     self.resting -= dt;
                     if self.resting <= 0.0 {
-                        self.route = inhabitants::plan(grid, origin, under, TRIP, rng);
+                        self.route = inhabitants::plan((grid, origin), under, TRIP, rng);
                         self.resting = inhabitants::between(rng, REST);
                     }
                 }
@@ -778,7 +780,7 @@ impl Drone {
                     self.route.clear();
                 } else if self.replan <= 0.0 || self.route.is_empty() {
                     self.replan = REPLAN;
-                    self.route = inhabitants::route_to(grid, origin, under, player.feet, f32::INFINITY);
+                    self.route = inhabitants::route_to((grid, origin), under, player.feet, f32::INFINITY);
                 }
                 // Out of range, it holds its fire till it is nearer.
                 if to.norm() > FIRE_RANGE {
@@ -805,13 +807,13 @@ impl Drone {
                     if self.scanning <= 0.0 {
                         self.scanning = 0.0;
                         self.searched += 1;
-                        self.route = inhabitants::plan(grid, origin, under, SEARCH_TRIP, rng);
+                        self.route = inhabitants::plan((grid, origin), under, SEARCH_TRIP, rng);
                     }
                 } else if self.route.is_empty() {
                     if self.searched == 0 && flat(self.lost_at - under).norm() > REACHED {
                         // First where the player was.
                         self.searched = 1;
-                        self.route = inhabitants::route_to(grid, origin, under, self.lost_at, f32::INFINITY);
+                        self.route = inhabitants::route_to((grid, origin), under, self.lost_at, f32::INFINITY);
                         says = Some("searching");
                     } else {
                         // Got there, or has nowhere to go: it scans.

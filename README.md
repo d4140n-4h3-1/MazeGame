@@ -96,9 +96,23 @@ shadow edges, temporal anti-aliasing, further-reaching ambient occlusion, screen
 reflections, a budget that keeps shadow maps for the nearest lamps only, and the ray-traced
 shadows (its `raytracing` feature).
 
+### hydroxus-ai
+
+The droids' and drones' AI, in a crate of its own
+([hydroxus-ai](https://github.com/d4140n-4h3-1/hydroxus-ai)) that knows nothing of the engine
+but its vectors: the walk grid and the routes over it, what an NPC sees and hears, Metal Gear's
+alert phases, and making way in a corridor. The game casts the rays, moves the droids and plays
+their animations; the crate decides what they make of what is round them.
+
 ### The game
 
 30 September 2026:
+
+- **The droids see only in front of them, always.** On ALERT too, and right next to them too: a
+  droid or a drone can be crept up on from behind, or slipped round while it looks the other
+  way. A hunting droid that loses you round its back has to search for you.
+- **The AI is a crate of its own**, `hydroxus-ai` (see above), fetched from GitHub as Hydroxus
+  and fyrox-gfx are. The droids behave as before, but for what they see.
 
 - **The engine fork is now Hydroxus.** The fork of Fyrox the game is built on has a name, and a
   README of its own crediting Fyrox. Its crates keep their Fyrox names, so nothing in the game
@@ -281,17 +295,17 @@ shadows (its `raytracing` feature).
     for you. After a minute it calms down, its eyes go back to green, and it can be talked to
     again.
 
-  Out of ALERT it sees only what is in front of it, 55 degrees either way, and 30 m off
-  standing, half as far crouched and under a third as far crawling; right next to it, it
-  notices you whichever way it faces. Seeing you in any phase puts it back on ALERT. A bolt
-  that hits it without it seeing you has it search where you fired from. As it spots you,
-  loses you and gives up, it says so out loud: "Intrusor detectum. Sta." ("Intruder detected.
+  It sees only what is in front of it, 55 degrees either way, in every phase, even right next
+  to it: it can be crept up on, or slipped round. On ALERT it sees you 30 m off however low you
+  are; otherwise 30 m off standing, half as far crouched and under a third as far crawling.
+  Seeing you in any phase puts it back on ALERT. A bolt that hits it without it seeing you has
+  it search where you fired from. As it spots you, loses you and gives up, it says so out loud: "Intrusor detectum. Sta." ("Intruder detected.
   Halt."), "Intrusor perdatum. Zeto intrusor." ("Intruder lost. Searching for the intruder.")
   and "Phantasma. Resumo patrolium." ("A sensor ghost. Resuming patrol."), with subtitles
   under the status line. These are the sentry's `barks` in `data/dialogue/droids.json`.
 - **Sentries join a chase.** A sentry that sees another sentry on ALERT, running after you, goes
   after you too, calm or not: the one it sees shows it where you are. It sees the other as it
-  would see you standing there - in front of it out of ALERT, less far with the lights off -
+  would see you standing there - in front of it, less far with the lights off -
   and a calm one stands a second before it sets off, as one does that has just turned hostile.
   A sentry that sees one that has joined in joins in as well. Once it sees neither you nor
   anyone after you, it searches where you were, as usual.
@@ -564,7 +578,7 @@ how a droid comes apart, and the computer's hack and where it goes.
 | `level.rs`      | A level in the scene: its pieces, collider, lamps and walkable ground.     |
 | `generate.rs`   | Plans random mazes on a grid of junctions and turns them into tiles.       |
 | `tiles.rs`      | Measures the tile models and assembles a maze from them.                   |
-| `layout.rs`     | The walkable grid, and where a round starts and ends.                      |
+| `layout.rs`     | Where a round starts and ends, on `hydroxus-ai`'s walkable grid.           |
 | `survey.rs`     | Finds the walkable ground of a level by casting rays into it.              |
 | `culling.rs`    | Hides the pieces and lamps that cannot be seen from where the player is.   |
 | `fixtures.rs`   | Light fixtures: the glass, the lamps, and everything that glows.           |

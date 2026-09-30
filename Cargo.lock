@@ -2098,6 +2098,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hydroxus-ai"
+version = "0.1.0"
+source = "git+https://github.com/d4140n-4h3-1/hydroxus-ai.git?branch=main#9208131168e90e12eec3e6ff8d6b8c1e20b473ba"
+dependencies = [
+ "nalgebra 0.35.0",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2671,6 +2679,7 @@ dependencies = [
  "fyrox",
  "fyrox-gfx",
  "fyrox-graphics-wgpu",
+ "hydroxus-ai",
  "serde",
  "serde_json",
  "web-sys",

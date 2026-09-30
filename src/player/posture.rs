@@ -36,6 +36,17 @@ pub(crate) enum Posture {
     Crawling,
 }
 
+/// How the player holds themselves, as the droids see them.
+impl From<Posture> for hydroxus_ai::sight::Stance {
+    fn from(posture: Posture) -> Self {
+        match posture {
+            Posture::Standing => Self::Standing,
+            Posture::Crouching => Self::Crouching,
+            Posture::Crawling => Self::Crawling,
+        }
+    }
+}
+
 impl Posture {
     /// What the crouch key (C) turns this into.
     pub(super) fn crouch_toggled(self) -> Self {

@@ -22,7 +22,7 @@ use crate::{
     generate::Maze,
     hud::{self, Hud, Status},
     inhabitants::{Alert, Inhabitants, Livery, News, Threat, HOSTILE_MODEL},
-    layout::Rng,
+    layout::{self, Rng},
     level::Level,
     menu::{Choice, PauseMenu},
     platform,
@@ -566,7 +566,7 @@ impl MazeGame {
                 let exit = survey::nearest_walkable(grid, *origin, goal);
                 exit.and_then(|exit| grid.farthest_from(exit).map(|(start, _)| (start, exit)))
             }
-            None => grid.plan_round(|n| rng.below(n)),
+            None => layout::plan_round(grid, |n| rng.below(n)),
         };
         let Some((start, exit)) = round else {
             Log::err("Maze: found no walkable ground to play on");

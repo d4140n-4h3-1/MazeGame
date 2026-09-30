@@ -1808,7 +1808,7 @@ mod tests {
     #[test]
     fn it_goes_against_a_wall_facing_open_floor_away_from_the_start() {
         // A room 12 cells wide and deep, walled all round.
-        let mut grid = WalkGrid::new(14, 14);
+        let mut grid = WalkGrid::new(14, 14, CELL_SIZE);
         for x in 1..13 {
             for z in 1..13 {
                 grid.set(x, z, true);

@@ -18,6 +18,8 @@ wgpu = "30"
 # Reading where the droid's skids take it, from the file made along with its animations.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The droids' and drones' AI: the walk grid and routes, sight, hearing and alert phases.
+hydroxus-ai = { git = "https://github.com/d4140n-4h3-1/hydroxus-ai.git", branch = "main" }
 # Refractive glass and other graphics improvements kept outside the engine.
 fyrox-gfx = { git = "https://github.com/d4140n-4h3-1/fyrox-gfx.git", branch = "main", features = ["raytracing"] }
 

@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn hearts_go_on_open_floor_away_from_the_start_and_from_each_other() {
         // A room 60 cells wide and deep, walled all round.
-        let mut grid = WalkGrid::new(62, 62);
+        let mut grid = WalkGrid::new(62, 62, crate::survey::CELL_SIZE);
         for x in 1..61 {
             for z in 1..61 {
                 grid.set(x, z, true);
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn a_maze_with_no_room_gets_none() {
-        let grid = WalkGrid::new(10, 10);
+        let grid = WalkGrid::new(10, 10, crate::survey::CELL_SIZE);
         assert!(spots(&grid, (1, 1), 3, &mut Rng::new(1)).is_empty());
     }
 }
