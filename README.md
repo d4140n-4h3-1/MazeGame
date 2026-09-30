@@ -556,8 +556,26 @@ it:
 - Small meshes standing on their own, narrower than 3.5 m, are taken as **something to find**:
   the round ends there instead of at a random exit.
 - FBX models are taken to be in centimeters and scaled down.
+- Ground is only walkable with a **ceiling** somewhere above it, and the floor has to sit at or
+  above the game's own safety floor, whose top is at -0.05 m.
 
 Anything in the model that glows by itself goes dark with the lights.
+
+`examples/combat_map.glb` is one such model: an indoor arena of hexagonal pillars and
+rectangular cover blocks, for trying out combat. Play it with
+
+```sh
+MAZE_MODEL=examples/combat_map.glb cargo run
+```
+
+`examples/team_battle.rs` plays the same arena as a battle between two teams of droids, red and
+cyan, five a side, all of them AI: they fight from cover, fall back when hurt and come back at
+their own end when downed, and the first team to 30 kills wins. The camera is free to fly about
+the arena or follow one droid (Tab).
+
+```sh
+cargo run --release --example team_battle
+```
 
 ## Tests
 
