@@ -565,11 +565,11 @@ it:
 
 Anything in the model that glows by itself goes dark with the lights.
 
-`examples/combat_map.glb` is one such model: an indoor arena of hexagonal pillars and
+`data/arena/combat_map.glb` is one such model: an indoor arena of hexagonal pillars and
 rectangular cover blocks, for trying out combat. Play it with
 
 ```sh
-MAZE_MODEL=examples/combat_map.glb cargo run
+MAZE_MODEL=data/arena/combat_map.glb cargo run
 ```
 
 `examples/team_battle.rs` plays the same arena as a battle between two teams of droids, red and

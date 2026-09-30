@@ -1,4 +1,4 @@
-//! Team battle: red droids against cyan droids in the combat arena, `examples/combat_map.glb`.
+//! Team battle: red droids against cyan droids in the combat arena, `data/arena/combat_map.glb`.
 //!
 //! Five a side, all played by the AI. They cross the arena along the walk grid, see only in front
 //! of them (hydroxus-ai's sight), and fight from cover: a crouched droid behind a low block or a
@@ -58,7 +58,7 @@ use fyrox::{
 };
 use hydroxus_ai::prelude::*;
 
-const MAP: &str = "examples/combat_map.glb";
+const MAP: &str = "data/arena/combat_map.glb";
 const PER_TEAM: usize = 5;
 const KILL_LIMIT: u32 = 30;
 
