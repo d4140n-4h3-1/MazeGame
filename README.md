@@ -148,8 +148,6 @@ shadows (its `raytracing` feature).
   stamina bar, shown with it - once it is after you, has spent some breath or has been hit -
   and a bolt takes a third of it. The drone has a health bar alone, while it is after you or has
   been hit.
-- **No droid waits in front of you at the start** any more: every droid starts out of sight, and
-  wanders.
 - **Jog, run and sprint.** Caps Lock still goes between walking and jogging. A tap of Shift now
   goes between walking and running, a pace between a jog and a sprint - the sprint's stride,
   stepped out slower - which costs stamina, if far less than a sprint: 20 seconds of it on a
