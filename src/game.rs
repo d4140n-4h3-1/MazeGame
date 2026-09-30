@@ -3,7 +3,7 @@
 use crate::{
     credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
-    drone::{Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
+    drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
     health::{Health, HealthSounds, Healing, Heard},
     hearts::{self, Hearts, HEART_MODEL},
@@ -956,23 +956,25 @@ impl MazeGame {
         }
     }
 
-    /// Calls a drone in to search where the player is, `at`: the one patrolling nearest there,
-    /// or failing that one from out of sight, from well away - or failing that, with every drone
-    /// already out, down or after the player, the searching one nearest there, to look there
-    /// instead. Some drone always comes.
+    /// Calls a drone in to search where the player is, `at`: the one patrolling nearest there, if
+    /// it is near enough to come soon, or failing that one from out of sight, not too far off - or
+    /// failing that, with every drone already out, the patrolling one nearest there however far,
+    /// or the searching one nearest, to look there instead. Some drone always comes.
     fn call_drone(&mut self, graph: &mut Graph, at: Vector3<f32>) {
         let (Some((grid, origin)), Some(rng)) = (self.level.grid.as_ref(), self.rng.as_mut()) else {
             return;
         };
+        let from = |drone: &Drone| (drone.at() - at).xz().norm();
         let nearest = |drones: &[Drone], state: fn(State) -> bool| {
             drones
                 .iter()
                 .enumerate()
                 .filter(|(_, drone)| drone.is_placed() && state(drone.state()))
-                .min_by(|a, b| (a.1.at() - at).norm().total_cmp(&(b.1.at() - at).norm()))
+                .min_by(|a, b| from(a.1).total_cmp(&from(b.1)))
                 .map(|(n, _)| n)
         };
-        if let Some(n) = nearest(&self.drones, |state| state == State::Patrol) {
+        let patrolling = nearest(&self.drones, |state| state == State::Patrol);
+        if let Some(n) = patrolling.filter(|&n| from(&self.drones[n]) <= drone::ANSWERS_WITHIN) {
             if let Some(says) = self.drones[n].alarm(at) {
                 self.drone_says.push((n, says));
             }
@@ -986,6 +988,14 @@ impl MazeGame {
                 Log::info(format!("Drone {n}: called in"));
                 return;
             }
+        }
+        // Every drone out already: the nearest patrolling or searching one comes, however far.
+        if let Some(n) = patrolling {
+            if let Some(says) = self.drones[n].alarm(at) {
+                self.drone_says.push((n, says));
+            }
+            Log::info(format!("Drone {n}: called to the computer, from afar"));
+            return;
         }
         if let Some(n) = nearest(&self.drones, |state| matches!(state, State::Search { .. })) {
             self.drones[n].alarm(at);

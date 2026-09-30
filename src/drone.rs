@@ -109,6 +109,12 @@ pub const HOVER: f32 = 1.7;
 /// How far from where the player starts it is put down, in steps across the grid's half-meter
 /// cells, at least: out of sight.
 const AWAY_FROM_PLAYER: f32 = 40.0;
+/// How far off one called in is put down, in the same steps, at most: out of sight, but near
+/// enough to be heard coming, and to come.
+const CALLED_FROM: f32 = 80.0;
+/// How near where it is called to a patrolling drone has to be, in meters as the crow flies, to
+/// answer the call itself, rather than one being called in from nearer.
+pub const ANSWERS_WITHIN: f32 = 25.0;
 /// How far it goes on patrol each time it sets off, and how far between the spots it searches,
 /// in steps across the grid, from least to most; and how long it waits between trips, in seconds.
 const TRIP: (f32, f32) = (30.0, 120.0);
@@ -402,6 +408,19 @@ impl Drone {
         feet: Vector3<f32>,
         rng: &mut Rng,
     ) -> bool {
+        self.put_down(graph, (grid, origin), feet, f32::INFINITY, rng)
+    }
+
+    /// Puts it down as [`Drone::place`] does, no more than `within` steps from the player's
+    /// `feet` if there is room.
+    fn put_down(
+        &mut self,
+        graph: &mut Graph,
+        (grid, origin): (&WalkGrid, Vector3<f32>),
+        feet: Vector3<f32>,
+        within: f32,
+        rng: &mut Rng,
+    ) -> bool {
         let Some(start) = survey::cell_at(grid, origin, feet)
             .filter(|&(x, z)| grid.is_walkable(x, z))
             .or_else(|| survey::nearest_walkable(grid, origin, feet))
@@ -417,7 +436,7 @@ impl Drone {
             .collect();
         let away: Vec<usize> = reached
             .iter()
-            .filter(|&&(_, cost)| cost >= AWAY_FROM_PLAYER)
+            .filter(|&&(_, cost)| cost >= AWAY_FROM_PLAYER && cost <= within.max(AWAY_FROM_PLAYER))
             .map(|&(i, _)| i)
             .collect();
         // Out of the way if there is room; in a small maze, as far off as it can be.
@@ -463,7 +482,7 @@ impl Drone {
         at: Vector3<f32>,
         rng: &mut Rng,
     ) -> bool {
-        if !self.place(graph, (grid, origin), feet, rng) {
+        if !self.put_down(graph, (grid, origin), feet, CALLED_FROM, rng) {
             return false;
         }
         self.search(at);
@@ -759,7 +778,7 @@ impl Drone {
                     self.route.clear();
                 } else if self.replan <= 0.0 || self.route.is_empty() {
                     self.replan = REPLAN;
-                    self.route = inhabitants::route_to(grid, origin, under, player.feet);
+                    self.route = inhabitants::route_to(grid, origin, under, player.feet, f32::INFINITY);
                 }
                 // Out of range, it holds its fire till it is nearer.
                 if to.norm() > FIRE_RANGE {
@@ -768,7 +787,9 @@ impl Drone {
                 None
             }
             State::Search { left } => {
-                let left = left - dt;
+                // Its time runs from when it gets to where it was sent, not while it is on its way.
+                let on_its_way = self.searched <= 1 && self.scanning == 0.0 && !self.route.is_empty();
+                let left = if on_its_way { left } else { left - dt };
                 if left <= 0.0 {
                     self.state = State::Patrol;
                     self.route.clear();
@@ -790,7 +811,7 @@ impl Drone {
                     if self.searched == 0 && flat(self.lost_at - under).norm() > REACHED {
                         // First where the player was.
                         self.searched = 1;
-                        self.route = inhabitants::route_to(grid, origin, under, self.lost_at);
+                        self.route = inhabitants::route_to(grid, origin, under, self.lost_at, f32::INFINITY);
                         says = Some("searching");
                     } else {
                         // Got there, or has nowhere to go: it scans.

@@ -140,9 +140,10 @@ shadows (its `raytracing` feature).
 - **The fallen stay down.** A droid shot down lies where it fell, broken parts and all, for the
   rest of the round, rather than disappearing a few seconds later; the others walk over it.
 - **A failed hack calls in a drone.** When the trace completes, the patrolling drone nearest the
-  computer comes to search there; if none is patrolling, one more flies in from out of sight -
-  there are four in all - and failing that, the nearest one searching goes there instead. Some
-  drone always comes.
+  computer comes to search there, if it is within 25 m; if not, one more flies in from out of
+  sight, 20 to 40 m off by the corridors - there are four in all - and failing that, the nearest
+  one patrolling or searching goes there instead, however far. Some drone always comes, and
+  finds its way however far it has to go; its 30 s of searching start once it gets there.
 - **Health bars over the sentries and the drone.** A sentry's red health bar sits over its
   stamina bar, shown with it - once it is after you, has spent some breath or has been hit -
   and a bolt takes a third of it. The drone has a health bar alone, while it is after you or has

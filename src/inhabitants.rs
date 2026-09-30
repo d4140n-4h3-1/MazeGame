@@ -771,12 +771,13 @@ fn walkable_cell(
 }
 
 /// A route from `feet` to `to`, as points on the floor, the first one last, ending at `to`
-/// itself. Empty if there is no way there within [`CHASE_REACH`].
+/// itself. Empty if there is no way there within `reach` steps across the grid.
 pub(crate) fn route_to(
     grid: &WalkGrid,
     origin: Vector3<f32>,
     feet: Vector3<f32>,
     to: Vector3<f32>,
+    reach: f32,
 ) -> Vec<Vector3<f32>> {
     let (Some(from), Some(goal)) = (
         walkable_cell(grid, origin, feet),
@@ -784,7 +785,7 @@ pub(crate) fn route_to(
     ) else {
         return Vec::new();
     };
-    let Some(path) = grid.routes_from(from, CHASE_REACH).path_to(goal) else {
+    let Some(path) = grid.routes_from(from, reach).path_to(goal) else {
         return Vec::new();
     };
     let mut route = along(grid, origin, path);
@@ -1074,7 +1075,7 @@ impl Inhabitants {
                 droid.replan -= dt;
                 if droid.replan <= 0.0 || droid.route.is_empty() {
                     droid.replan = REPLAN;
-                    droid.route = route_to(grid, origin, droid.feet, player);
+                    droid.route = route_to(grid, origin, droid.feet, player, CHASE_REACH);
                 }
             } else if droid.alert == Some(Alert::Evasion) {
                 if droid.route.is_empty() {
@@ -1104,7 +1105,7 @@ impl Inhabitants {
                                     (1..=4).all(|i| floor_at(from + way * (i as f32 / 4.0)))
                                 })
                                 .unwrap_or(droid.lost_at);
-                            droid.route = route_to(grid, origin, droid.feet, guess);
+                            droid.route = route_to(grid, origin, droid.feet, guess, CHASE_REACH);
                         }
                         // Got there, or has nowhere to go: it looks about.
                         None => {
