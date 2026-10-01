@@ -113,6 +113,8 @@ const KILL_LIMIT: u32 = 30;
 /// Walk grid spacing, and how far from any wall a droid's middle keeps.
 const CELL: f32 = 0.5;
 const BODY_RADIUS: f32 = 0.4;
+/// How much room a floor up above needs over it to be stood on.
+const HEADROOM: f32 = 2.0;
 
 /// How fast a droid goes advancing and running for cover, in meters per second, if its model has
 /// no jog or run to go by; with them it goes at their own pace, so its feet keep to the floor.
@@ -688,7 +690,25 @@ impl Battle {
         Self::blocked(graph, from, to).is_none()
     }
 
-    /// Samples the arena for floor a droid can stand on, with room round it.
+    /// How high the highest floor at `spot` is with [`HEADROOM`] over it, looking down from
+    /// `top`, over everything: a ray dropped through the arena surface by surface, since a cast
+    /// meets only the first surface of the arena's one collider.
+    fn top_floor(graph: &Graph, spot: Vector3<f32>, top: f32) -> Option<f32> {
+        let mut above: Option<f32> = None;
+        let mut from = top;
+        loop {
+            let start = Vector3::new(spot.x, from, spot.z);
+            let hit = from - Self::blocked(graph, start, Vector3::new(spot.x, -1.0, spot.z))?;
+            if above.is_some_and(|above| above - hit >= HEADROOM) {
+                return Some(hit);
+            }
+            above = Some(hit);
+            from = hit - 0.01;
+        }
+    }
+
+    /// Samples the arena for floor a droid can stand on, with room round it: the arena's floor,
+    /// and whatever stairs lead up from it to, a step at a time.
     fn survey(&mut self, graph: &Graph) {
         let mut bounds = AxisAlignedBoundingBox::default();
         for node in graph.linear_iter() {
@@ -702,6 +722,17 @@ impl Battle {
         let depth = ((bounds.max.z - bounds.min.z) / CELL).ceil() as usize;
         let origin = Vector3::new(bounds.min.x, 0.0, bounds.min.z);
         let mut grid = WalkGrid::new(width, depth, CELL);
+        let roomy = |spot: Vector3<f32>, floor: f32| {
+            let waist = Vector3::new(spot.x, floor + 0.5, spot.z);
+            let head = Vector3::new(spot.x, floor + 1.6, spot.z);
+            [Vector3::x(), -Vector3::x(), Vector3::z(), -Vector3::z()]
+                .iter()
+                .all(|dir| {
+                    Self::clear(graph, waist, waist + dir * BODY_RADIUS)
+                        && Self::clear(graph, head, head + dir * BODY_RADIUS)
+                })
+                && Self::clear(graph, waist, head)
+        };
         for z in 0..depth {
             for x in 0..width {
                 let spot = grid.center(origin, (x, z));
@@ -714,17 +745,27 @@ impl Battle {
                 if floor > 0.3 {
                     continue;
                 }
-                let waist = Vector3::new(spot.x, floor + 0.5, spot.z);
-                let head = Vector3::new(spot.x, floor + 1.6, spot.z);
-                let roomy = [Vector3::x(), -Vector3::x(), Vector3::z(), -Vector3::z()]
-                    .iter()
-                    .all(|dir| {
-                        Self::clear(graph, waist, waist + dir * BODY_RADIUS)
-                            && Self::clear(graph, head, head + dir * BODY_RADIUS)
-                    });
-                if roomy && Self::clear(graph, waist, head) {
+                if roomy(spot, floor) {
                     grid.set(x, z, true);
                     grid.set_floor(x, z, floor);
+                }
+            }
+        }
+        // Then up any stairs: out from the floor, onto floor a step higher or lower, with room.
+        let mut queue: std::collections::VecDeque<(usize, usize)> = grid.walkable_cells().collect();
+        while let Some((x, z)) = queue.pop_front() {
+            for (nx, nz) in [(x.wrapping_sub(1), z), (x + 1, z), (x, z.wrapping_sub(1)), (x, z + 1)] {
+                if nx >= width || nz >= depth || grid.is_walkable(nx, nz) {
+                    continue;
+                }
+                let spot = grid.center(origin, (nx, nz));
+                let Some(floor) = Self::top_floor(graph, spot, bounds.max.y + 1.0) else {
+                    continue;
+                };
+                if (floor - grid.floor(x, z)).abs() <= hydroxus_ai::grid::MAX_CLIMB && roomy(spot, floor) {
+                    grid.set(nx, nz, true);
+                    grid.set_floor(nx, nz, floor);
+                    queue.push_back((nx, nz));
                 }
             }
         }

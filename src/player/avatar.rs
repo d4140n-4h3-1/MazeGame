@@ -101,6 +101,8 @@ use fyrox::{
     scene::{
         animation::{Animation, AnimationContainer, AnimationPlayer},
         base::BaseBuilder,
+        collider::Collider,
+        graph::physics::RayCastOptions,
         light::{
             point::{PointLight, PointLightBuilder},
             BaseLightBuilder,
@@ -108,6 +110,7 @@ use fyrox::{
         graph::Graph,
         mesh::Mesh,
         node::Node,
+        rigidbody::{RigidBody, RigidBodyType},
         Scene,
     },
 };
@@ -286,6 +289,16 @@ const RUN_PACE: f32 = 0.7;
 const HIPS: &str = "DEF-spine";
 /// Its feet, one of which is planted on the floor at a time, walking.
 const FEET: [&str; 2] = ["DEF-foot.L", "DEF-foot.R"];
+/// The tops of its legs and its knees, left and right, which bend each leg to put its foot down
+/// on a step (see [`Avatar::plant_feet`]): the thigh swings from the hip, the shin from the knee.
+const THIGHS: [&str; 2] = ["DEF-thigh.L", "DEF-thigh.R"];
+const SHINS: [&str; 2] = ["DEF-shin.L", "DEF-shin.R"];
+/// How far up or down from the floor the droid stands on a foot is put down on a step, at most,
+/// in meters: a stair's step, or two, and not off a ledge.
+const MOST_STEP: f32 = 0.6;
+/// How quickly a foot comes to the step under it, like a rate: after 1/FOOTING_RATE seconds,
+/// about two thirds of the way.
+const FOOTING_RATE: f32 = 18.0;
 /// The pistol in its right hand, which everything on it hangs off, as long as [`MOTION`] does not
 /// say otherwise.
 const PISTOL: &str = "pistol";
@@ -654,6 +667,77 @@ fn ground(stances: &[Stance]) -> f32 {
         .iter()
         .flat_map(|stance| stance.feet.map(|foot| foot.y))
         .fold(f32::INFINITY, f32::min)
+}
+
+/// The bones from the droid's top down to the top of each leg and to each knee, left and right.
+#[derive(Debug, Clone, PartialEq)]
+struct Legs {
+    thighs: [Vec<Handle<Node>>; 2],
+    shins: [Vec<Handle<Node>>; 2],
+}
+
+/// How far the floor under `foot` is above `floor`, the floor the droid stands on, in meters: a
+/// step up or down, as far as [`MOST_STEP`] either way; 0 with only more floor there. Only the
+/// level counts - what stands still - not anyone's body or parts.
+fn step_under(graph: &Graph, foot: Vector3<f32>, floor: f32) -> f32 {
+    let mut hits = Vec::new();
+    graph.physics.cast_ray(
+        RayCastOptions {
+            ray_origin: Point3::new(foot.x, floor + MOST_STEP, foot.z),
+            ray_direction: -Vector3::y(),
+            max_len: 2.0 * MOST_STEP,
+            groups: Default::default(),
+            sort_results: true,
+        },
+        &mut hits,
+    );
+    let fixed = |collider: Handle<Collider>| {
+        let body = graph[collider.transmute::<Node>()].parent();
+        graph
+            .try_get_of_type::<RigidBody>(body)
+            .is_ok_and(|body| body.body_type() == RigidBodyType::Static)
+    };
+    hits.iter()
+        .find(|hit| fixed(hit.collider))
+        .map_or(0.0, |hit| hit.position.y - floor)
+}
+
+/// Bends the leg from `thigh` down through `shin` in `pose` to bring the end of `foot` to
+/// `wanted`, in the droid's own terms - as near as the leg reaches - and turns the foot back to
+/// `turned`, as it was: the knee bends in the plane it already bends in, then the thigh swings
+/// the foot round onto `wanted`.
+fn reach(
+    pose: &mut FxHashMap<Handle<Node>, Bone>,
+    thigh: &[Handle<Node>],
+    shin: &[Handle<Node>],
+    foot: &[Handle<Node>],
+    wanted: Vector3<f32>,
+    turned: UnitQuaternion<f32>,
+) {
+    let at = |pose: &FxHashMap<Handle<Node>, Bone>, chain: &[Handle<Node>]| place(chain, |bone| pose[&bone]).position;
+    let (hip, knee, ankle) = (at(pose, thigh), at(pose, shin), at(pose, foot));
+    let (up, down) = (hip - knee, ankle - knee);
+    let (upper, lower) = (up.norm(), down.norm());
+    if upper < 1.0e-4 || lower < 1.0e-4 {
+        return;
+    }
+    let far = (wanted - hip).norm().clamp((upper - lower).abs() + 1.0e-3, upper + lower - 1.0e-3);
+    let bent = (up.dot(&down) / (upper * lower)).clamp(-1.0, 1.0).acos();
+    let bend = ((upper * upper + lower * lower - far * far) / (2.0 * upper * lower)).clamp(-1.0, 1.0).acos();
+    // Straight, the knee goes forward, the shin swinging back about the droid's left-right.
+    let axis = up.cross(&down).try_normalize(1.0e-6).unwrap_or_else(Vector3::x);
+    let axis = fyrox::core::algebra::Unit::new_unchecked(axis);
+    rotate_bone(pose, shin, UnitQuaternion::from_axis_angle(&axis, bend - bent));
+    let ankle = at(pose, foot);
+    if let Some(swing) = UnitQuaternion::rotation_between(&(ankle - hip), &(wanted - hip)) {
+        rotate_bone(pose, thigh, swing);
+    }
+    if let Some((&last, above)) = foot.split_last() {
+        let parent = place(above, |bone| pose[&bone]).rotation;
+        if let Some(bone) = pose.get_mut(&last) {
+            bone.rotation = parent.inverse() * turned;
+        }
+    }
 }
 
 /// The bones from the droid's top down to its hips and to each foot, to find where those are in
@@ -1311,6 +1395,10 @@ pub struct Avatar {
     /// Every bone, at rest.
     rest: FxHashMap<Handle<Node>, Bone>,
     skeleton: Skeleton,
+    /// Its legs, if the model has them to bend; and how far up each foot is put down on a step
+    /// from the floor the droid stands on, in meters, left and right, as of this frame.
+    legs: Option<Legs>,
+    footing: [f32; 2],
     /// The hips at rest, in the model's own terms.
     rest_hips: Bone,
     /// The highest bones the animations move, each with where the bone it hangs off is in the
@@ -1616,6 +1704,14 @@ impl Avatar {
             .collect::<FxHashMap<_, _>>();
         let rest_hips = place(&skeleton.hips, |bone| rest[&bone]);
         let find = |name: &str| graph.find_by_name(root, name).map(|(node, _)| node);
+        let legs = (|| {
+            let [left, right] = THIGHS.map(find);
+            let [left_knee, right_knee] = SHINS.map(find);
+            Some(Legs {
+                thighs: [chain(parent_of, root, left?), chain(parent_of, root, right?)],
+                shins: [chain(parent_of, root, left_knee?), chain(parent_of, root, right_knee?)],
+            })
+        })();
         let square = (|| {
             let [left, right] = SHOULDERS.map(find);
             let head = chain(parent_of, root, find(HEAD)?);
@@ -2073,6 +2169,8 @@ impl Avatar {
             travel: None,
             rest,
             skeleton,
+            legs,
+            footing: [0.0; 2],
             rest_hips,
             tops,
             playing: None,
@@ -2667,10 +2765,55 @@ impl Avatar {
                 rotate_bone(&mut target, &self.right_forearm, dip);
             }
         }
+        // Last of all, on top of the rest: on stairs, each foot down on its own step.
+        self.plant_feet(graph, &mut target, dt);
         for (bone, pose) in target {
             let transform = graph[bone].local_transform_mut();
             transform.set_position(pose.position);
             transform.set_rotation(pose.rotation);
+        }
+    }
+
+    /// Puts each foot down on what is under it - a step up or down from the floor the droid
+    /// stands on - in `target`: the hips go down as far as the lower foot needs, and each leg
+    /// bends at the knee to bring its foot onto its own step, keeping the lift and the angle the
+    /// animation gives it, so that it walks up and down stairs a step at a time. Each foot comes
+    /// to its step over a moment. On level floor, and off the ground, it changes nothing.
+    fn plant_feet(&mut self, graph: &Graph, target: &mut FxHashMap<Handle<Node>, Bone>, dt: f32) {
+        let Some(legs) = self.legs.as_ref() else {
+            return;
+        };
+        let grounded = self.leaping.is_none() && self.skidding.is_none() && self.airborne == 0.0;
+        // As of the last frame: the floor the droid stands on, and where its feet were over it.
+        let floor = graph[self.root].global_position().y;
+        let follow = 1.0 - (-FOOTING_RATE * dt).exp();
+        for (footing, chain) in self.footing.iter_mut().zip(&self.skeleton.feet) {
+            let wanted = match (grounded, chain.last()) {
+                (true, Some(&foot)) => step_under(graph, graph[foot].global_position(), floor),
+                _ => 0.0,
+            };
+            *footing += (wanted - *footing) * follow;
+        }
+        if self.footing.iter().all(|footing| footing.abs() < 1.0e-3) {
+            return;
+        }
+        if self.skeleton.feet.iter().chain(&legs.thighs).chain(&legs.shins).flatten().any(|bone| !target.contains_key(bone)) {
+            return;
+        }
+        // In the model's own meters, which the root scales.
+        let up = self.footing.map(|footing| footing / SCALE);
+        let feet = self.skeleton.feet.each_ref().map(|chain| place(chain, |bone| target[&bone]));
+        let drop = up[0].min(up[1]).min(0.0);
+        if let Some((&hips, above)) = self.skeleton.hips.split_last() {
+            let parent = place(above, |bone| target[&bone]).rotation;
+            if let Some(pose) = target.get_mut(&hips) {
+                pose.position += parent.inverse() * Vector3::new(0.0, drop, 0.0);
+            }
+        }
+        for side in 0..2 {
+            let wanted = feet[side].position + Vector3::new(0.0, up[side], 0.0);
+            let leg = (&legs.thighs[side], &legs.shins[side], &self.skeleton.feet[side]);
+            reach(target, leg.0, leg.1, leg.2, wanted, feet[side].rotation);
         }
     }
 
@@ -3732,6 +3875,65 @@ mod tests {
         }
         let top = place(&bones, |bone| target[&bone]).rotation;
         assert!((top.angle() - 0.9).abs() < 1e-5, "the shoulders all of it");
+    }
+
+    /// A leg standing on the floor: the hip a meter up, the knee a little forward, the foot
+    /// turned a little, toes down.
+    fn leg() -> ([Handle<Node>; 3], FxHashMap<Handle<Node>, Bone>) {
+        let bones = [Handle::new(1, 1), Handle::new(2, 1), Handle::new(3, 1)];
+        let pose = |x: f32, y: f32, z: f32, turn: f32| Bone {
+            position: Vector3::new(x, y, z),
+            rotation: UnitQuaternion::from_axis_angle(&Vector3::x_axis(), turn),
+        };
+        let poses = [pose(0.1, 1.0, 0.0, 0.0), pose(0.0, -0.48, 0.08, 0.0), pose(0.0, -0.48, -0.08, 0.2)];
+        (bones, bones.into_iter().zip(poses).collect())
+    }
+
+    #[test]
+    fn a_foot_is_brought_up_onto_a_step_or_down_off_one_keeping_its_angle() {
+        // Down off a step, the hips go down too (see `Avatar::plant_feet`): the leg alone has only
+        // the bend in its knee to reach down with.
+        for step in [0.25, 0.4, -0.01] {
+            let ([thigh, shin, foot], mut pose) = leg();
+            let at = |pose: &FxHashMap<Handle<Node>, Bone>| place(&[thigh, shin, foot], |bone| pose[&bone]);
+            let before = at(&pose);
+            let hip = place(&[thigh], |bone| pose[&bone]).position;
+            let wanted = before.position + Vector3::new(0.0, step, 0.0);
+            reach(&mut pose, &[thigh], &[thigh, shin], &[thigh, shin, foot], wanted, before.rotation);
+            let after = at(&pose);
+            assert!((after.position - wanted).norm() < 1.0e-4, "{step}: {:?} for {wanted:?}", after.position);
+            assert!(after.rotation.angle_to(&before.rotation) < 1.0e-4, "{step}: the foot keeps its angle");
+            assert!((place(&[thigh], |bone| pose[&bone]).position - hip).norm() < 1.0e-6, "the hip stays put");
+            // The knee still bends forward, and only goes further forward stepping up.
+            let knee = place(&[thigh, shin], |bone| pose[&bone]).position;
+            assert!(knee.z > 0.0, "{step}: {knee:?}");
+        }
+    }
+
+    #[test]
+    fn out_of_reach_the_leg_straightens_towards_where_the_foot_is_wanted() {
+        let ([thigh, shin, foot], mut pose) = leg();
+        let before = place(&[thigh, shin, foot], |bone| pose[&bone]);
+        let hip = place(&[thigh], |bone| pose[&bone]).position;
+        let wanted = before.position - Vector3::new(0.0, 0.5, 0.0);
+        reach(&mut pose, &[thigh], &[thigh, shin], &[thigh, shin, foot], wanted, before.rotation);
+        let (knee, ankle) = (place(&[thigh, shin], |bone| pose[&bone]).position, place(&[thigh, shin, foot], |bone| pose[&bone]).position);
+        let straight = (knee - hip).normalize().dot(&(ankle - knee).normalize());
+        assert!(straight > 0.99, "{straight}");
+        assert!((ankle - hip).normalize().dot(&(wanted - hip).normalize()) > 0.9999);
+    }
+
+    #[test]
+    fn a_foot_already_where_it_is_wanted_is_left_as_it_was() {
+        let ([thigh, shin, foot], mut pose) = leg();
+        let was = pose.clone();
+        let before = place(&[thigh, shin, foot], |bone| pose[&bone]);
+        reach(&mut pose, &[thigh], &[thigh, shin], &[thigh, shin, foot], before.position, before.rotation);
+        for (bone, then) in &was {
+            let now = pose[bone];
+            assert!((now.position - then.position).norm() < 1.0e-5);
+            assert!(now.rotation.angle_to(&then.rotation) < 1.0e-4, "{bone:?}");
+        }
     }
 
     #[test]

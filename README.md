@@ -111,9 +111,17 @@ their animations; the crate decides what they make of what is round them.
 - **A choice of maps for capture the flag.** Capture the Flag in the main menu opens a page of
   maps: Lanes, the first, and Balconies, `data/arena/ctf_balconies.glb`, on two floors - each
   flag in an open well under a balcony round three sides of it, catwalks along the side walls
-  joining the balconies, a raised hub in the middle, and stairs between them all. The droids keep
-  to the ground floor, so the high ground is the player's. `data/arena/ctf_balconies.py` builds
-  it in Blender, its cover laid out at random from a seed and mirrored end to end.
+  joining the balconies, a raised hub in the middle, and stairs between them all.
+  `data/arena/ctf_balconies.py` builds it in Blender, its cover laid out at random from a seed and
+  mirrored end to end.
+- **Stairs.** The droids find their way up and down stairs: the walk grid's floor in each cell is
+  now the highest with headroom over it, and only what can be climbed to from the ground a
+  stair's step at a time (hydroxus-ai's `MAX_CLIMB`, 0.55 m) is walkable - so stairs and the
+  floors they lead to are, and the tops of crates and railings no longer are. A droid on the
+  stairs puts each foot down on its own step: the hips go down to the lower foot and each leg
+  bends at the knee to reach its step, keeping the walk's lift and the foot's angle. The player
+  walks up steps of up to 0.4 m too, the eyes coming up after the body over a moment. The team
+  battle climbs as well.
 
 30 September 2026:
 
@@ -657,6 +665,9 @@ it:
 - FBX models are taken to be in centimeters and scaled down.
 - Ground is only walkable with a **ceiling** somewhere above it, and the floor has to sit at or
   above the game's own safety floor, whose top is at -0.05 m.
+- **Floors up above** are walkable where stairs lead up to them from the ground, each step no
+  more than 0.55 m: a spot keeps one floor, the highest with 2 m of headroom, so make raised
+  floors solid down to the ground rather than leaving room under them.
 
 Anything in the model that glows by itself goes dark with the lights.
 

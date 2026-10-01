@@ -136,6 +136,10 @@ pub struct Player {
     swing: f32,
     /// How far the knees are still bent under a landing, in meters.
     landing: f32,
+    /// How far the head has yet to come up after the body stepped up onto a stair, in meters;
+    /// and how long ago it did, while it is still carried over the step's edge, in seconds.
+    stepped: f32,
+    stepping: Option<f32>,
     /// How far the head is rolled into its movement, in radians.
     roll: f32,
     /// The yaw last frame, to see how fast the player is turning.
@@ -210,6 +214,8 @@ impl Default for Player {
             stride: 0.0,
             swing: 0.0,
             landing: 0.0,
+            stepped: 0.0,
+            stepping: None,
             roll: 0.0,
             last_yaw: 0.0,
             posture: Posture::Standing,
@@ -386,6 +392,8 @@ impl Player {
         self.fall_speed = 0.0;
         self.since_jump = None;
         self.landing = 0.0;
+        self.stepped = 0.0;
+        self.stepping = None;
         self.stride = 0.0;
         self.swing = 0.0;
         self.roll = 0.0;
@@ -400,6 +408,9 @@ impl Player {
     pub fn update(&mut self, graph: &mut Graph, dt: f32, can_move: bool) {
         let was_grounded = self.grounded;
         self.grounded = self.on_ground(graph);
+        // Lifted onto a stair, it is carried over the edge until it stands on the step.
+        self.carry_over_step(graph, dt);
+        self.grounded |= self.stepping.is_some();
         // Landed: the knees take whatever the body was falling at as of last frame, since the
         // solver has already taken it out of the body by now.
         if self.grounded && !was_grounded {

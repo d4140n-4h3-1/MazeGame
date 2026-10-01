@@ -37,6 +37,9 @@ fn bob(phase: f32, swing: f32) -> (f32, f32) {
     )
 }
 
+/// How quickly the head comes up after the body steps up a stair, like a rate: the body goes up
+/// at once, the eyes over a moment, so that climbing stairs does not jolt the view.
+const STEP_EASING: f32 = 14.0;
 /// How far the knees give on landing, in meters per meter per second of fall, and the most they
 /// can give however far the drop.
 const LANDING_DIP: f32 = 0.03;
@@ -124,6 +127,7 @@ impl Player {
         };
         self.swing += (wanted - self.swing) * (1.0 - (-BOB_EASING * dt).exp());
         self.landing *= (-LANDING_EASING * dt).exp();
+        self.stepped *= (-STEP_EASING * dt).exp();
 
         let yaw_rate = if dt > 0.0 {
             (self.yaw - self.last_yaw) / dt
@@ -152,7 +156,7 @@ impl Player {
         // moves it out round the corner, and tilts it as far as that is to the side.
         let head = Vector3::new(
             self.lean.x - sideways,
-            FEET + self.eyes - LEAN_DIP * leaning + up - self.landing,
+            FEET + self.eyes - LEAN_DIP * leaning + up - self.landing - self.stepped,
             self.lean.z,
         );
         let tilt = UnitQuaternion::from_axis_angle(

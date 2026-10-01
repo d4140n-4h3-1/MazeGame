@@ -1,8 +1,17 @@
-//! Moving the body: speeding up and slowing down along the floor, jumping, and feeling for the
-//! floor under the feet.
+//! Moving the body: speeding up and slowing down along the floor, jumping, stepping up stairs,
+//! and feeling for the floor under the feet.
 
 use super::{posture::Posture, Player, FEET};
-use fyrox::{core::algebra::Vector3, scene::graph::Graph};
+use fyrox::{
+    core::{algebra::Vector3, pool::Handle},
+    graph::SceneGraph,
+    scene::{
+        collider::Collider,
+        graph::Graph,
+        node::Node,
+        rigidbody::{RigidBody, RigidBodyType},
+    },
+};
 
 /// How much harder the player slows down than speeds up: stopping only needs the feet planted,
 /// where getting going has to push a whole body along.
@@ -17,6 +26,22 @@ const LOW_JUMP_SPEED: f32 = 1.5;
 /// How far below the feet to look for a floor, in meters. Slack enough that resting on one, with
 /// the small overlaps the solver leaves, still reads as standing on it.
 const GROUND_REACH: f32 = 0.15;
+/// The highest step the body walks up without a jump, in meters: a stair's, not a crate's.
+const STEP_UP: f32 = 0.4;
+/// The lowest that is worth stepping up rather than sliding over, in meters.
+const STEP_LEAST: f32 = 0.02;
+/// How far out from its middle the body feels ahead for a step, in meters: its radius and a
+/// little more.
+const STEP_REACH: f32 = 0.45;
+/// How high over the feet the body feels for a step in its way, in meters: the bottom of the
+/// capsule curves up away from a step's edge, which a ray any higher would miss.
+const ANKLE: f32 = 0.05;
+/// How long the body is carried over a step's edge, at most, in seconds: long enough to walk
+/// its middle out over the step at a crawl.
+const OVER_STEP: f32 = 1.5;
+/// Below this speed along the floor, in meters per second, the body has stopped on the edge.
+const STOPPED: f32 = 0.05;
+
 /// The share of the usual acceleration the player has in the air. Feet push against a floor, not
 /// against air; but a jump that cannot be steered at all feels like being on rails, so not zero.
 const AIR_CONTROL: f32 = 0.15;
@@ -135,13 +160,149 @@ impl Player {
             self.since_jump = Some(0.0);
         }
         body.set_lin_vel(velocity);
+        if jumped {
+            self.stepping = None;
+            graph[self.body].set_gravity_scale(1.0);
+        } else if self.grounded {
+            self.step_up(graph, horizontal, dt);
+        }
         (horizontal, jumped, low)
+    }
+
+    /// Lifts the body up onto a stair in its way as it walks into it: something that stands still
+    /// just ahead at the ankles, with a top no higher than [`STEP_UP`] and room over that to go
+    /// on. The capsule's round bottom would only push against the step's edge; the eyes come up
+    /// after it over a moment (see `place_head`).
+    fn step_up(&mut self, graph: &mut Graph, horizontal: Vector3<f32>, dt: f32) {
+        let Some(way) = horizontal.try_normalize(0.1) else {
+            return;
+        };
+        let fixed = |graph: &Graph, collider: Handle<Collider>| {
+            let body = graph[collider.transmute::<Node>()].parent();
+            graph
+                .try_get_of_type::<RigidBody>(body)
+                .is_ok_and(|body| body.body_type() == RigidBodyType::Static)
+        };
+        let feet = graph[self.body].global_position() + Vector3::new(0.0, FEET, 0.0);
+        let reach = STEP_REACH + horizontal.norm() * dt;
+        let ankle = feet + Vector3::new(0.0, ANKLE, 0.0);
+        let Some((ahead, wall)) = self.first_hit(graph, ankle, way, reach) else {
+            return;
+        };
+        if !fixed(graph, wall) {
+            return;
+        }
+        // Onto the top of it, just past its edge.
+        let over = feet + way * (ahead + 0.05) + Vector3::new(0.0, STEP_UP + ANKLE, 0.0);
+        let Some((down, _)) = self.first_hit(graph, over, -Vector3::y(), STEP_UP + ANKLE) else {
+            return;
+        };
+        let rise = STEP_UP + ANKLE - down;
+        if !(STEP_LEAST..=STEP_UP).contains(&rise) {
+            return;
+        }
+        // With room to go on over it: a wall would stop a ray at the step's height too.
+        let above = feet + Vector3::new(0.0, rise + ANKLE, 0.0);
+        if self.first_hit(graph, above, way, reach).is_some() {
+            return;
+        }
+        // Up, and held there - without its weight - until its middle is out over the step:
+        // the ground is felt for straight under it, and its round bottom would only drop back
+        // onto the edge (see `carry_over_step`).
+        let body = &mut graph[self.body];
+        let mut velocity = body.lin_vel();
+        velocity.y = 0.0;
+        body.set_lin_vel(velocity);
+        body.set_gravity_scale(0.0);
+        let at = **body.local_transform().position();
+        body.local_transform_mut().set_position(at + Vector3::new(0.0, rise, 0.0));
+        self.stepped += rise;
+        self.stepping = Some(0.0);
+    }
+
+    /// Carries the body on over the edge of the step it was lifted onto, weightless, until it
+    /// stands on the step, stops, or [`OVER_STEP`] runs out; then it has its weight again.
+    pub(super) fn carry_over_step(&mut self, graph: &mut Graph, dt: f32) {
+        let Some(since) = self.stepping.as_mut() else {
+            return;
+        };
+        *since += dt;
+        let velocity = graph[self.body].lin_vel();
+        let stopped = Vector3::new(velocity.x, 0.0, velocity.z).norm() < STOPPED;
+        if self.grounded || stopped || *since > OVER_STEP {
+            self.stepping = None;
+            graph[self.body].set_gravity_scale(1.0);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fyrox::{
+        core::algebra::Vector2,
+        scene::{
+            base::BaseBuilder,
+            collider::{ColliderBuilder, ColliderShape},
+            graph::GraphUpdateSwitches,
+            rigidbody::RigidBodyBuilder,
+            transform::TransformBuilder,
+        },
+    };
+
+    /// A box standing still, from `min` to `max`.
+    fn block(graph: &mut Graph, min: Vector3<f32>, max: Vector3<f32>) {
+        let collider = ColliderBuilder::new(
+            BaseBuilder::new().with_local_transform(
+                TransformBuilder::new().with_local_position((min + max) / 2.0).build(),
+            ),
+        )
+        .with_shape(ColliderShape::cuboid((max.x - min.x) / 2.0, (max.y - min.y) / 2.0, (max.z - min.z) / 2.0))
+        .build(graph);
+        RigidBodyBuilder::new(BaseBuilder::new().with_child(collider))
+            .with_body_type(RigidBodyType::Static)
+            .build(graph);
+    }
+
+    /// The player walking forward along +z for `seconds` over a floor, from just short of
+    /// whatever `ahead` puts in the way at z = 1: where their feet end up.
+    fn walk_into(ahead: impl FnOnce(&mut Graph), seconds: f32) -> Vector3<f32> {
+        let mut graph = Graph::new();
+        block(&mut graph, Vector3::new(-5.0, -1.0, -5.0), Vector3::new(5.0, 0.0, 20.0));
+        ahead(&mut graph);
+        let mut player = Player::spawn(&mut graph);
+        player.teleport(&mut graph, Vector3::new(0.0, -FEET + 0.01, 0.0), 0.0);
+        player.on_key(fyrox::keyboard::KeyCode::KeyW, true);
+        let dt = 1.0 / 60.0;
+        for _ in 0..(seconds / dt) as usize {
+            player.update(&mut graph, dt, true);
+            graph.update(Vector2::new(800.0, 600.0), dt, GraphUpdateSwitches::default());
+        }
+        player.feet(&graph)
+    }
+
+    #[test]
+    fn it_walks_up_stairs() {
+        // Twelve steps of 0.25 m, 0.35 m deep, up to a floor 3 m up: a flight from the arena.
+        let feet = walk_into(
+            |graph| {
+                for n in 0..12 {
+                    let z = 1.0 + n as f32 * 0.35;
+                    block(graph, Vector3::new(-1.25, 0.0, z), Vector3::new(1.25, 0.25 * (n + 1) as f32, 20.0));
+                }
+            },
+            12.0,
+        );
+        assert!(feet.y > 2.9, "up to the top: {feet:?}");
+        assert!(feet.z > 1.0 + 12.0 * 0.35, "and on along it: {feet:?}");
+        assert!(feet.y < 3.1, "and no higher: {feet:?}");
+    }
+
+    #[test]
+    fn a_crate_is_not_a_step() {
+        let feet = walk_into(|graph| block(graph, Vector3::new(-1.25, 0.0, 1.0), Vector3::new(1.25, 1.0, 2.0)), 2.0);
+        assert!(feet.y < 0.1 && feet.z < 1.0, "stopped against it: {feet:?}");
+    }
     use crate::player::posture::STANDING_ACCELERATION;
 
     /// Runs `ramp` at 60 Hz until the velocity settles on `target`, and returns how long it took

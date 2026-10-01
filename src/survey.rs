@@ -2,8 +2,16 @@
 //!
 //! This is the scene side of [`layout`](crate::layout): it samples the level's colliders on a
 //! grid of cells, and turns cells back into places in the world.
+//!
+//! A cell's floor is the highest in it with headroom over it, under a ceiling, and room around:
+//! the ground, or a stair, or a floor up above. A cell holds one floor, so ground under a floor
+//! up above is left out. Of those, the walkable cells are the ground and whatever can be climbed
+//! to from it a stair's step at a time ([`hydroxus_ai::grid::MAX_CLIMB`]) - not the tops of
+//! crates or walls, which no stairs lead up to.
 
 use crate::layout::WalkGrid;
+use hydroxus_ai::grid::MAX_CLIMB;
+use std::collections::VecDeque;
 use fyrox::{
     core::{
         algebra::{Point3, Vector3},
@@ -19,6 +27,11 @@ use fyrox::{
 
 /// Spacing of the walkability samples, in meters.
 pub(crate) const CELL_SIZE: f32 = 0.5;
+
+/// How much room a floor needs over it to be stood on.
+const HEADROOM: f32 = 2.0;
+/// How high a floor can be and still be the ground, which the climbing starts from.
+const GROUND: f32 = 0.5;
 
 /// Samples the maze for walkable ground, returning the grid and the world position of its corner.
 /// `maze` is the level's collider, which must exist already, and `ignore` a mesh that is not part
@@ -45,21 +58,48 @@ pub fn survey(
     let depth = ((max.z - min.z) / CELL_SIZE).ceil() as usize;
     let mut grid = WalkGrid::new(width, depth, CELL_SIZE);
     let origin = Vector3::new(min.x, 0.0, min.z);
-    let mut walkable = 0;
+    // Each cell's floor, if it has one.
+    let mut floors = vec![None; width * depth];
     for z in 0..depth {
         for x in 0..width {
-            let spot = cell_center(origin, x, z);
-            if let Some(floor) = open_floor(graph, maze, spot) {
-                grid.set(x, z, true);
-                grid.set_floor(x, z, floor);
+            floors[z * width + x] = top_floor(graph, maze, cell_center(origin, x, z), max.y + 1.0);
+        }
+    }
+    // Out from the ground, onto every floor a step from one already walkable.
+    let mut queue = VecDeque::new();
+    for (i, floor) in floors.iter().enumerate() {
+        if floor.is_some_and(|floor| floor <= GROUND) {
+            queue.push_back((i % width, i / width));
+        }
+    }
+    for &(x, z) in &queue {
+        grid.set(x, z, true);
+        grid.set_floor(x, z, floors[z * width + x].unwrap_or_default());
+    }
+    let mut walkable = queue.len();
+    let ground = walkable;
+    while let Some((x, z)) = queue.pop_front() {
+        let neighbours = [(x.wrapping_sub(1), z), (x + 1, z), (x, z.wrapping_sub(1)), (x, z + 1)];
+        for (nx, nz) in neighbours {
+            if nx >= width || nz >= depth || grid.is_walkable(nx, nz) {
+                continue;
+            }
+            let Some(floor) = floors[nz * width + nx] else {
+                continue;
+            };
+            if (floor - grid.floor(x, z)).abs() <= MAX_CLIMB {
+                grid.set(nx, nz, true);
+                grid.set_floor(nx, nz, floor);
                 walkable += 1;
+                queue.push_back((nx, nz));
             }
         }
     }
     Log::info(format!(
-        "Maze: {width}x{depth} cells over {:.1}x{:.1} m, {walkable} walkable",
+        "Maze: {width}x{depth} cells over {:.1}x{:.1} m, {walkable} walkable, {} of them up off the ground",
         max.x - min.x,
-        max.z - min.z
+        max.z - min.z,
+        walkable - ground
     ));
     Some((grid, origin))
 }
@@ -128,22 +168,36 @@ pub fn draw_map(grid: &WalkGrid, start: (usize, usize), exit: (usize, usize)) ->
     text
 }
 
-/// How high the floor is at `spot`, if a person could stand there inside the maze's tubes: there
-/// is maze floor just below, maze ceiling somewhere above, and room around the point.
-fn open_floor(graph: &Graph, maze: Handle<Collider>, spot: Vector3<f32>) -> Option<f32> {
-    let probe = Vector3::new(spot.x, 1.0, spot.z);
-    let on_maze = |hit: Option<(Vector3<f32>, Handle<Collider>)>| {
-        hit.filter(|&(_, collider)| collider == maze)
-            .map(|(position, _)| position)
-    };
-    let ground = on_maze(first_hit(graph, probe, -Vector3::y(), 1.5))?;
-    // Open sky: this is outside the tubes.
-    on_maze(first_hit(graph, probe, Vector3::y(), 20.0))?;
-    let chest = Vector3::new(spot.x, ground.y + 1.0, spot.z);
+/// How high the highest floor at `spot` is that has headroom over it, under a ceiling, with room
+/// around: a ray is dropped from `top`, over everything, through all of the maze, surface by
+/// surface - a cast meets only the first surface of a collider - and the floor is the first it
+/// meets with [`HEADROOM`] or more of open air above it.
+fn top_floor(graph: &Graph, maze: Handle<Collider>, spot: Vector3<f32>, top: f32) -> Option<f32> {
+    /// Below a surface, to cast on from past it; and the most surfaces a cell is looked through.
+    const PAST: f32 = 0.01;
+    const MOST: usize = 32;
+    let mut heights = Vec::new();
+    let mut from = top;
+    while heights.len() < MOST {
+        let below = Vector3::new(spot.x, from, spot.z);
+        let Some((hit, collider)) = first_hit(graph, below, -Vector3::y(), from + 1.0) else {
+            break;
+        };
+        if collider == maze {
+            heights.push(hit.y);
+        }
+        from = hit.y - PAST;
+    }
+    // The first surface down is the top of the roof, with open sky over it.
+    let floor = heights
+        .windows(2)
+        .find(|pair| pair[0] - pair[1] >= HEADROOM)
+        .map(|pair| pair[1])?;
+    let chest = Vector3::new(spot.x, floor + 1.0, spot.z);
     [Vector3::x(), -Vector3::x(), Vector3::z(), -Vector3::z()]
         .iter()
         .all(|dir| first_hit(graph, chest, *dir, 0.45).is_none())
-        .then_some(ground.y)
+        .then_some(floor)
 }
 
 fn first_hit(

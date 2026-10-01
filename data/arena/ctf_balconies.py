@@ -1,7 +1,8 @@
 """
 Capture-the-flag arena on two floors: two mirrored bases, each with its flag in an open well
-under a U-shaped balcony, catwalks along both side walls joining the balconies, a raised centre
-hub, stairs between the floors, and random cover mirrored so neither side gets a better layout.
+inside a U-shaped raised floor (the balcony), catwalks along both side walls joining the
+balconies, a raised centre hub, stairs between the floors, and random cover mirrored so neither
+side gets a better layout.
 
 Builds data/arena/ctf_balconies.glb (and a .blend to look it over, wherever --out puts it):
 
@@ -24,11 +25,11 @@ Layout (top view, x runs along the length, red base at -x and blue at +x):
 
 Made for Ruptura Systematis (MazeGame/maze), whose capture the flag reads the map's empties: the
 game puts each side's flag in a firewall at `flag_red` / `flag_blue`, the computer that opens it
-at `computer_red` / `computer_blue`, and its droids at `post_red_1` and on. Its droids walk only
-the ground floor, so the flags and posts are all down there; the balconies, catwalks and hub are
-the high ground over them. As the game needs, there is a ceiling over everything and the light
-fixtures' glass is pure magenta. The lamps behind the glass reach 7.5 m, so the spaces under the
-upper floors get strips of their own.
+at `computer_red` / `computer_blue`, and its droids at `post_red_1` and on. Its droids climb the
+stairs: the game's survey of where they can walk keeps one floor to each spot, the ground first,
+so the balconies and catwalks are solid down to the ground, with nothing under them to be
+mistaken for the floor. The flags and posts are on the ground. As the game needs, there is a
+ceiling over everything and the light fixtures' glass is pure magenta.
 """
 
 import bpy
@@ -41,7 +42,6 @@ LENGTH = 80.0        # hall length (x), base to base
 WIDTH = 44.0         # hall width (y)
 CEILING = 7.0        # hall height (lamps reach 7.5 m, so ceiling light still reaches the ground)
 UPPER = 3.5          # height of the upper floor: balconies and catwalks
-SLAB = 0.3           # upper floor thickness
 BASE_DEPTH = 12.0    # how far each base reaches in from its end wall
 BACK = 3.0           # depth of the balcony along the end wall
 WELL = 10.0          # half-width of the open well the flag stands in
@@ -153,7 +153,6 @@ def main():
     edge = hx - BASE_DEPTH                  # |x| of each base's front edge
     back = hx - BACK                        # |x| of the back balcony's inner edge
     cw = hy - CATWALK                       # |y| of each catwalk's inner edge
-    under = UPPER - SLAB                    # underside of the upper floor
 
     col_hall = collection("Hall")
     col_struct = collection("Structures")
@@ -185,9 +184,7 @@ def main():
 
     # catwalks along both side walls, between the two bases' balconies
     for side, sy in (("N", 1), ("S", -1)):
-        add_box(f"Catwalk_{side}", -edge, edge, sy * cw, sy * hy, under, UPPER, col_struct, mat_floor)
-        add_box(f"CatwalkGlass_{side}", -edge, edge, sy * (cw + 1.0), sy * (hy - 1.0), under - 0.1, under,
-                col_lights, mat_glass)
+        add_box(f"Catwalk_{side}", -edge, edge, sy * cw, sy * hy, 0, UPPER, col_struct, mat_floor)
         gaps = []
         for sx in (-1, 1):
             x = sx * edge / 2
@@ -197,15 +194,15 @@ def main():
         add_rail(f"CatwalkRail_{side}", -edge, edge, sy * (cw + 0.1), True, gaps, col_struct, mat_rail)
         keep_clear.append((-edge, edge, *sorted((sy * cw, sy * hy))))
 
-    # bases: the flag on the ground in an open well, under a balcony round three sides of it
+    # bases: the flag on the ground in an open well, with a balcony round three sides of it
     for team, sx in (("red", -1), ("blue", 1)):
         mat = mat_team[team]
         facing = -sx                                        # toward the middle of the hall
         keep_clear.append((*sorted((sx * edge, sx * hx)), -hy, hy))
-        add_box(f"{team}BackBalcony", sx * back, sx * hx, -hy, hy, under, UPPER, col_struct, mat_floor)
+        add_box(f"{team}BackBalcony", sx * back, sx * hx, -hy, hy, 0, UPPER, col_struct, mat_floor)
         add_rail(f"{team}BackRail", -WELL, WELL, sx * (back - 0.1), False, [(-1.5, 1.5)], col_struct, mat)
         for side, sy in (("N", 1), ("S", -1)):
-            add_box(f"{team}Balcony{side}", sx * edge, sx * back, sy * WELL, sy * hy, under, UPPER,
+            add_box(f"{team}Balcony{side}", sx * edge, sx * back, sy * WELL, sy * hy, 0, UPPER,
                     col_struct, mat_floor)
             # stairs down into the well, and off the front toward the middle of the hall
             well_x = sx * (edge + 3)
@@ -220,21 +217,8 @@ def main():
                      [(well_x - w, well_x + w)], col_struct, mat)
             add_rail(f"{team}FrontRail{side}", *sorted((sy * WELL, sy * cw)), sx * (edge + 0.1), False,
                      [(front_y - w, front_y + w)], col_struct, mat)
-            # pillars under the balcony, and lights on its underside for the room beneath
-            for px in (edge + 3, back - 2.5):
-                py = sy * (WELL + cw) / 2
-                add_box(f"{team}Pillar{side}_{px:.0f}", sx * px - 0.5, sx * px + 0.5, py - 0.5, py + 0.5, 0, under,
-                        col_struct, mat, "high")
-            for lx in (edge + 4.5, back - 4.0):
-                add_box(f"{team}BalconyGlass{side}_{lx:.0f}", sx * (lx - 2), sx * (lx + 2), sy * (WELL + 1.5),
-                        sy * (WELL + 2.0), under - 0.1, under, col_lights, mat_glass)
-                add_box(f"{team}BalconyGlass{side}_{lx:.0f}b", sx * (lx - 2), sx * (lx + 2), sy * (hy - 2.0),
-                        sy * (hy - 1.5), under - 0.1, under, col_lights, mat_glass)
-        for ly in (-14, -4, 4, 14):
-            add_box(f"{team}BackGlass_{ly:+d}", sx * (hx - 1.75), sx * (hx - 1.25), ly - 2, ly + 2,
-                    under - 0.1, under, col_lights, mat_glass)
-        # a band of the side's colour along its end wall, and the pad the flag stands on
-        add_box(f"{team}Band", sx * (hx - 0.02), sx * hx, -hy, hy, 2.4, 2.8, col_struct, mat)
+        # a band of the side's colour along the balcony's face, and the pad the flag stands on
+        add_box(f"{team}Band", sx * back, sx * (back - 0.02), -WELL, WELL, 2.4, 2.8, col_struct, mat)
         flag_x = sx * (edge + back) / 2
         bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=2.0, depth=0.02, location=(flag_x, 0, 0.01))
         pad = bpy.context.active_object
@@ -243,9 +227,9 @@ def main():
         move_to(pad, col_struct)
 
         # what the game puts here itself: the flag in its firewall, the computer that opens it
-        # (under the back balcony, its screen out from the wall), and each droid's post
+        # (against the back balcony, its screen out from it), and each droid's post
         marker(f"flag_{team}", flag_x, 0.0, facing)
-        marker(f"computer_{team}", sx * (hx - 0.8), -6.0, facing)
+        marker(f"computer_{team}", sx * (back - 0.8), -6.0, facing)
         for n, (x, y) in enumerate(((edge + 1.5, -3.0), (edge - 6.0, 0.0), (15.0, 0.0)), start=1):
             marker(f"post_{team}_{n}", sx * x, y, facing)
             keep_clear.append((sx * x - 1.0, sx * x + 1.0, y - 1.0, y + 1.0))
