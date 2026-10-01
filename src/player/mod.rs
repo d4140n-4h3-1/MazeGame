@@ -342,6 +342,19 @@ impl Player {
         self.yaw
     }
 
+    /// The middle of the player's droid's back, up by its chest, and which way it faces, along
+    /// the ground: for carrying something on its back. Without the droid, about where it would
+    /// be, the way the view faces.
+    pub fn back(&self, graph: &Graph) -> (Vector3<f32>, Vector3<f32>) {
+        self.avatar
+            .as_ref()
+            .and_then(|avatar| avatar.back(graph))
+            .unwrap_or_else(|| {
+                let ahead = Vector3::new(self.yaw.sin(), 0.0, self.yaw.cos());
+                (self.position(graph) + Vector3::new(0.0, 0.4, 0.0), ahead)
+            })
+    }
+
     /// Where the player's feet are.
     pub fn feet(&self, graph: &Graph) -> Vector3<f32> {
         self.position(graph) + Vector3::new(0.0, FEET, 0.0)

@@ -163,6 +163,10 @@ pub struct Character {
     /// `provoked` or `calmed`.
     #[serde(default)]
     pub barks: HashMap<String, Bark>,
+    /// What it says when the player tries to talk to it, one at random each time, for one that
+    /// has no conversation to have.
+    #[serde(default)]
+    pub chatter: Vec<Bark>,
     /// How it takes having the pistol pointed at it; not at all, without.
     #[serde(default)]
     pub threatened: Option<Threatened>,
@@ -625,17 +629,19 @@ mod tests {
     fn capture_the_flags_droids_only_call_out_each_side_in_a_voice_of_its_own() {
         let script = Script::load(CTF_SCRIPT).unwrap();
         let voices = crate::formants::speech::Voices::load(crate::formants::speech::VOICES).unwrap();
-        let [red, blue] = &script.characters[..] else {
+        let [ally, enemy] = &script.characters[..] else {
             panic!("a kind of droid for each side");
         };
         let mut pitches = Vec::new();
-        for character in [red, blue] {
+        for character in [ally, enemy] {
             assert!(character.lines.is_empty(), "{} is not talked to", character.name);
             assert!(character.barks.contains_key("engaged"), "{} calls out", character.name);
             let voice = voices.voices.get(&character.name).expect("a voice of its own");
             pitches.push(voice.pitch);
         }
         assert!(pitches[0] > 2.0 * pitches[1], "told apart by ear");
+        assert!(ally.chatter.len() > 1, "the player's own say something when talked to");
+        assert!(enemy.chatter.is_empty(), "the enemy's are not talked to");
     }
 
     fn bribable() -> Script {

@@ -1,21 +1,24 @@
 //! Capture the flag: two sides, red and blue, each with a base round its flag at one end of the
-//! map (see [`crate::firewall`]). The player is red, and takes blue's flag.
+//! map (see [`crate::firewall`]). The player is blue - [`PLAYERS`] - and takes red's flag.
 //!
-//! Each side has [`DROIDS`] droids and a drone of its own. Red's are the player's allies:
-//! they pay the player no heed, and go after blue's. Blue's guard their end, watching for the
-//! player all the while, and go after the player or red's, whichever they see. Of each side's
-//! droids, the first stays by its own flag and the second makes for the other side's; each
+//! Each side has [`DROIDS`] droids and a drone of its own. Blue's are the player's allies:
+//! they pay the player no heed, and go after red's. Red's guard their end, watching for the
+//! player all the while, and go after the player or blue's, whichever they see. Of each side's
+//! droids, each keeps to a post of its own in its side's half, as the map marks them; each
 //! side's drone patrols round its own flag. A droid comes after one of the other side it sees
 //! and shoots it with its pistol; a drone fires at them. Each side's shots harm only the other
-//! side: blue's harm the player too.
+//! side: red's harm the player too.
 
 use fyrox::core::algebra::Vector3;
 
 /// The map it is played on.
 pub const CTF_MAP: &str = "data/arena/ctf_map.glb";
 
+/// The player's side; the other is the enemy's.
+pub const PLAYERS: Side = Side::Blue;
+
 /// How many droids each side has.
-pub const DROIDS: usize = 2;
+pub const DROIDS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
@@ -26,14 +29,14 @@ pub enum Side {
 impl Side {
     pub const BOTH: [Side; 2] = [Side::Red, Side::Blue];
 
-    pub fn name(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Side::Red => "red",
             Side::Blue => "blue",
         }
     }
 
-    pub fn other(self) -> Side {
+    pub const fn other(self) -> Side {
         match self {
             Side::Red => Side::Blue,
             Side::Blue => Side::Red,
@@ -42,15 +45,17 @@ impl Side {
 
     /// Whether it is the player's side.
     pub fn is_players(self) -> bool {
-        self == Side::Red
+        self == PLAYERS
     }
 }
 
-/// Where a side's droids and drone go: the flags, as the map has them.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Where a side's droids and drone go: the flags, and each side's posts, red's and blue's, as
+/// the map has them.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Bases {
     pub red: Vector3<f32>,
     pub blue: Vector3<f32>,
+    pub posts: [Vec<Vector3<f32>>; 2],
 }
 
 impl Bases {
@@ -61,12 +66,28 @@ impl Bases {
         }
     }
 
-    /// Where the `n`th droid of `side` keeps to: its own flag for the first, the other side's
-    /// for the rest.
+    /// Where the `n`th droid of `side` keeps to: its post, or its own flag with no post for it.
     pub fn post(&self, side: Side, n: usize) -> Vector3<f32> {
-        match n {
-            0 => self.flag(side),
-            _ => self.flag(side.other()),
-        }
+        let posts = &self.posts[usize::from(side == Side::Blue)];
+        posts.get(n).copied().unwrap_or_else(|| self.flag(side))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_droid_keeps_to_its_own_post_or_else_its_flag() {
+        let post = |x: f32| Vector3::new(x, 0.0, 0.0);
+        let bases = Bases {
+            red: post(-37.0),
+            blue: post(37.0),
+            posts: [vec![post(-34.0), post(-27.0), post(-17.0)], vec![post(34.0)]],
+        };
+        let red: Vec<_> = (0..DROIDS).map(|n| bases.post(Side::Red, n)).collect();
+        assert_eq!(red, [post(-34.0), post(-27.0), post(-17.0)]);
+        let blue: Vec<_> = (0..DROIDS).map(|n| bases.post(Side::Blue, n)).collect();
+        assert_eq!(blue, [post(34.0), post(37.0), post(37.0)], "the flag, past the posts there are");
     }
 }

@@ -4,8 +4,8 @@
 #
 # Two bases face each other down the long (x) axis, red at -x and cyan at +x, each a walled room
 # with its flag in the middle - put there by the game, in a firewall, at the empty `flag_red` or
-# `flag_blue`, with the computer that opens it at `computer_red` or `computer_blue` - and three
-# ways in: the front door onto the yard, and a door in each
+# `flag_blue`, with the computer that opens it at `computer_red` or `computer_blue`, and each of
+# the side's droids keeping to a post of its own, `post_red_1` and on - and three ways in: the front door onto the yard, and a door in each
 # side wall off a back corridor. Between them the field is split into three lanes by two long
 # walls with doorways through them: an open middle lane round a central tower, and a narrower
 # lane down each side. Everything is mirrored end to end, so neither side has the better of it.
@@ -166,6 +166,10 @@ def base(sx, team):
     side = "red" if team == "TeamRed" else "blue"
     marker(f"flag_{side}", sx * -37.0, 0.0, sx)
     marker(f"computer_{side}", sx * -(HALF_X - 0.8), -5.0, sx)
+    # Where each of the side's droids keeps watch: inside the base between its door and the
+    # flag, in the yard before the door, and forward in its half of the middle lane.
+    for n, (x, y) in enumerate(((-34.5, -2.5), (-27.5, 0.0), (-17.5, 0.0)), start=1):
+        marker(f"post_{side}_{n}", sx * x, y, sx)
 
 
 ends(base)

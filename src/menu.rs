@@ -88,8 +88,8 @@ impl MainMenu {
         )
         .with_text(
             "Maze: find the way out of a new maze each round.\n\
-             Capture the Flag: hack blue's firewall and take their flag,\n\
-             with red's droids and drone on your side.",
+             Capture the Flag: hack red's firewall, take their flag and bring it home,\n\
+             with blue's droids and drone on your side.",
         )
         .with_font_size(16.0.into())
         .with_horizontal_text_alignment(HorizontalAlignment::Center)

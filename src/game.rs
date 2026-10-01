@@ -11,7 +11,7 @@ use fyrox::{
 use crate::{
     credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
-    ctf::{Bases, Side, CTF_MAP},
+    ctf::{Bases, Side, CTF_MAP, PLAYERS},
     firewall::{self, Firewalls},
     drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
@@ -22,7 +22,7 @@ use crate::{
     diagnostics::{self, FrameStats},
     dialogue::{
         screen::{self, DialogueScreen, Pointer, Subtitles},
-        Conversation, Facts, Mood, Provoked, Script, CTF_SCRIPT, SCRIPT,
+        Bark, Conversation, Facts, Mood, Provoked, Script, CTF_SCRIPT, SCRIPT,
     },
     formants::{
         self,
@@ -82,8 +82,19 @@ const MAZE_SIZE: (usize, usize) = (20, 20);
 const COMPUTERS: usize = 6;
 /// The chance of a dead end being opened into a neighbouring corridor, which makes loops.
 const LOOP_CHANCE: f32 = 0.15;
+/// How long a droid in capture the flag keeps its head turned to the player it says something
+/// to, in seconds.
+const CHAT_LOOK: f32 = 3.5;
+
+/// In capture the flag, the side the player takes the flag from.
+const ENEMY: Side = PLAYERS.other();
+
 /// How close to the exit counts as reaching it.
 const EXIT_RADIUS: f32 = 1.5;
+/// In capture the flag, how close to the middle of the player's own flag counts as having
+/// brought the enemy's home - from beside its plinth - and how high over a flag the marker shows where to go.
+const HOME_REACH: f32 = 2.5;
+const FLAG_MARKER: f32 = 2.0;
 /// The ambient light. Low: the lamps do the lighting, and a flat ambient term lights corners as
 /// much as open floor, which is what makes a room look like untextured geometry.
 const AMBIENT: Color = Color::opaque(24, 26, 34);
@@ -328,6 +339,14 @@ pub struct MazeGame {
     #[visit(skip)]
     #[reflect(hidden)]
     side_bolts: Option<[Bolts; 2]>,
+    /// In capture the flag, which of its chatter the droid talked to last said.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    last_chat: Option<usize>,
+    /// In capture the flag, whether the player has the enemy's flag, to bring home.
+    #[visit(skip)]
+    #[reflect(hidden)]
+    carrying: bool,
     /// The drone, as its model loads and once it is in the scene, and whether it has been put in
     /// front of the player this round.
     #[visit(skip)]
@@ -663,7 +682,24 @@ impl MazeGame {
             let name = format!("flag_{}", side.name());
             self.level.markers.iter().find(|m| m.name == name).map(|m| m.position)
         };
-        self.ctf = flag(Side::Red).zip(flag(Side::Blue)).map(|(red, blue)| Bases { red, blue });
+        // Each side's posts, by their number.
+        let posts = |side: Side| {
+            let prefix = format!("post_{}_", side.name());
+            let mut posts: Vec<_> = self
+                .level
+                .markers
+                .iter()
+                .filter_map(|m| Some((m.name.strip_prefix(&prefix)?.parse::<u32>().ok()?, m.position)))
+                .collect();
+            posts.sort_by_key(|&(n, _)| n);
+            posts.into_iter().map(|(_, at)| at).collect()
+        };
+        self.ctf = flag(Side::Red).zip(flag(Side::Blue)).map(|(red, blue)| Bases {
+            red,
+            blue,
+            posts: [posts(Side::Red), posts(Side::Blue)],
+        });
+        self.carrying = false;
         // Capture the flag has droids of its own, which say other things.
         let script = if self.ctf.is_some() { CTF_SCRIPT } else { SCRIPT };
         if script != self.script_path {
@@ -1017,7 +1053,7 @@ impl MazeGame {
         let scene = &mut ctx.scenes[self.scene];
         let player = self.player.feet(&scene.graph);
         if let Some(liveries) = liveries {
-            match self.ctf {
+            match &self.ctf {
                 // Each side's droids of its own kind: red's the first in the conversations, blue's
                 // the second.
                 Some(bases) => self.inhabitants.populate_sides(
@@ -1025,9 +1061,9 @@ impl MazeGame {
                     liveries,
                     (grid, *origin),
                     bases,
-                    |side| match side {
-                        Side::Red => 0,
-                        Side::Blue => 1,
+                    |side| match side.is_players() {
+                        true => 0,
+                        false => 1,
                     },
                     rng,
                 ),
@@ -1174,7 +1210,7 @@ impl MazeGame {
         }
         if let Some(n) = self.inhabitants.shot(graph, strike, from) {
             Log::info(format!("Capture the flag: droid {n} is down"));
-            let whose = self.inhabitants.side(n).map_or("A", |s| if s.is_players() { "One of yours" } else { "One of blue's" });
+            let whose = self.inhabitants.side(n).map_or("A", |s| if s.is_players() { "One of yours" } else { "One of the enemy's" });
             self.hud.show_note(format!("{whose} droids is down"));
         }
     }
@@ -1380,14 +1416,49 @@ impl MazeGame {
     /// Has the `n`th droid say its bark called `name`, if its kind has one, feeling `mood`: out
     /// loud once the voice is made, and on screen straight away, as the player has subtitles.
     fn bark(&mut self, n: usize, name: &str, mood: Mood) {
+        let bark = self
+            .script
+            .as_ref()
+            .zip(self.inhabitants.who(n))
+            .and_then(|(script, (character, _))| script.characters[character].barks.get(name).cloned());
+        if let Some(bark) = bark {
+            self.say_bark(n, &bark, mood);
+        }
+    }
+
+    /// Has the `n`th droid say one of the things it says when the player tries to talk to it,
+    /// in capture the flag, where there are no conversations: at random, but never the same
+    /// twice running. Only to one of the player's own side.
+    fn chat(&mut self, n: usize) {
+        if !self.inhabitants.side(n).is_some_and(Side::is_players) {
+            return;
+        }
+        let Some(chatter) = self
+            .script
+            .as_ref()
+            .zip(self.inhabitants.who(n))
+            .map(|(script, (character, _))| script.characters[character].chatter.clone())
+            .filter(|chatter| !chatter.is_empty())
+        else {
+            return;
+        };
+        let mut pick = self.rng().below(chatter.len());
+        if chatter.len() > 1 && Some(pick) == self.last_chat {
+            pick = (pick + 1) % chatter.len();
+        }
+        self.last_chat = Some(pick);
+        self.inhabitants.speak_to_player(n, CHAT_LOOK);
+        self.say_bark(n, &chatter[pick], Mood::Normal);
+    }
+
+    /// Has the `n`th droid say `bark`, feeling `mood`: out loud once the voice is made, and on
+    /// screen straight away, as the player has subtitles.
+    fn say_bark(&mut self, n: usize, bark: &Bark, mood: Mood) {
         let (Some(script), Some((character, code))) = (&self.script, self.inhabitants.who(n))
         else {
             return;
         };
         let character = &script.characters[character];
-        let Some(bark) = character.barks.get(name) else {
-            return;
-        };
         let mut lines = Vec::new();
         if self.subtitles.latin {
             lines.push(bark.says.clone());
@@ -1517,13 +1588,15 @@ impl MazeGame {
     fn look_for_someone(&mut self, ctx: &mut PluginContext) {
         let can_use_computer = self.phase == Phase::Playing && !self.busy() && !self.menu.is_open();
         // In capture the flag, the droids are not talked to.
-        let can_talk = can_use_computer && self.script.is_some() && self.ctf.is_none();
+        // In capture the flag, only to the player's own side, and they only say something.
+        let can_talk = can_use_computer && self.script.is_some();
         let found = if can_talk {
             let graph = &ctx.scenes[self.scene].graph;
             let (player, feet, ahead) =
                 (&self.player, self.player.feet(graph), self.player.ahead());
             self.inhabitants
                 .to_talk_to(feet, ahead, |there| player.can_see(graph, there))
+                .filter(|&n| self.ctf.is_none() || self.inhabitants.side(n).is_some_and(Side::is_players))
         } else {
             None
         };
@@ -1655,6 +1728,11 @@ impl MazeGame {
         let Some((droid, who)) = self.talkable.clone() else {
             return;
         };
+        // In capture the flag there is no conversation: it just says something.
+        if self.ctf.is_some() {
+            self.chat(droid);
+            return;
+        }
         let graph = &ctx.scenes[self.scene].graph;
         let (Some(script), Some((character, _)), Some(facts), Some(face)) = (
             &self.script,
@@ -2054,7 +2132,7 @@ impl MazeGame {
                     break;
                 }
                 let side = self.drones.iter().find(|d| d.collider() == hit.by).and_then(Drone::side);
-                match (self.ctf, side) {
+                match (&self.ctf, side) {
                     // A drone on a side harms whatever of the other side it hits.
                     (Some(_), Some(side)) => {
                         let strike = Strike { collider: hit.collider, at: hit.at, way: hit.way };
@@ -2085,7 +2163,7 @@ impl MazeGame {
                 for drone in &mut self.drones {
                     drone.hide(graph);
                 }
-                match self.ctf {
+                match &self.ctf {
                     // One for each side, by its flag; the rest wait to be called in.
                     Some(bases) => {
                         for (drone, side) in self.drones.iter_mut().zip(Side::BOTH) {
@@ -2481,12 +2559,26 @@ impl Plugin for MazeGame {
                     let exit = scene.graph[self.exit].global_position();
                     let player = self.player.position(&scene.graph);
                     let flat = Vector3::new(exit.x - player.x, 0.0, exit.z - player.z);
-                    // A flag is only there to take once its firewall is down, and is reached
-                    // from beside its plinth.
-                    let flag = self.firewalls.at(exit);
-                    let (reach, open) = flag.map_or((EXIT_RADIUS, true), |w| (firewall::REACH, w.is_open()));
-                    let side = flag.map(|w| w.side);
-                    if open && flat.norm() < reach {
+                    // In capture the flag, blue's flag first - only there to take once its
+                    // firewall is down, and reached from beside its plinth - and then home with
+                    // it, to red's, which the marker moves to.
+                    let won = match self.ctf.clone() {
+                        Some(bases) if !self.carrying => {
+                            let open = self.firewalls.of(ENEMY.name()).is_none_or(|wall| wall.is_open());
+                            if open && flat.norm() < firewall::REACH {
+                                self.carrying = true;
+                                scene.graph[self.exit]
+                                    .local_transform_mut()
+                                    .set_position(bases.flag(PLAYERS) + Vector3::new(0.0, FLAG_MARKER, 0.0));
+                                self.hud.show_note(format!("You have {}'s flag: bring it home", ENEMY.name()));
+                                Log::info(format!("Capture the flag: the player has {}'s flag", ENEMY.name()));
+                            }
+                            false
+                        }
+                        Some(_) => flat.norm() < HOME_REACH,
+                        None => flat.norm() < EXIT_RADIUS,
+                    };
+                    if won {
                         self.phase = Phase::Won;
                         let best = self
                             .best_time
@@ -2494,13 +2586,14 @@ impl Plugin for MazeGame {
                         let record = self.best_time.is_none_or(|b| self.round_time < b);
                         self.best_time = Some(best);
                         let text = format!(
-                            "{} in {}{}\nPress N for another maze",
-                            match side {
-                                Some(side) => format!("You took {side}'s flag"),
+                            "{} in {}{}\nPress N for {}",
+                            match self.ctf {
+                                Some(_) => format!("You captured {}'s flag", ENEMY.name()),
                                 None => "You escaped".to_string(),
                             },
                             hud::format_time(self.round_time),
-                            if record { " - a new best!" } else { "" }
+                            if record { " - a new best!" } else { "" },
+                            if self.model.is_some() { "another round" } else { "another maze" }
                         );
                         self.set_banner(ctx, &text);
                     }
@@ -2534,6 +2627,15 @@ impl Plugin for MazeGame {
             self.inhabitants.show(&mut scene.graph, &self.level);
             let level = &self.level;
             self.hearts.cull(&mut scene.graph, |at| level.can_see(at));
+        }
+
+        // Blue's flag, once the player has it, on their back.
+        if self.carrying && matches!(self.phase, Phase::Playing | Phase::Won) {
+            let graph = &mut ctx.scenes[self.scene].graph;
+            let (back, ahead) = self.player.back(graph);
+            if let Some(wall) = self.firewalls.of(ENEMY.name()) {
+                wall.carry(graph, back, ahead);
+            }
         }
 
         // The exit bobs so it catches the eye.

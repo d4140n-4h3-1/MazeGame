@@ -33,8 +33,8 @@ use fyrox::{
 /// How high the middle of a flag is over the floor its firewall stands on.
 const FLAG_MIDDLE: f32 = 2.0;
 /// What a model's empty is named to mark where the game puts something: a flag in its firewall,
-/// or the computer that opens it (see [`crate::firewall`]).
-const MARKERS: [&str; 2] = ["flag_", "computer_"];
+/// the computer that opens it (see [`crate::firewall`]), or a droid's post (see [`crate::ctf`]).
+const MARKERS: [&str; 3] = ["flag_", "computer_", "post_"];
 
 /// Somewhere a maze model marks with an empty, by the empty's name, for the game to put
 /// something: where it is, and which way its +x points, as a turn about the vertical.
@@ -134,13 +134,13 @@ impl Level {
 
         // A model can put something in its maze to find. Tiles have nothing of the kind, and
         // their small parts - the light fixtures - would only be mistaken for it.
-        // A model for capture the flag marks where the flags go instead: the player takes
-        // blue's, from where it stands in its firewall.
+        // A model for capture the flag marks where the flags go instead: the player takes the
+        // other side's, from where it stands in its firewall.
         let markers = if fixed { markers(&scene.graph, root) } else { Vec::new() };
         let goal = if fixed {
             markers
                 .iter()
-                .find(|marker| marker.name == "flag_blue")
+                .find(|marker| marker.name == format!("flag_{}", crate::ctf::PLAYERS.other().name()))
                 .map(|marker| marker.position + Vector3::y() * FLAG_MIDDLE)
                 .or_else(|| landmark(&scene.graph, root))
         } else {

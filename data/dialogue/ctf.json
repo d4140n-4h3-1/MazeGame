@@ -1,9 +1,19 @@
 {
-  "about": "Capture the flag: each side's droids, which call out as they fight and are not talked to. Red's, the player's allies, first; blue's second (see src/ctf.rs). Every line is checked by data/system_latin/sl_parser.py.",
+  "about": "Capture the flag: each side's droids, which call out as they fight. The player's own say one thing or another of their 'chatter' when talked to, and that is all; the enemy's are not talked to. The player's allies, blue's, first, in the cyan droid; the enemy, red's, second, in the red droid (see src/ctf.rs). Every line is checked by data/system_latin/sl_parser.py.",
   "characters": [
     {
       "name": "Protegator",
-      "model": "data/droid_hostile.glb",
+      "model": "data/droid_full_deform.glb",
+      "chatter": [
+        { "says": "Zona securum. Progreda.", "means": "The zone is secure. Go ahead." },
+        { "says": "Affirmatum. Protego tu.", "means": "Affirmative. I've got your back." },
+        { "says": "Ego defendo hic locus.", "means": "I'm holding this spot." },
+        { "says": "Festina. Hostis exspectat.", "means": "Hurry. The enemy is waiting." },
+        { "says": "Status: plenum. Paratum.", "means": "Status: full. Ready." },
+        { "says": "Sequa via. Ego observo retro.", "means": "Go on. I'll watch behind." },
+        { "says": "Terminale in zona hostilum. Desactiva scutum.", "means": "The terminal is in the enemy zone. Shut down their shield." },
+        { "says": "Ubi hostis? Ego observo.", "means": "Where's the enemy? I'm watching." }
+      ],
       "barks": {
         "engaged": {
           "says": "Hostis detectum. Confronto hostis.",
@@ -13,7 +23,7 @@
     },
     {
       "name": "Obstruator",
-      "model": "data/droid_full_deform.glb",
+      "model": "data/droid_hostile.glb",
       "barks": {
         "spotted": {
           "says": "Hostis detectum. Neutralizo hostis.",

@@ -108,14 +108,25 @@ their animations; the crate decides what they make of what is round them.
 
 30 September 2026:
 
+- **Your allies say something when you talk to them** in capture the flag: E by one of blue's
+  droids has it say one of a handful of lines, in its own voice, without a conversation. As it
+  speaks it turns its head to you, as far as 90 degrees either way, without turning round. Red's
+  are not talked to.
+- **You play for blue in capture the flag**, and take red's flag. Your allies are blue's, in the
+  cyan droid, and the guards against you red's, in the red one; the voices stay with the parts,
+  your allies' high and quick, the guards' deep, slow and rasping.
+- **Capture the flag is taken home.** With red's firewall down, reaching their flag takes it:
+  it rides on your droid's back, shrunk and slung across it at 45 degrees, and the marker moves
+  to your own flag. Bringing it home to blue's wins the round.
 - **A main menu** to pick the maze or capture the flag, which the pause menu can go back to.
 - **A capture-the-flag map**, `data/arena/ctf_map.glb`: a red base at one end and a cyan base at
   the other, each with its flag, joined by three lanes. The team battle can be fought in it
   with `BATTLE_MAP`.
-- **Sides in capture the flag.** Each side has two droids and a drone. Red's are yours: they
+- **Sides in capture the flag.** Each side has three droids and a drone. Red's are yours: they
   pay you no heed and go after blue's. Blue's guard their end, watching for you all the while,
-  and go after you or red's, whichever they see. The first droid of each side keeps to its own
-  flag and the second makes for the other side's; each drone patrols round its flag. Droids
+  and go after you or red's, whichever they see. Each droid keeps to a post of its own in its
+  side's half - inside its base, in the yard before the door, and forward in the middle lane -
+  and each drone patrols round its flag. Droids
   shoot with their pistols and drones fire as ever, and each side's shots harm only the other
   side, yours included. Your own bolts pass red's by.
 - **Capture the flag's droids say their own things**, from `data/dialogue/ctf.json`: red's
@@ -523,9 +534,9 @@ well.
 It opens on the main menu, to pick which game to play:
 
 - **Maze**: find the way out of a new random maze each round.
-- **Capture the Flag**: in `data/arena/ctf_map.glb`, hack the computer in blue's base to take
-  down the firewall round their flag, and take it, with red's droids and drone on your side and
-  blue's against you.
+- **Capture the Flag**: in `data/arena/ctf_map.glb`, you are blue. Hack the computer in red's
+  base to take down the firewall round their flag, take it, and bring it home to your own, with
+  blue's droids and drone on your side and red's against you.
 
 With `MAZE_MODEL` set, it skips the menu and plays that model.
 
@@ -664,14 +675,17 @@ round a central tower, and each side lane is narrower, with a low wall across it
 halves of the map are the same, mirrored, with low and tall cover and pillars throughout.
 `data/arena/ctf_map.py` builds it in Blender (`blender -b --python data/arena/ctf_map.py`).
 It is what **Capture the Flag** on the main menu plays, as `MAZE_MODEL` does too: you start at
-red's end and take blue's flag.
+blue's end, take red's flag and bring it home to blue's.
 
 The model marks where the game puts things with empties. `flag_red` and `flag_blue` get that
 side's flag, `data/ctf/flag_red.glb` or `data/ctf/flag_blue.glb`, standing in a firewall,
 `data/ctf/firewall.glb`, turned the way the empty's +x points. `computer_red` and `computer_blue`
 get the computer that opens that firewall, its screen facing along the empty's +x; without one,
-the computer goes against the wall nearest the firewall. The firewall's orange shell stands in the
-way until its computer is hacked, then goes, and the flag can be taken from beside its plinth.
+the computer goes against the wall nearest the firewall. `post_red_1`, `post_red_2` and on, and
+`post_blue_1` and on, are each side's droids' posts, the first droid at the first; a droid with
+no post keeps to its flag. The firewall's orange shell stands in the
+way until its computer is hacked, then goes, and the flag can be taken from beside its plinth;
+taken, it is carried on the taker's back.
 The shell is see-through glass that tints what is behind it orange, and its glow and its light
 flicker. The team battle fights in it with
 

@@ -301,6 +301,13 @@ const BACK: [&str; 3] = ["DEF-spine.001", UPPER_BODY, "DEF-spine.003"];
 const LEFT_ARM: &str = "DEF-shoulder.L";
 /// Its head, and the tops of its arms, which its face and its shoulders go by.
 const HEAD: &str = "DEF-spine.006";
+/// The joints of its neck, below the head, which turn the head between them: the head itself
+/// turned would wring the chin, which is skinned to the neck as well.
+const NECK: [&str; 2] = ["DEF-spine.004", "DEF-spine.005"];
+/// How far the head turns from the way the droid faces, at most, either way, in radians; and how
+/// quickly it comes round, as how much of the way left it goes in a second.
+const HEAD_TURN_MOST: f32 = std::f32::consts::FRAC_PI_2;
+const HEAD_TURN_RATE: f32 = 6.0;
 const SHOULDERS: [&str; 2] = ["DEF-upper_arm.L", "DEF-upper_arm.R"];
 /// How far above the head bone, in the model's own units up the bone, the middle of the face is:
 /// the bone sits at the bottom of the head, 0.22 below the top of the model.
@@ -935,6 +942,9 @@ struct Square {
     back: Vec<Vec<Handle<Node>>>,
     /// Down to the head, which is turned to square the face.
     head: Vec<Handle<Node>>,
+    /// Down to each joint of the neck, lowest first, which turn the head between them (see
+    /// [`NECK`]); none, without them, and the head turns by itself.
+    neck: Vec<Vec<Handle<Node>>>,
     /// Down to the tops of the arms, left and right.
     shoulders: [Vec<Handle<Node>>; 2],
     /// Which way the head faces, in its own terms: ahead, at rest.
@@ -1373,6 +1383,10 @@ pub struct Avatar {
     /// this frame; and how far it has, from 0 to 1.
     squaring: bool,
     square_weight: f32,
+    /// How far its head is turned from the way the droid faces, in radians, left positive, and
+    /// how far it is to be: towards someone it is speaking to, say.
+    head_turn: f32,
+    head_wanted: f32,
     /// Its parts, which come apart when it is shot down, if the model has them.
     dismember: Option<Dismember>,
 }
@@ -1611,6 +1625,11 @@ impl Avatar {
                     .iter()
                     .map(|&joint| Some(chain(parent_of, root, find(joint)?)))
                     .collect::<Option<_>>()?,
+                neck: NECK
+                    .iter()
+                    .map(|&joint| Some(chain(parent_of, root, find(joint)?)))
+                    .collect::<Option<_>>()
+                    .unwrap_or_default(),
                 head,
                 shoulders: [
                     chain(parent_of, root, left?),
@@ -2087,6 +2106,8 @@ impl Avatar {
             blended: Default::default(),
             squaring: false,
             square_weight: 0.0,
+            head_turn: 0.0,
+            head_wanted: 0.0,
             dismember,
         })
     }
@@ -2139,6 +2160,24 @@ impl Avatar {
         if let Some(parts) = self.dismember.as_mut() {
             parts.sweep_up(graph);
         }
+    }
+
+    /// The middle of the droid's back, up by its chest, across the world as of the last frame;
+    /// and which way it faces there, along the ground, one meter long: for something carried on
+    /// its back. None without the bone.
+    pub fn back(&self, graph: &Graph) -> Option<(Vector3<f32>, Vector3<f32>)> {
+        let (chest, _) = graph.find_by_name(self.root, BACK[2])?;
+        let turn = graph[self.root].global_transform();
+        let ahead = turn.transform_vector(&(self.upright.inverse() * Vector3::z()));
+        let ahead = Vector3::new(ahead.x, 0.0, ahead.z).try_normalize(1.0e-6)?;
+        Some((graph[chest].global_position(), ahead))
+    }
+
+    /// Turns the droid's head `turn` radians from the way it faces, left positive, no further
+    /// than [`HEAD_TURN_MOST`] either way - or back to the front, with none. It comes round over a
+    /// moment, as it is posed.
+    pub fn turn_head(&mut self, turn: Option<f32>) {
+        self.head_wanted = turn.map_or(0.0, |turn| wrap(turn).clamp(-HEAD_TURN_MOST, HEAD_TURN_MOST));
     }
 
     /// Which way the droid faces from the way the body faces, in radians, left positive.
@@ -2532,6 +2571,16 @@ impl Avatar {
             twist_back(&mut target, &square.back, w * off);
             let face = place(&square.head, |bone| target[&bone]).rotation * square.face;
             turn_bone(&mut target, &square.head, w * wrap(ahead - yaw_of(face)));
+        }
+        // The head turned towards whatever it is to look at, coming round over a moment.
+        self.head_turn += (self.head_wanted - self.head_turn) * (1.0 - (-HEAD_TURN_RATE * dt).exp());
+        // By the neck, shared between its joints, so that the head and chin turn as one.
+        if let Some(square) = self.square.as_ref().filter(|_| self.head_turn.abs() > 1.0e-3) {
+            let turn = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.head_turn);
+            match square.neck.is_empty() {
+                true => turn_bone(&mut target, &square.head, self.head_turn),
+                false => turn_back(&mut target, &square.neck, turn),
+            }
         }
         // The pistol follows the camera, as far over to the pistol as the upper body has gone:
         // the aims' offsets laid on top, from where the droid itself faces.

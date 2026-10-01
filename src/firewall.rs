@@ -59,6 +59,16 @@ const PLINTH_HEIGHT: f32 = 0.5;
 const TAKEN: f32 = 1.8;
 /// How close to the middle the player has to come to take the flag, off the plinth's side.
 pub const REACH: f32 = 2.0;
+/// The flag carried on a droid's back: how big, as a part of its own size; how far behind the
+/// middle of the back its pole stands, in meters; how far its pole's middle is above the chest;
+/// how far it is slung across the back, from upright, and how far it leans back, in radians.
+const CARRIED_SIZE: f32 = 0.4;
+const CARRIED_BEHIND: f32 = 0.2;
+const CARRIED_LIFT: f32 = 0.15;
+const CARRIED_SLANT: f32 = std::f32::consts::FRAC_PI_4;
+const CARRIED_LEAN: f32 = 0.15;
+/// Where the middle of the flag's pole is, up from the bottom of its model, as it is made.
+const POLE_MIDDLE: f32 = 1.5;
 /// The shell's colour: how strongly it colours what is seen through it, and how brightly it glows
 /// at most; and the light it gives off, how far, and how brightly at most.
 const COLOUR: Color = Color::opaque(255, 46, 0);
@@ -83,8 +93,9 @@ pub struct Firewall {
     pub position: Vector3<f32>,
     /// The computer that opens it, in the maze's list of computers, once one is given it.
     pub computer: Option<usize>,
-    /// Everything it put into the scene.
+    /// Everything it put into the scene, and its flag of all that.
     nodes: Vec<Handle<Node>>,
+    flag: Handle<Node>,
     /// The shell's meshes and their glass, its light, and the static body that stands in the
     /// way while it is up.
     barrier: Vec<Handle<Node>>,
@@ -116,6 +127,11 @@ impl Firewalls {
 
     pub fn iter(&self) -> impl Iterator<Item = &Firewall> {
         self.walls.iter()
+    }
+
+    /// The firewall round `side`'s flag - "red" or "blue" - if there is one.
+    pub fn of(&self, side: &str) -> Option<&Firewall> {
+        self.walls.iter().find(|wall| wall.side == side)
     }
 
     pub fn get_mut(&mut self, n: usize) -> Option<&mut Firewall> {
@@ -184,14 +200,6 @@ impl Firewalls {
                 ));
             }
         }
-    }
-
-    /// The firewall standing at `point`, give or take a little, if there is one.
-    pub fn at(&self, point: Vector3<f32>) -> Option<&Firewall> {
-        self.walls.iter().find(|wall| {
-            let flat = Vector3::new(point.x - wall.position.x, 0.0, point.z - wall.position.z);
-            flat.norm() < 0.5
-        })
     }
 }
 
@@ -299,6 +307,7 @@ impl Firewall {
             position: at,
             computer: None,
             nodes: vec![shell, banner, light, plinth, wall],
+            flag: banner,
             barrier,
             glass,
             light,
@@ -309,6 +318,30 @@ impl Firewall {
 
     pub fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// Carries its flag, shrunk, on the back of whoever has taken it: `back`, the middle of
+    /// their back, and `ahead`, which way they face, along the ground. It is slung across their
+    /// back, as a rifle would be, leaning back a little, its cloth behind them.
+    pub fn carry(&self, graph: &mut Graph, back: Vector3<f32>, ahead: Vector3<f32>) {
+        // Its cloth is on its +x: turned to point behind them.
+        let yaw = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), ahead.z.atan2(-ahead.x));
+        let about = |axis: Vector3<f32>, angle: f32| {
+            axis.try_normalize(1.0e-6).map_or_else(UnitQuaternion::identity, |axis| {
+                UnitQuaternion::from_axis_angle(&fyrox::core::algebra::Unit::new_unchecked(axis), angle)
+            })
+        };
+        // Across the back - turned about the way they face - and then the top back a little.
+        let slant = about(ahead, CARRIED_SLANT);
+        let lean = about(Vector3::y().cross(&-ahead), CARRIED_LEAN);
+        let rotation = lean * slant * yaw;
+        let middle = back - ahead * CARRIED_BEHIND + Vector3::y() * CARRIED_LIFT;
+        let at = middle - rotation * (Vector3::y() * POLE_MIDDLE * CARRIED_SIZE);
+        graph[self.flag]
+            .local_transform_mut()
+            .set_position(at)
+            .set_rotation(rotation)
+            .set_scale(Vector3::repeat(CARRIED_SIZE));
     }
 
     /// Its glow and its light, `time` seconds in: a quick unsteady waver, and now and then a
@@ -365,6 +398,43 @@ fn flicker(time: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_taken_flag_is_slung_shrunk_across_the_carriers_back() {
+        let mut graph = Graph::new();
+        let flag = fyrox::scene::pivot::PivotBuilder::new(BaseBuilder::new()).build(&mut graph).to_base();
+        let wall = Firewall {
+            side: "blue",
+            position: Vector3::zeros(),
+            computer: None,
+            nodes: Vec::new(),
+            flag,
+            barrier: Vec::new(),
+            glass: MaterialResource::new_embedded(fyrox::material::Material::standard()),
+            light: Handle::NONE,
+            wall: Handle::NONE,
+            open: true,
+        };
+        let (back, ahead) = (Vector3::new(3.0, 1.2, -2.0), Vector3::new(0.0, 0.0, 1.0));
+        wall.carry(&mut graph, back, ahead);
+        graph.update_hierarchical_data();
+        let to_world = graph[flag].global_transform();
+        let at = |p: Vector3<f32>| to_world.transform_point(&p.into()).coords;
+        // The pole's middle behind the back, a little above the chest.
+        let middle = at(Vector3::y() * POLE_MIDDLE);
+        let wanted = back - ahead * CARRIED_BEHIND + Vector3::y() * CARRIED_LIFT;
+        assert!((middle - wanted).norm() < 1.0e-4, "{middle:?} for {wanted:?}");
+        // Shrunk: the two meters of pole are less than one.
+        let pole = at(Vector3::y() * 2.5) - at(Vector3::y() * 0.5);
+        assert!((pole.norm() - 2.0 * CARRIED_SIZE).abs() < 1.0e-4);
+        // Slung across the back: 45 degrees off upright, give or take its lean, and up.
+        let off_upright = pole.normalize().dot(&Vector3::y()).acos();
+        assert!((off_upright - CARRIED_SLANT).abs() < CARRIED_LEAN + 0.01, "{off_upright}");
+        assert!(pole.x.abs() > 0.2, "across the back, not along it: {pole:?}");
+        // Its cloth behind them.
+        let cloth = at(Vector3::new(0.4, 2.1, 0.0)) - at(Vector3::new(0.0, 2.1, 0.0));
+        assert!(cloth.dot(&ahead) < -0.1, "{cloth:?}");
+    }
 
     #[test]
     fn a_firewall_flickers_between_dim_and_full() {

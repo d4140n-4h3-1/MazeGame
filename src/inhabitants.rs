@@ -188,15 +188,14 @@ const ALARM_RANGE: f32 = 40.0;
 const REPLAN: f32 = 0.4;
 /// How far it looks for a way to the player, in steps across the grid's half-meter cells.
 const CHASE_REACH: f32 = 200.0;
-/// In capture the flag: how far from where it keeps to a droid wanders, and from its flag it is
-/// put down, in meters; how long it keeps after one of the other side it has lost sight of, and
+/// In capture the flag: how far from its post a droid wanders, and is put down, in meters; how long it keeps after one of the other side it has lost sight of, and
 /// how long it keeps its pistol out once there is no one to shoot at, in seconds.
-const POST_REACH: f32 = 7.0;
-const SPAWN_REACH: f32 = 4.0;
+const POST_REACH: f32 = 3.0;
+const SPAWN_REACH: f32 = 1.5;
 const FOE_MEMORY: f32 = 6.0;
 const ARMED_FOR: f32 = 5.0;
 /// In capture the flag, a droid shoots at whoever it sees of the other side - the player too,
-/// for blue's - from as far as [`FIRE_RANGE`], in meters, coming on to [`ENGAGE`] and standing
+/// for the enemy's - from as far as [`FIRE_RANGE`], in meters, coming on to [`ENGAGE`] and standing
 /// there; once every so many seconds, as [`FIRE_EVERY`] says; wide by up to [`SPREAD`] meters
 /// every ten meters away; and only facing within [`FIRE_CONE`] radians of them.
 const FIRE_RANGE: f32 = 24.0;
@@ -350,6 +349,8 @@ struct Inhabitant {
     post: Option<Vector3<f32>>,
     foe: Option<usize>,
     foe_unseen: f32,
+    /// How long it has left speaking to the player, its head turned to them, in seconds.
+    speaking: f32,
     /// How long before it can fire again, and before it puts its pistol away, in seconds; and
     /// what it last aimed at.
     reload: f32,
@@ -850,6 +851,7 @@ impl Inhabitants {
             post: None,
             foe: None,
             foe_unseen: 0.0,
+            speaking: 0.0,
             reload: 0.0,
             armed_left: 0.0,
             aimed_at: None,
@@ -858,16 +860,16 @@ impl Inhabitants {
     }
 
     /// Puts each side's droids into `scene` for capture the flag, on the floor of `grid` whose
-    /// corner is at `origin`, by their flags in `bases`: the first of each by its own flag to
-    /// keep to it, the rest making for the other side's (see [`ctf::Bases::post`]). Each looks
-    /// as its side's kind of droid does, as `kind` says, of `liveries`. Blue's watch for the
-    /// player from the start.
+    /// corner is at `origin`, each at its post in `bases`, to keep to (see [`ctf::Bases::post`]).
+    /// Each looks
+    /// as its side's kind of droid does, as `kind` says, of `liveries`. The enemy's watch for
+    /// the player from the start.
     pub fn populate_sides(
         &mut self,
         scene: &mut Scene,
         liveries: Vec<Livery>,
         (grid, origin): (&WalkGrid, Vector3<f32>),
-        bases: ctf::Bases,
+        bases: &ctf::Bases,
         kind: impl Fn(Side) -> usize,
         rng: &mut Rng,
     ) {
@@ -879,10 +881,9 @@ impl Inhabitants {
         }
         ragdoll::prepare(&mut scene.graph);
         for side in Side::BOTH {
-            let flag = bases.flag(side);
-            let facing = flat(bases.flag(side.other()) - flag);
+            let facing = flat(bases.flag(side.other()) - bases.flag(side));
             for n in 0..ctf::DROIDS {
-                let Some(feet) = spot_near((grid, origin), flag, SPAWN_REACH, rng) else {
+                let Some(feet) = spot_near((grid, origin), bases.post(side, n), SPAWN_REACH, rng) else {
                     continue;
                 };
                 let character = kind(side).min(self.liveries.len() - 1);
@@ -901,6 +902,14 @@ impl Inhabitants {
             }
         }
         Log::info(format!("Capture the flag: {} droids", self.droids.len()));
+    }
+
+    /// Has the `n`th droid speak to the player for `seconds`: it turns its head to them, as far
+    /// as a head turns, without turning round.
+    pub fn speak_to_player(&mut self, n: usize, seconds: f32) {
+        if let Some(droid) = self.droids.get_mut(n) {
+            droid.speaking = seconds;
+        }
     }
 
     /// The side of the `n`th droid, in capture the flag.
@@ -1082,7 +1091,7 @@ impl Inhabitants {
                 })
                 .map(|(_, &other)| other);
             // In capture the flag, whoever of the other side it sees to shoot at: the player
-            // first, for blue's; and near enough, it stands to shoot.
+            // first, for the enemy's; and near enough, it stands to shoot.
             let target = match droid.side {
                 Some(_) if hunting && droid.sees_player => Some(player + Vector3::new(0.0, PLAYER_CHEST, 0.0)),
                 Some(_) if sees_foe => fighting.map(|n| everyone[n].0 + Vector3::new(0.0, CHEST, 0.0)),
@@ -1344,6 +1353,12 @@ impl Inhabitants {
             if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(droid.body) {
                 body.set_next_kinematic_translation(droid.feet + Vector3::new(0.0, MIDDLE, 0.0));
             }
+            // Speaking to the player, its head turned to them.
+            droid.speaking = (droid.speaking - dt).max(0.0);
+            let to_player = flat(player - droid.feet);
+            let head = (droid.speaking > 0.0 && !droid.down && to_player.norm() > 1.0e-3)
+                .then(|| to_player.x.atan2(to_player.z) - droid.heading);
+            droid.avatar.turn_head(head);
             // Firing when it can, facing them near enough; looking up or down at them.
             let facing_them = target.and_then(|at| {
                 let to = flat(at - droid.feet);
