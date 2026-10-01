@@ -114,6 +114,9 @@ their animations; the crate decides what they make of what is round them.
   joining the balconies, a raised hub in the middle, and stairs between them all.
   `data/arena/ctf_balconies.py` builds it in Blender, its cover laid out at random from a seed and
   mirrored end to end.
+- **The menus work from the keyboard**: the arrow keys or W and S go up and down the buttons, the
+  one picked shown in light blue, and Enter or Space presses it - in the main menu, its maps, the
+  pause menu and the options.
 - **Stairs.** The droids find their way up and down stairs: the walk grid's floor in each cell is
   now the highest with headroom over it, and only what can be climbed to from the ground a
   stair's step at a time (hydroxus-ai's `MAX_CLIMB`, 0.55 m) is walkable - so stairs and the
@@ -625,6 +628,11 @@ window in the middle of a round pauses it too. The menu has:
   flag.
 - **Main menu**: leave the game under way for the main menu, to pick another.
 - **Quit**.
+
+Every menu - this one, its options, the main menu and its maps - works from the keyboard as well
+as the mouse: the arrow keys, or W and S, go up and down the buttons, the one picked in light
+blue, and Enter or Space presses it. Start again is passed over while there is nothing to start
+again.
 
 ## Options
 

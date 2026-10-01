@@ -889,6 +889,15 @@ impl MazeGame {
     }
 
     fn on_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
+        // The menus go first: up and down them, and pressing what is picked.
+        let ui = ctx.user_interfaces.first();
+        let in_menu = match self.phase {
+            Phase::Title => self.main_menu.key(ui, code),
+            _ => self.menu.key(ui, code),
+        };
+        if in_menu {
+            return;
+        }
         match code {
             // On the main menu, only its buttons do anything, and Escape goes back from the maps.
             KeyCode::Escape if self.phase == Phase::Title => {
@@ -2718,6 +2727,8 @@ impl Plugin for MazeGame {
                 None => (),
             }
         }
+        self.main_menu.observe(ctx.user_interfaces.first(), message);
+        self.menu.observe(ctx.user_interfaces.first(), message);
         match self.main_menu.choice(message) {
             Some(Start::Play(game)) if self.phase == Phase::Title => self.play(ctx, game),
             Some(Start::Maps) => self.main_menu.show_maps(ctx.user_interfaces.first(), true),
