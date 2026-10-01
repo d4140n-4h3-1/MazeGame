@@ -225,6 +225,10 @@ const SENTRY_STAMINA: f32 = 1.5;
 const SENTRY_RECOVERY: f32 = 2.0 / 3.0;
 /// How many of the pistol's bolts it takes to stop a hostile droid.
 pub const HITS: u32 = 3;
+/// The ragdoll body a good headshot has to go through, and how near the middle of it, as a share
+/// of how far round it is: through the middle of the skull, not just clipping it.
+const HEAD: &str = "head";
+const SQUARELY: f32 = 0.6;
 /// How tall a droid that has been stopped is, crouched, in meters.
 const DOWN_HEIGHT: f32 = 1.1;
 
@@ -378,6 +382,35 @@ impl Inhabitant {
         if self.avatar.break_off(graph, part) {
             ragdoll.let_loose(graph, part);
         }
+    }
+
+    /// Where its head is and how far round, if a bolt going `way` that struck it at `at` went
+    /// squarely through it: a good headshot.
+    fn headshot(
+        &self,
+        graph: &Graph,
+        at: Vector3<f32>,
+        way: Vector3<f32>,
+    ) -> Option<(Vector3<f32>, f32)> {
+        ragdoll::struck_squarely(graph, self.avatar.root(), HEAD, at, way, SQUARELY)
+    }
+
+    /// Blows its head apart into voxels, wherever it is - on it or lying broken off - after a
+    /// good headshot going `way`, its head `middle` and `radius` round. Whether it was there to.
+    fn blow_head_up(
+        &mut self,
+        graph: &mut Graph,
+        (middle, radius): (Vector3<f32>, f32),
+        way: Vector3<f32>,
+    ) -> bool {
+        if !self.avatar.blow_up(graph, HEAD, middle, radius, way) {
+            return false;
+        }
+        if let Some(ragdoll) = self.ragdoll.as_mut() {
+            ragdoll.let_loose(graph, HEAD);
+        }
+        Log::info(format!("Headshot: head blown apart at {middle:?}"));
+        true
     }
 }
 
@@ -1685,7 +1718,7 @@ impl Inhabitants {
     }
 
     /// Shoots down the droid nearest the `player`'s feet, as bolts from them would, [`HITS`]
-    /// times over, for MAZE_KNOCKDOWN; and with MAZE_DISMEMBER=<bodies>, a comma-separated list
+    /// times over, for MAZE_KNOCKDOWN, or once through the head with MAZE_HEADSHOT; and with MAZE_DISMEMBER=<bodies>, a comma-separated list
     /// of ragdoll bodies such as head,forearm.L,shin.R, breaks those off it too. Which one, if any
     /// is standing.
     pub fn knock_down(&mut self, graph: &mut Graph, player: Vector3<f32>) -> Option<usize> {
@@ -1697,8 +1730,16 @@ impl Inhabitants {
             })?;
         self.set_hostile(n);
         let droid = &self.droids[n];
-        let at = droid.feet + Vector3::new(0.0, 1.2, 0.0);
-        let from = player + Vector3::new(0.0, 1.5, 0.0);
+        let mut at = droid.feet + Vector3::new(0.0, 1.2, 0.0);
+        let mut from = player + Vector3::new(0.0, 1.5, 0.0);
+        // With MAZE_HEADSHOT, one bolt level through the middle of its skull.
+        let headshot = crate::platform::var("MAZE_HEADSHOT").is_some();
+        if headshot {
+            if let Some((head, _)) = graph.find_by_name(droid.avatar.root(), "DEF-spine.004") {
+                at = graph[head].global_position() + Vector3::new(0.0, 0.19, 0.0);
+                from = Vector3::new(player.x, at.y, player.z);
+            }
+        }
         let strike = Strike {
             collider: droid.collider,
             at,
@@ -1739,8 +1780,14 @@ impl Inhabitants {
         }) {
             let ragdoll = droid.ragdoll.as_ref()?;
             ragdoll.shove(graph, collider, strike.way * ragdoll::SHOVE, strike.at);
-            if let Some(body) = ragdoll.body_of(collider) {
-                droid.break_off(graph, body);
+            let body = ragdoll.body_of(collider);
+            let headshot = body
+                .filter(|&body| body == HEAD)
+                .and_then(|_| droid.headshot(graph, strike.at, strike.way));
+            if !headshot.is_some_and(|head| droid.blow_head_up(graph, head, strike.way)) {
+                if let Some(body) = body {
+                    droid.break_off(graph, body);
+                }
             }
             return None;
         }
@@ -1752,8 +1799,10 @@ impl Inhabitants {
         if (droid.alert.is_none() && droid.side.is_none()) || droid.down {
             return None;
         }
+        // A good headshot stops it there and then.
+        let headshot = droid.headshot(graph, strike.at, strike.way);
         droid.hits += 1;
-        if droid.hits < HITS {
+        if droid.hits < HITS && headshot.is_none() {
             if droid.side.is_some() {
                 // In capture the flag, it turns to whoever it was, to see them.
                 let to = flat(player - droid.feet);
@@ -1780,9 +1829,14 @@ impl Inhabitants {
             forward(droid.heading) * droid.speed,
             Some((strike.way * ragdoll::STOPPING_BLOW, strike.at)),
         );
+        if let Some(head) = headshot {
+            droid.blow_head_up(graph, head, strike.way);
+        }
         if let Some(ragdoll) = &droid.ragdoll {
-            if let Some(body) = ragdoll.body_struck(graph, strike.at, strike.way) {
-                droid.break_off(graph, body);
+            if headshot.is_none() {
+                if let Some(body) = ragdoll.body_struck(graph, strike.at, strike.way) {
+                    droid.break_off(graph, body);
+                }
             }
             return Some(n);
         }

@@ -2155,6 +2155,21 @@ impl Avatar {
             .is_some_and(|parts| parts.break_off(graph, body))
     }
 
+    /// Blows the part the ragdoll body `body` carries apart into voxels, as
+    /// [`Dismember::blow_up`] does. Whether it was there to blow apart.
+    pub fn blow_up(
+        &mut self,
+        graph: &mut Graph,
+        body: &str,
+        middle: Vector3<f32>,
+        radius: f32,
+        way: Vector3<f32>,
+    ) -> bool {
+        self.dismember
+            .as_mut()
+            .is_some_and(|parts| parts.blow_up(graph, body, middle, radius, way))
+    }
+
     /// Takes the loose voxels its breaks have spilt out of the scene.
     pub fn sweep_up(&mut self, graph: &mut Graph) {
         if let Some(parts) = self.dismember.as_mut() {

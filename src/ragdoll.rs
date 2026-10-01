@@ -272,6 +272,38 @@ pub fn character_groups() -> InteractionGroups {
     InteractionGroups::new(BitMask(CHARACTERS), BitMask(u32::MAX))
 }
 
+/// Whether a bolt going `way` that struck the droid whose model's root is `root` at `at` went
+/// squarely through the body called `name` - through the middle `share` of the biggest of its
+/// colliders, the skull rather than the neck - measured where the bones are, standing or lying.
+/// If it did, where the middle of that collider is across the world, and how far round it is.
+pub fn struck_squarely(
+    graph: &Graph,
+    root: Handle<Node>,
+    name: &str,
+    at: Vector3<f32>,
+    way: Vector3<f32>,
+    share: f32,
+) -> Option<(Vector3<f32>, f32)> {
+    let body = spec()?.bodies.iter().find(|body| body.name == name)?;
+    let (bone, _) = graph.find_by_name(root, &body.bone)?;
+    let pose = Pose::of_transform(&graph[bone].global_transform());
+    let place = |v: [f32; 3]| pose.position + pose.rotation * (vector(v) * SCALE);
+    let (begin, end, radius) = body
+        .colliders
+        .iter()
+        .map(|shape| match *shape {
+            Shape::Capsule { begin, end, radius } => (place(begin), place(end), radius * SCALE),
+            Shape::Cuboid {
+                position,
+                half_extents: [x, y, z],
+                ..
+            } => (place(position), place(position), (x + y + z) / 3.0 * SCALE),
+        })
+        .max_by(|a, b| a.2.total_cmp(&b.2))?;
+    let (_, gap) = closest(at - way * 0.3, at + way * 1.0, begin, end);
+    (gap <= radius * share).then(|| (0.5 * (begin + end), radius))
+}
+
 /// One of the bodies: its name, the bone it drives, its colliders, and the joint that holds it to
 /// the body it hangs off, unless it has none or has been let loose.
 #[derive(Debug, Clone, PartialEq)]

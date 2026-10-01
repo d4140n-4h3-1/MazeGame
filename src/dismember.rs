@@ -141,6 +141,8 @@ struct Break {
     voxel: f32,
     spill: usize,
     broken: bool,
+    /// Whether the part that came off has been blown apart, and gone.
+    blown: bool,
 }
 
 /// The collision group of the loose voxels, which bump into the maze and the droids lying in it,
@@ -151,6 +153,13 @@ pub const SPILL: u32 = 1 << 30;
 const SPILL_SPEED: (f32, f32) = (0.6, 2.2);
 const SPILL_SPIN: f32 = 12.0;
 const SPILL_DENSITY: f32 = 1500.0;
+/// A part blown apart bursts into this many voxels, up to this many times as big across as the
+/// break's, flying out from its middle this fast, in meters a second, slowest and fastest, and
+/// carried on along the bolt by up to this much of its speed.
+const BURST: usize = 90;
+const BURST_GROWTH: f32 = 2.2;
+const BURST_SPEED: (f32, f32) = (1.5, 5.5);
+const BURST_CARRY: f32 = 0.6;
 
 /// One droid's parts, whole or come apart.
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +207,7 @@ impl Dismember {
                     voxel: b.voxel,
                     spill: b.spill,
                     broken: false,
+                    blown: false,
                 })
             })
             .collect();
@@ -307,6 +317,39 @@ impl Dismember {
         }
         true
     }
+
+    /// Blows the part the ragdoll body `body` carries apart, struck by a bolt going `way`: it
+    /// breaks off if it has not already, then is gone - its pieces, its broken end and whatever
+    /// rides its bones, the eyes in a head - and bursts into glowing voxels flying out from
+    /// `middle`, all through `radius` of it. Whether it was there to blow apart.
+    pub fn blow_up(
+        &mut self,
+        graph: &mut Graph,
+        body: &str,
+        middle: Vector3<f32>,
+        radius: f32,
+        way: Vector3<f32>,
+    ) -> bool {
+        let Some(at) = self.breaks.iter().position(|b| b.body == body && !b.blown) else {
+            return false;
+        };
+        if !self.breaks[at].broken {
+            self.break_off(graph, body);
+        }
+        self.breaks[at].blown = true;
+        let Break { bone, end, .. } = self.breaks[at].clone();
+        let off: FxHashSet<Handle<Node>> = graph.traverse_handle_iter(bone).collect();
+        for part in self.parts.iter().filter(|part| off.contains(&part.bone)) {
+            graph[part.node].set_visibility(false);
+        }
+        graph[end].set_visibility(false);
+        // And everything that rides its bones, the eyes in a head.
+        for node in off {
+            graph[node].set_visibility(false);
+        }
+        self.burst(graph, at, middle, radius, way);
+        true
+    }
 }
 
 impl Dismember {
@@ -347,54 +390,91 @@ impl Dismember {
             .try_normalize(1.0e-6)
             .unwrap_or_else(Vector3::y);
         let size = voxel * SCALE;
-        let groups = InteractionGroups::new(BitMask(SPILL), BitMask(!(CHARACTERS | SPILL)));
         for k in 0..spill {
             let side = if k % 2 == 0 { 1.0 } else { -1.0 };
             let way = (along * side + self.any_way() * 0.7)
                 .try_normalize(1.0e-6)
                 .unwrap_or(along);
             let speed = SPILL_SPEED.0 + (SPILL_SPEED.1 - SPILL_SPEED.0) * self.roll();
-            let spin = self.any_way() * SPILL_SPIN * self.roll();
             let place = from + way * (size * 1.5) + self.any_way() * (size * self.roll());
-            let turned = UnitQuaternion::from_scaled_axis(
-                self.any_way() * std::f32::consts::PI * self.roll(),
-            );
-            let material = self.glows[k % self.glows.len()].clone();
-            let cube = MeshBuilder::new(BaseBuilder::new().with_cast_shadows(false))
-                .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
-                    SurfaceData::make_cube(Matrix4::new_scaling(size)),
-                ))
-                .with_material(material)
-                .build()])
-                .build(graph);
-            let half = 0.5 * size;
-            let collider = ColliderBuilder::new(BaseBuilder::new())
-                .with_shape(ColliderShape::cuboid(half, half, half))
-                .with_density(Some(SPILL_DENSITY))
-                .with_friction(0.6)
-                .with_restitution(0.3)
-                .with_collision_groups(groups)
-                .build(graph);
-            let body = RigidBodyBuilder::new(
-                BaseBuilder::new()
-                    .with_name("spilt voxel")
-                    .with_child(cube)
-                    .with_child(collider)
-                    .with_local_transform(
-                        TransformBuilder::new()
-                            .with_local_position(place)
-                            .with_local_rotation(turned)
-                            .build(),
-                    ),
-            )
-            // Its mass, and how hard it is to turn, come from its collider.
-            .with_mass(0.0)
-            .with_lin_vel(way * speed)
-            .with_ang_vel(spin)
-            .with_ccd_enabled(true)
-            .build(graph);
-            self.spilt.push(body.to_base());
+            self.voxel(graph, k, place, size, way * speed);
         }
+    }
+
+    /// Bursts the part of the `at`th break into [`BURST`] voxels, all through `radius` of
+    /// `middle`, flying out from it and on along the bolt's `way`.
+    fn burst(
+        &mut self,
+        graph: &mut Graph,
+        at: usize,
+        middle: Vector3<f32>,
+        radius: f32,
+        way: Vector3<f32>,
+    ) {
+        if self.glows.is_empty() {
+            return;
+        }
+        let voxel = self.breaks[at].voxel * SCALE;
+        for k in 0..BURST {
+            let out = self.any_way();
+            // Evenly through the ball, not bunched at its middle.
+            let place = middle + out * (radius * self.roll().cbrt());
+            let speed = BURST_SPEED.0 + (BURST_SPEED.1 - BURST_SPEED.0) * self.roll();
+            let carry = way * (speed * BURST_CARRY * self.roll());
+            let size = voxel * (1.0 + (BURST_GROWTH - 1.0) * self.roll());
+            self.voxel(graph, k, place, size, out * speed + carry);
+        }
+    }
+
+    /// A loose glowing voxel `size` across at `place`, the `k`th material of the ends' glows,
+    /// flying off at `velocity` and tumbling, swept up with the droid.
+    fn voxel(
+        &mut self,
+        graph: &mut Graph,
+        k: usize,
+        place: Vector3<f32>,
+        size: f32,
+        velocity: Vector3<f32>,
+    ) {
+        let spin = self.any_way() * SPILL_SPIN * self.roll();
+        let turned =
+            UnitQuaternion::from_scaled_axis(self.any_way() * std::f32::consts::PI * self.roll());
+        let groups = InteractionGroups::new(BitMask(SPILL), BitMask(!(CHARACTERS | SPILL)));
+        let material = self.glows[k % self.glows.len()].clone();
+        let cube = MeshBuilder::new(BaseBuilder::new().with_cast_shadows(false))
+            .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
+                SurfaceData::make_cube(Matrix4::new_scaling(size)),
+            ))
+            .with_material(material)
+            .build()])
+            .build(graph);
+        let half = 0.5 * size;
+        let collider = ColliderBuilder::new(BaseBuilder::new())
+            .with_shape(ColliderShape::cuboid(half, half, half))
+            .with_density(Some(SPILL_DENSITY))
+            .with_friction(0.6)
+            .with_restitution(0.3)
+            .with_collision_groups(groups)
+            .build(graph);
+        let body = RigidBodyBuilder::new(
+            BaseBuilder::new()
+                .with_name("spilt voxel")
+                .with_child(cube)
+                .with_child(collider)
+                .with_local_transform(
+                    TransformBuilder::new()
+                        .with_local_position(place)
+                        .with_local_rotation(turned)
+                        .build(),
+                ),
+        )
+        // Its mass, and how hard it is to turn, come from its collider.
+        .with_mass(0.0)
+        .with_lin_vel(velocity)
+        .with_ang_vel(spin)
+        .with_ccd_enabled(true)
+        .build(graph);
+        self.spilt.push(body.to_base());
     }
 
     /// Takes every loose voxel spilt so far out of the scene.
