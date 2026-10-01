@@ -11,8 +11,27 @@
 
 use fyrox::core::algebra::Vector3;
 
-/// The map it is played on.
-pub const CTF_MAP: &str = "data/arena/ctf_map.glb";
+/// A map it can be played on: what the main menu calls it, its model, and a line about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Map {
+    pub name: &'static str,
+    pub path: &'static str,
+    pub about: &'static str,
+}
+
+/// The maps it can be played on, picked from in the main menu.
+pub const MAPS: [Map; 2] = [
+    Map {
+        name: "Lanes",
+        path: "data/arena/ctf_map.glb",
+        about: "Walled bases joined by three lanes, all on one floor.",
+    },
+    Map {
+        name: "Balconies",
+        path: "data/arena/ctf_balconies.glb",
+        about: "Two floors: each flag in a well under a balcony, catwalks along the walls, a raised hub.",
+    },
+];
 
 /// The player's side; the other is the enemy's.
 pub const PLAYERS: Side = Side::Blue;
@@ -76,6 +95,14 @@ impl Bases {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_map_is_there_to_play() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for map in MAPS {
+            assert!(dir.join(map.path).is_file(), "{} has no model at {}", map.name, map.path);
+        }
+    }
 
     #[test]
     fn each_droid_keeps_to_its_own_post_or_else_its_flag() {

@@ -106,6 +106,15 @@ their animations; the crate decides what they make of what is round them.
 
 ### The game
 
+1 October 2026:
+
+- **A choice of maps for capture the flag.** Capture the Flag in the main menu opens a page of
+  maps: Lanes, the first, and Balconies, `data/arena/ctf_balconies.glb`, on two floors - each
+  flag in an open well under a balcony round three sides of it, catwalks along the side walls
+  joining the balconies, a raised hub in the middle, and stairs between them all. The droids keep
+  to the ground floor, so the high ground is the player's. `data/arena/ctf_balconies.py` builds
+  it in Blender, its cover laid out at random from a seed and mirrored end to end.
+
 30 September 2026:
 
 - **Your allies say something when you talk to them** in capture the flag: E by one of blue's
@@ -534,7 +543,8 @@ well.
 It opens on the main menu, to pick which game to play:
 
 - **Maze**: find the way out of a new random maze each round.
-- **Capture the Flag**: in `data/arena/ctf_map.glb`, you are blue. Hack the computer in red's
+- **Capture the Flag**: you are blue. Pick a map - Lanes (`data/arena/ctf_map.glb`) or
+  Balconies (`data/arena/ctf_balconies.glb`), Escape going back - then hack the computer in red's
   base to take down the firewall round their flag, take it, and bring it home to your own, with
   blue's droids and drone on your side and red's against you.
 

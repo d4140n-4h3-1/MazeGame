@@ -1,7 +1,7 @@
 //! The menus.
 //!
 //! The main menu comes first, over a blank screen: which game to play - the maze, or capture the
-//! flag - or to leave.
+//! flag on one of its maps, picked on a page of their own - or to leave.
 //!
 //! The pause menu: the world stops behind a dimmed screen, with buttons to carry on, to switch
 //! the maze's lights, to change the options, to start again, to go back to the main menu or to
@@ -9,7 +9,7 @@
 //! what the droids say, in System Latin and in English, each on or off. Escape there goes back to
 //! the menu.
 
-use crate::dialogue::screen::Subtitles;
+use crate::{ctf::MAPS, dialogue::screen::Subtitles};
 use fyrox::{
     core::{color::Color, pool::Handle},
     gui::{
@@ -54,23 +54,34 @@ pub enum Choice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Game {
     Maze,
-    CaptureTheFlag,
+    /// Capture the flag, on the map of [`MAPS`] at this index.
+    CaptureTheFlag(usize),
 }
 
 /// What the player picked in the main menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Start {
     Play(Game),
+    /// Go to the maps for capture the flag, or back from them to the menu.
+    Maps,
+    Back,
     Quit,
 }
 
-/// The main menu: which game to play, or to leave.
+/// The main menu: which game to play, or to leave; and for capture the flag, a page of its own
+/// for which map.
 #[derive(Debug, Default, PartialEq)]
 pub struct MainMenu {
     screen: Handle<Screen>,
     maze: Handle<Button>,
     ctf: Handle<Button>,
     quit: Handle<Button>,
+    /// The menu's own page, and the maps'.
+    main_page: Handle<UiNode>,
+    maps_page: Handle<UiNode>,
+    /// A button for each of [`MAPS`], in order.
+    maps: Vec<Handle<Button>>,
+    back: Handle<Button>,
 }
 
 impl MainMenu {
@@ -89,17 +100,34 @@ impl MainMenu {
         .with_text(
             "Maze: find the way out of a new maze each round.\n\
              Capture the Flag: hack red's firewall, take their flag and bring it home,\n\
-             with blue's droids and drone on your side.",
+             with blue's droids and drone on your side, on the map of your choice.",
         )
         .with_font_size(16.0.into())
         .with_horizontal_text_alignment(HorizontalAlignment::Center)
         .build(ctx);
         let items = [heading.to_base(), maze.to_base(), ctf.to_base(), quit.to_base(), about.to_base()];
-        let page = page(ctx, true, items);
+        let main_page = page(ctx, true, items);
+        let maps_title = title(ctx, "Capture the Flag");
+        let maps: Vec<_> = MAPS.iter().map(|map| button(ctx, map.name).0).collect();
+        let (back, _) = button(ctx, "Back");
+        let maps_about = TextBuilder::new(
+            WidgetBuilder::new()
+                .with_margin(Thickness::top(24.0))
+                .with_foreground(Brush::Solid(Color::opaque(190, 190, 200)).into()),
+        )
+        .with_text(maps_text())
+        .with_font_size(16.0.into())
+        .with_horizontal_text_alignment(HorizontalAlignment::Center)
+        .build(ctx);
+        let items = std::iter::once(maps_title.to_base())
+            .chain(maps.iter().map(|map| map.to_base()))
+            .chain([back.to_base(), maps_about.to_base()]);
+        let maps_page = page(ctx, false, items);
         let backdrop = BorderBuilder::new(
             WidgetBuilder::new()
                 .with_background(Brush::Solid(Color::opaque(8, 10, 14)).into())
-                .with_child(page),
+                .with_child(main_page)
+                .with_child(maps_page),
         )
         .with_stroke_thickness(Thickness::uniform(0.0).into())
         .build(ctx);
@@ -110,24 +138,45 @@ impl MainMenu {
             maze,
             ctf,
             quit,
+            main_page,
+            maps_page,
+            maps,
+            back,
         }
     }
 
+    /// Shows or hides the menu, on its own page.
     pub fn set_open(&self, ui: &UserInterface, open: bool) {
         ui.send(self.screen, WidgetMessage::Visibility(open));
+        self.show_maps(ui, false);
+    }
+
+    /// Shows the maps for capture the flag, or the menu's own page.
+    pub fn show_maps(&self, ui: &UserInterface, maps: bool) {
+        ui.send(self.main_page, WidgetMessage::Visibility(!maps));
+        ui.send(self.maps_page, WidgetMessage::Visibility(maps));
     }
 
     /// What `message` picks from the menu, if anything.
     pub fn choice(&self, message: &UiMessage) -> Option<Start> {
+        let maps = (self.maps.iter().enumerate()).map(|(n, &map)| (map, Start::Play(Game::CaptureTheFlag(n))));
         [
             (self.maze, Start::Play(Game::Maze)),
-            (self.ctf, Start::Play(Game::CaptureTheFlag)),
+            (self.ctf, Start::Maps),
+            (self.back, Start::Back),
             (self.quit, Start::Quit),
         ]
         .into_iter()
+        .chain(maps)
         .find(|&(button, _)| matches!(message.data_from(button), Some(ButtonMessage::Click)))
         .map(|(_, choice)| choice)
     }
+}
+
+/// A line about each map, under the maps' buttons.
+fn maps_text() -> String {
+    let lines: Vec<_> = MAPS.iter().map(|map| format!("{}: {}", map.name, map.about)).collect();
+    lines.join("\n")
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -366,4 +415,43 @@ fn button(ctx: &mut BuildContext, label: &str) -> (Handle<Button>, Handle<Text>)
     .with_content(text)
     .build(ctx);
     (button, text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fyrox::core::algebra::Vector2;
+
+    fn click(button: Handle<Button>) -> UiMessage {
+        UiMessage::from_widget(button, ButtonMessage::Click)
+    }
+
+    #[test]
+    fn capture_the_flag_opens_the_maps_and_each_map_plays_its_own() {
+        let mut ui = UserInterface::new(Vector2::new(800.0, 600.0));
+        let menu = MainMenu::build(&mut ui);
+        assert_eq!(menu.maps.len(), MAPS.len());
+        assert_eq!(menu.choice(&click(menu.ctf)), Some(Start::Maps));
+        assert_eq!(menu.choice(&click(menu.back)), Some(Start::Back));
+        assert_eq!(menu.choice(&click(menu.maze)), Some(Start::Play(Game::Maze)));
+        for (n, &map) in menu.maps.iter().enumerate() {
+            assert_eq!(menu.choice(&click(map)), Some(Start::Play(Game::CaptureTheFlag(n))));
+        }
+    }
+
+    #[test]
+    fn the_maps_show_in_place_of_the_menus_own_page() {
+        let mut ui = UserInterface::new(Vector2::new(800.0, 600.0));
+        let menu = MainMenu::build(&mut ui);
+        let showing = |ui: &mut UserInterface| {
+            while ui.poll_message().is_some() {}
+            (ui[menu.main_page].visibility(), ui[menu.maps_page].visibility())
+        };
+        assert_eq!(showing(&mut ui), (true, false));
+        menu.show_maps(&ui, true);
+        assert_eq!(showing(&mut ui), (false, true));
+        // Opened again, it is back on its own page.
+        menu.set_open(&ui, true);
+        assert_eq!(showing(&mut ui), (true, false));
+    }
 }

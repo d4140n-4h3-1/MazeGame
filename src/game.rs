@@ -11,7 +11,7 @@ use fyrox::{
 use crate::{
     credits::Credits,
     computer::{self, Beeps, Computer, ScreenTerminal, Terminal, COMPUTER_MODEL},
-    ctf::{Bases, Side, CTF_MAP, PLAYERS},
+    ctf::{Bases, Side, MAPS, PLAYERS},
     firewall::{self, Firewalls},
     drone::{self, Drone, DroneLines, State, Target, DRONE_LINES, DRONE_MODEL},
     drone_shot::{Shots, SHOT_MODEL},
@@ -561,7 +561,7 @@ impl MazeGame {
     fn play(&mut self, ctx: &mut PluginContext, game: Game) {
         let resources = &ctx.resource_manager;
         let model = match game {
-            Game::CaptureTheFlag => Some(CTF_MAP.to_string()),
+            Game::CaptureTheFlag(map) => Some(MAPS[map].path.to_string()),
             Game::Maze => platform::var("MAZE_MODEL"),
         };
         match model {
@@ -890,7 +890,10 @@ impl MazeGame {
 
     fn on_key(&mut self, ctx: &mut PluginContext, code: KeyCode) {
         match code {
-            // On the main menu, only its buttons do anything.
+            // On the main menu, only its buttons do anything, and Escape goes back from the maps.
+            KeyCode::Escape if self.phase == Phase::Title => {
+                self.main_menu.show_maps(ctx.user_interfaces.first(), false)
+            }
             _ if self.phase == Phase::Title => (),
             // At the computer every key but Escape is for it: minus and the rest are typed.
             _ if self.hacking && !self.menu.is_open() && code != KeyCode::Escape => {
@@ -2717,6 +2720,8 @@ impl Plugin for MazeGame {
         }
         match self.main_menu.choice(message) {
             Some(Start::Play(game)) if self.phase == Phase::Title => self.play(ctx, game),
+            Some(Start::Maps) => self.main_menu.show_maps(ctx.user_interfaces.first(), true),
+            Some(Start::Back) => self.main_menu.show_maps(ctx.user_interfaces.first(), false),
             Some(Start::Quit) => platform::quit(ctx),
             _ => (),
         }
