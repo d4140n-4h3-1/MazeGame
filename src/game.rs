@@ -743,8 +743,9 @@ impl MazeGame {
         self.drone_alarmed = false;
         self.drone_calls.clear();
         self.hearts_placed = false;
-        let start_position = survey::cell_center(*origin, start.0, start.1);
-        let exit_position = survey::cell_center(*origin, exit.0, exit.1);
+        // On their floors: up on a balcony, say, rather than in the ground under it.
+        let start_position = grid.on_floor(*origin, start);
+        let exit_position = grid.on_floor(*origin, exit);
 
         let scene = &mut ctx.scenes[self.scene];
         // Light whatever marks the end: the model's own landmark if it has one, otherwise the
