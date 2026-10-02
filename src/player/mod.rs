@@ -136,12 +136,15 @@ pub struct Player {
     swing: f32,
     /// How far the knees are still bent under a landing, in meters.
     landing: f32,
-    /// How far the head has yet to come up after the body stepped up onto a stair, in meters;
+    /// How far the head has yet to come up after the body stepped up onto a stair, in meters -
+    /// or, below 0, to go down after it walked down off one;
     /// and how long ago it did, while it is still carried over the step's edge, in seconds.
     stepped: f32,
     stepping: Option<f32>,
     /// Whether it is walking down off the edge of a step onto the one below: still on its feet.
+    /// And how high the body was last frame, in meters, for the eyes to ease down after it.
     descending: bool,
+    last_height: f32,
     /// How far the head is rolled into its movement, in radians.
     roll: f32,
     /// The yaw last frame, to see how fast the player is turning.
@@ -219,6 +222,7 @@ impl Default for Player {
             stepped: 0.0,
             stepping: None,
             descending: false,
+            last_height: 0.0,
             roll: 0.0,
             last_yaw: 0.0,
             posture: Posture::Standing,
@@ -418,6 +422,14 @@ impl Player {
         self.descending =
             !self.grounded && (was_grounded || self.descending) && self.step_below(graph);
         self.grounded |= self.descending;
+        // The body drops onto each step of its own weight, all at once; the eyes come down after
+        // it over a moment, as they come up after it climbing - all the way down onto the step,
+        // which reads as underfoot a little before the body is on it. Not after a fall.
+        let height = graph[self.body].global_position().y;
+        if self.grounded && was_grounded && height < self.last_height {
+            self.stepped += height - self.last_height;
+        }
+        self.last_height = height;
         // Landed: the knees take whatever the body was falling at as of last frame, since the
         // solver has already taken it out of the body by now.
         if self.grounded && !was_grounded {

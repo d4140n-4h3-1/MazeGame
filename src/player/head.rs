@@ -37,8 +37,9 @@ fn bob(phase: f32, swing: f32) -> (f32, f32) {
     )
 }
 
-/// How quickly the head comes up after the body steps up a stair, like a rate: the body goes up
-/// at once, the eyes over a moment, so that climbing stairs does not jolt the view.
+/// How quickly the head comes up after the body steps up a stair, or down after it steps down
+/// one, like a rate: the body goes up at once, or drops onto the step below, the eyes over a
+/// moment, so that taking stairs does not jolt the view.
 const STEP_EASING: f32 = 14.0;
 /// How far the knees give on landing, in meters per meter per second of fall, and the most they
 /// can give however far the drop.

@@ -30,6 +30,11 @@ const GROUND_REACH: f32 = 0.15;
 const STEP_UP: f32 = 0.4;
 /// The deepest step the body walks down without falling, in meters: as high as it walks up.
 const STEP_DOWN: f32 = STEP_UP;
+/// How fast the body goes down onto the step below, on its feet: as many meters a second as it
+/// goes along the floor, a little steeper than any stairs, so that it keeps to them; and at
+/// least this, to settle onto a step from its edge standing still.
+const DESCENT: f32 = 1.0;
+const LEAST_DESCENT: f32 = 0.5;
 /// The lowest that is worth stepping up rather than sliding over, in meters.
 const STEP_LEAST: f32 = 0.02;
 /// How far out from its middle the body feels ahead for a step, in meters: its radius and a
@@ -143,6 +148,12 @@ impl Player {
         };
         velocity.x = horizontal.x;
         velocity.z = horizontal.z;
+        // On its feet, down onto the step below at a walk down the stairs: its round bottom would
+        // otherwise hang on the edge of each step and then drop off it. On a floor the floor
+        // holds it up; a jump, or a step being climbed, goes its own way.
+        if self.grounded && self.stepping.is_none() && self.since_jump.is_none() && velocity.y <= 0.0 {
+            velocity.y = -(horizontal.norm() * DESCENT).max(LEAST_DESCENT);
+        }
         // Every jump starts high. Let go of quickly, it is cut short into a low one.
         let mut low = false;
         if let Some(since) = self.since_jump.as_mut() {
@@ -317,8 +328,9 @@ mod tests {
 
     /// Twelve steps of 0.25 m, 0.35 m deep, down from a floor 3 m up from z = 1, as from the arena;
     /// or, `ledge`, a sheer drop there instead. The player walks forward along +z from the top for
-    /// `seconds`: where their feet end up, and how many frames they were off their feet.
-    fn walk_down(ledge: bool, seconds: f32) -> (Vector3<f32>, usize) {
+    /// `seconds`: where their feet end up, how many frames they were off their feet, and the most
+    /// the eyes' height - the body's, less how far the head has yet to follow it - changed in a frame.
+    fn walk_down(ledge: bool, seconds: f32) -> (Vector3<f32>, usize, f32) {
         let mut graph = Graph::new();
         block(&mut graph, Vector3::new(-5.0, -1.0, -5.0), Vector3::new(5.0, 0.0, 20.0));
         block(&mut graph, Vector3::new(-1.25, 0.0, -5.0), Vector3::new(1.25, 3.0, 1.0));
@@ -332,26 +344,35 @@ mod tests {
         player.teleport(&mut graph, Vector3::new(0.0, 3.0 - FEET + 0.01, 0.0), 0.0);
         let dt = 1.0 / 60.0;
         let mut off = 0;
+        let (mut eyes, mut jolt) = (None, 0.0_f32);
         for frame in 0..(seconds / dt) as usize {
             // Settled on the top before setting off.
             player.on_key(fyrox::keyboard::KeyCode::KeyW, frame >= 30);
             player.update(&mut graph, dt, true);
             graph.update(Vector2::new(800.0, 600.0), dt, GraphUpdateSwitches::default());
             off += usize::from(frame >= 30 && !player.grounded);
+            let now = player.feet(&graph).y - player.stepped;
+            if let Some(before) = eyes.filter(|_| frame >= 30) {
+                jolt = jolt.max((now - before as f32).abs());
+            }
+            eyes = Some(now);
         }
-        (player.feet(&graph), off)
+        (player.feet(&graph), off, jolt)
     }
 
     #[test]
     fn it_walks_down_stairs_on_its_feet() {
-        let (feet, off) = walk_down(false, 12.0);
+        let (feet, off, jolt) = walk_down(false, 12.0);
         assert!(feet.y < 0.1 && feet.z > 1.0 + 12.0 * 0.35, "down to the bottom: {feet:?}");
         assert_eq!(off, 0, "never off its feet on the way");
+        // Walking down, the eyes drop under a centimetre a frame on average; a body hanging on
+        // each step's edge and then falling off it, up to three.
+        assert!(jolt < 0.015, "down the stairs smoothly: {jolt} m in a frame");
     }
 
     #[test]
     fn walking_off_a_ledge_is_a_fall() {
-        let (feet, off) = walk_down(true, 5.0);
+        let (feet, off, _) = walk_down(true, 5.0);
         assert!(feet.y < 0.1, "down on the floor: {feet:?}");
         assert!(off > 10, "off its feet as it fell: {off} frames");
     }

@@ -29,8 +29,8 @@
 //! On stairs, walking or running along them as it faces, it climbs or goes down them with its
 //! cycles made on stairs: a step at a time walking, two at a time at any faster gait, and only as
 //! fast as those go - a little faster hurrying. Each foot is still put down on the step under it,
-//! by however far that is from the step the cycle had there; and the hips come up a step after
-//! the floor, over a moment. Going over to them or back, the feet go by the steps under them in
+//! by however far that is from the step the cycle had there; and the hips come up or down a step
+//! after the floor, over a moment. Going over to them or back, the feet go by the steps under them in
 //! the pose as far as it has gone over. Strafing any way but straight ahead, or crouched, it
 //! takes stairs in its own cycles, each foot put down on its step all the same.
 //!
@@ -322,9 +322,11 @@ const STAIR_LOOK: f32 = 0.35;
 const STAIR_SLOPE: (f32, f32) = (0.3, 0.15);
 /// How much faster than the run's stair cycle the droid takes stairs running, and sprinting.
 const STAIR_HURRY: (f32, f32) = (1.15, 1.3);
-/// How quickly the hips follow the floor up a step, like a rate, so that a body lifted a step at
-/// a time does not jolt them.
+/// How quickly the hips follow the floor up or down a step, like a rate, so that a body lifted a
+/// step at a time, or dropping onto each one below, does not jolt them; and how far above the
+/// floor they may stay following it down, in meters, no further than the legs reach down to it.
 const RIDE_RATE: f32 = 10.0;
+const RIDE_ABOVE: f32 = 0.1;
 /// The pistol in its right hand, which everything on it hangs off, as long as [`MOTION`] does not
 /// say otherwise.
 const PISTOL: &str = "pistol";
@@ -2973,8 +2975,9 @@ impl Avatar {
     ///
     /// Playing a cycle made on stairs, which has each foot on a step of its own already, `made_on`
     /// is how high it has the step under each foot (0 for one made on level floor): a foot only
-    /// goes up or down by how far the step under it is from that one. And the hips follow the floor up a step over a moment,
-    /// rather than all at once with a body lifted onto it.
+    /// goes up or down by how far the step under it is from that one. And the hips follow the
+    /// floor up or down a step over a moment, rather than all at once with a body lifted onto it
+    /// or dropping onto it.
     fn plant_feet(
         &mut self,
         graph: &Graph,
@@ -2998,10 +3001,12 @@ impl Avatar {
             };
             *footing += (wanted - *footing) * follow;
         }
-        // Up a step, the hips come up after the floor; down one, or off the ground, they keep to it.
+        // Up or down a step, the hips come after the floor - down, never far above it; off the
+        // ground, they keep to it.
         let ride = match self.ride {
-            Some(ride) if grounded && floor > ride && floor - ride < MOST_STEP => {
-                ride + (floor - ride) * (1.0 - (-RIDE_RATE * dt).exp())
+            Some(ride) if grounded && (floor - ride).abs() < MOST_STEP => {
+                let ride = ride + (floor - ride) * (1.0 - (-RIDE_RATE * dt).exp());
+                ride.min(floor + RIDE_ABOVE)
             }
             _ => floor,
         };
