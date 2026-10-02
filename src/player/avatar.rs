@@ -26,6 +26,13 @@
 //! going, it turns only by what is left over, a few degrees. Without a strafe back it plays its
 //! cycle backwards, and without the others it turns as far as it has to, up to side on.
 //!
+//! On stairs, walking or running along them as it faces, it climbs or goes down them with its
+//! cycles made on stairs: a step at a time walking, two at a time at any faster gait, and only as
+//! fast as those go - a little faster hurrying. Each foot is still put down on the step under it,
+//! by however far that is from the step the cycle had there; and the hips come up a step after
+//! the floor, over a moment. Strafing or crouched, it takes stairs in its own cycles, each foot
+//! put down on its step all the same.
+//!
 //! Sprinting or running flat out, and only then, the droid skids, with the skids for that gait;
 //! jogging, it just turns and slows down.
 //! Turning round - from going forward to going back, say - it digs its feet in, slides, swings
@@ -299,6 +306,24 @@ const MOST_STEP: f32 = 0.6;
 /// How quickly a foot comes to the step under it, like a rate: after 1/FOOTING_RATE seconds,
 /// about two thirds of the way.
 const FOOTING_RATE: f32 = 18.0;
+/// The droid's cycles on stairs, made for the maps' (a step 0.25 m up and 0.35 m deep): walking a
+/// step at a time, and running two at a time, each up and down; with the gait each is for, the
+/// run going for every gait faster than a walk.
+const STAIRS: [(&str, &str, Gait); 2] = [
+    ("droid_stairs_walk_up", "droid_stairs_walk_down", Gait::Walking),
+    ("droid_stairs_run_up", "droid_stairs_run_down", Gait::Jogging),
+];
+/// How far ahead of the droid and behind it the floor is looked at to tell stairs, in meters: a
+/// step's depth, so that on stairs the floor there is a step or two up or down, within
+/// [`MOST_STEP`] of where it stands. And how steep the floor between has to be, rise over run,
+/// to be taken as stairs - going onto them, and staying on them: a step up or down at either.
+const STAIR_LOOK: f32 = 0.35;
+const STAIR_SLOPE: (f32, f32) = (0.3, 0.15);
+/// How much faster than the run's stair cycle the droid takes stairs running, and sprinting.
+const STAIR_HURRY: (f32, f32) = (1.15, 1.3);
+/// How quickly the hips follow the floor up a step, like a rate, so that a body lifted a step at
+/// a time does not jolt them.
+const RIDE_RATE: f32 = 10.0;
 /// The pistol in its right hand, which everything on it hangs off, as long as [`MOTION`] does not
 /// say otherwise.
 const PISTOL: &str = "pistol";
@@ -833,6 +858,22 @@ struct Clip {
     forward_m: Vec<f32>,
     left_m: Vec<f32>,
     turn_left_deg: Vec<f32>,
+    /// On stairs, how high the step under each ankle, left and right, is from the root, in the
+    /// model's own meters, each frame: the stairs the clip was made on.
+    #[serde(default)]
+    ground_m: Option<[Vec<f32>; 2]>,
+}
+
+/// A cycle on stairs.
+#[derive(Debug, Clone, PartialEq)]
+struct StairCycle {
+    /// As an index into `cycles`.
+    index: usize,
+    gait: Gait,
+    /// Up the stairs, or down.
+    up: bool,
+    /// How high the step under each ankle is from the root as it was made, like [`Clip::ground_m`].
+    ground: [Vec<f32>; 2],
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
@@ -1399,6 +1440,13 @@ pub struct Avatar {
     /// from the floor the droid stands on, in meters, left and right, as of this frame.
     legs: Option<Legs>,
     footing: [f32; 2],
+    /// Its cycles on stairs, as far as it has them.
+    stair_cycles: Vec<StairCycle>,
+    /// Whether it is on stairs, walking or running along them as it faces: going up, or down.
+    stairs: Option<bool>,
+    /// The floor the hips ride on, in meters across the world: the floor it stands on, followed
+    /// up a step over a moment. None until it has stood on one.
+    ride: Option<f32>,
     /// The hips at rest, in the model's own terms.
     rest_hips: Bone,
     /// The highest bones the animations move, each with where the bone it hangs off is in the
@@ -1595,6 +1643,17 @@ fn left_step(stances: &[(f32, Stance)]) -> Option<f32> {
         });
     (sin != 0.0 || cos != 0.0)
         .then(|| sin.atan2(cos).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU)
+}
+
+/// How high `ground` - a height every frame of a cycle, the last the same frame as the first, a
+/// loop on - has the step under a foot `through` of the way through it, from 0 to 1, between frames.
+fn ground_at(ground: &[f32], through: f32) -> f32 {
+    let Some(last) = ground.len().checked_sub(1).filter(|&last| last > 0) else {
+        return ground.first().copied().unwrap_or(0.0);
+    };
+    let at = through.clamp(0.0, 1.0) * last as f32;
+    let i = (at as usize).min(last - 1);
+    ground[i] + (ground[i + 1] - ground[i]) * (at - i as f32)
 }
 
 /// How far through a cycle whose left foot is down `to` of the way through, from 0 to 1, has
@@ -1912,6 +1971,46 @@ impl Avatar {
                 Some(cycles.len() - 1)
             })
         });
+        // On stairs. Their feet climb as they go, so how fast each goes is from its path in
+        // MOTION rather than its feet; and as each is the cycle for its gait with the feet put on
+        // steps, its left foot is down when that one's is.
+        let mut stair_cycles = Vec::new();
+        for (up_name, down_name, gait) in STAIRS {
+            let phase = cycles[..gaited]
+                .iter()
+                .find(|cycle| cycle.gait == Some(gait))
+                .map(|cycle| cycle.phase);
+            for (name, up) in [(up_name, true), (down_name, false)] {
+                let clip = motions.and_then(|motions| motions.clips.get(name));
+                let (Some((handle, _)), Some(clip), Some(phase)) =
+                    (container.find_by_name_mut(name), clip, phase)
+                else {
+                    warn(format!("Droid: it has no {name}, so takes stairs as it walks"));
+                    continue;
+                };
+                let (Some(ground), Some(&went)) = (clip.ground_m.clone(), clip.forward_m.last())
+                else {
+                    warn(format!("Droid: {MOTION} has no steps for {name}"));
+                    continue;
+                };
+                let time = (clip.forward_m.len() - 1) as f32 / clip.fps;
+                let speed = went / time * SCALE;
+                info(format!("Droid: its {name} goes {speed:.2} m/s"));
+                cycles.push(Cycle {
+                    animation: handle,
+                    gait: Some(gait),
+                    speed,
+                    way: 0.0,
+                    phase,
+                });
+                stair_cycles.push(StairCycle {
+                    index: cycles.len() - 1,
+                    gait,
+                    up,
+                    ground,
+                });
+            }
+        }
         let cover_idle = COVER_IDLE.map(|name| {
             container.find_by_name_mut(name).map(|(handle, animation)| {
                 animation.set_loop(true);
@@ -2171,6 +2270,9 @@ impl Avatar {
             skeleton,
             legs,
             footing: [0.0; 2],
+            stair_cycles,
+            stairs: None,
+            ride: None,
             rest_hips,
             tops,
             playing: None,
@@ -2210,6 +2312,71 @@ impl Avatar {
         })
     }
 
+    /// Its cycle for `gait` in `posture` on the stairs it is on, if it is on stairs and has one:
+    /// the walk's walking, and the run's at any faster gait.
+    fn stair_cycle(&self, posture: Posture, gait: Gait) -> Option<&StairCycle> {
+        let up = self.stairs.filter(|_| posture == Posture::Standing)?;
+        let gait = match gait {
+            Gait::Walking => Gait::Walking,
+            Gait::Jogging | Gait::Running | Gait::Sprinting => Gait::Jogging,
+        };
+        self.stair_cycles
+            .iter()
+            .find(|stair| stair.gait == gait && stair.up == up)
+    }
+
+    /// The way it faces across the world, along the ground, one meter long.
+    fn ahead(&self, graph: &Graph) -> Vector3<f32> {
+        let body = graph[self.root].parent();
+        let ahead = UnitQuaternion::from_axis_angle(&Vector3::y_axis(), self.heading) * Vector3::z();
+        let ahead = graph
+            .try_get(body)
+            .map_or(ahead, |body| body.global_transform().transform_vector(&ahead));
+        Vector3::new(ahead.x, 0.0, ahead.z)
+            .try_normalize(1.0e-6)
+            .unwrap_or_else(Vector3::z)
+    }
+
+    /// Whether it is on stairs going `going`, as it faces: going up them, or down. Only walking or
+    /// running ahead along the floor, standing, out of cover - where the floor ahead of it and
+    /// the floor behind it are a stair's slope apart.
+    fn stairs_under(&self, graph: &Graph, going: Going) -> Option<bool> {
+        let along = going.grounded
+            && going.posture == Posture::Standing
+            && !going.strafing
+            && going.cover.is_none()
+            && going.speed >= STILL
+            && self.leaping.is_none()
+            && self.skidding.is_none();
+        if !along || self.stair_cycles.is_empty() {
+            return None;
+        }
+        let at = graph[self.root].global_position();
+        let ahead = self.ahead(graph) * STAIR_LOOK;
+        let rise = step_under(graph, at + ahead, at.y) - step_under(graph, at - ahead, at.y);
+        let slope = rise / (2.0 * STAIR_LOOK);
+        let steep = match self.stairs {
+            Some(_) => STAIR_SLOPE.1,
+            None => STAIR_SLOPE.0,
+        };
+        (slope.abs() > steep).then_some(slope > 0.0)
+    }
+
+    /// Playing a cycle on stairs, how high it has the step under each foot, left and right, from
+    /// the floor the droid stands on, in meters, as of where it is in the cycle: the stairs it
+    /// was made on.
+    fn stair_ground(&self, graph: &mut Graph) -> Option<[f32; 2]> {
+        let playing = self.playing?;
+        let stair = self.stair_cycles.iter().find(|stair| stair.index == playing)?;
+        let animation = self.cycles[playing].animation;
+        let container = self.container(graph)?;
+        let animation = &container[animation];
+        let through = ((animation.time_position() - animation.time_slice().start)
+            / animation.length())
+        .rem_euclid(1.0);
+        Some(stair.ground.each_ref().map(|ground| ground_at(ground, through) * SCALE))
+    }
+
     fn gaits(&self) -> Vec<Option<Gait>> {
         self.cycles[..self.gaited].iter().map(|c| c.gait).collect()
     }
@@ -2217,6 +2384,15 @@ impl Avatar {
     /// How fast the droid goes at `gait` in `posture`, in meters per second, with its feet
     /// keeping to the floor. None without a cycle to go by.
     pub fn pace(&self, posture: Posture, gait: Gait) -> Option<f32> {
+        // On stairs, as fast as its cycle there goes: hurrying, a little faster.
+        if let Some(stair) = self.stair_cycle(posture, gait) {
+            let hurry = match gait {
+                Gait::Running => STAIR_HURRY.0,
+                Gait::Sprinting => STAIR_HURRY.1,
+                Gait::Walking | Gait::Jogging => 1.0,
+            };
+            return Some(self.cycles[stair.index].speed * hurry);
+        }
         let gaits = self.gaits();
         let (index, rate) = match posture {
             Posture::Standing => {
@@ -2766,7 +2942,8 @@ impl Avatar {
             }
         }
         // Last of all, on top of the rest: on stairs, each foot down on its own step.
-        self.plant_feet(graph, &mut target, dt);
+        let made_on = self.stair_ground(graph);
+        self.plant_feet(graph, &mut target, made_on, dt);
         for (bone, pose) in target {
             let transform = graph[bone].local_transform_mut();
             transform.set_position(pose.position);
@@ -2779,7 +2956,18 @@ impl Avatar {
     /// bends at the knee to bring its foot onto its own step, keeping the lift and the angle the
     /// animation gives it, so that it walks up and down stairs a step at a time. Each foot comes
     /// to its step over a moment. On level floor, and off the ground, it changes nothing.
-    fn plant_feet(&mut self, graph: &Graph, target: &mut FxHashMap<Handle<Node>, Bone>, dt: f32) {
+    ///
+    /// Playing a cycle made on stairs, which has each foot on a step of its own already, `made_on`
+    /// is how high it has the step under each foot: a foot only goes up or down by how far the
+    /// step under it is from that one. And the hips follow the floor up a step over a moment,
+    /// rather than all at once with a body lifted onto it.
+    fn plant_feet(
+        &mut self,
+        graph: &Graph,
+        target: &mut FxHashMap<Handle<Node>, Bone>,
+        made_on: Option<[f32; 2]>,
+        dt: f32,
+    ) {
         let Some(legs) = self.legs.as_ref() else {
             return;
         };
@@ -2787,14 +2975,26 @@ impl Avatar {
         // As of the last frame: the floor the droid stands on, and where its feet were over it.
         let floor = graph[self.root].global_position().y;
         let follow = 1.0 - (-FOOTING_RATE * dt).exp();
-        for (footing, chain) in self.footing.iter_mut().zip(&self.skeleton.feet) {
+        let made_on = made_on.unwrap_or([0.0; 2]);
+        for ((footing, chain), made_on) in self.footing.iter_mut().zip(&self.skeleton.feet).zip(made_on) {
             let wanted = match (grounded, chain.last()) {
-                (true, Some(&foot)) => step_under(graph, graph[foot].global_position(), floor),
+                (true, Some(&foot)) => {
+                    step_under(graph, graph[foot].global_position(), floor) - made_on
+                }
                 _ => 0.0,
             };
             *footing += (wanted - *footing) * follow;
         }
-        if self.footing.iter().all(|footing| footing.abs() < 1.0e-3) {
+        // Up a step, the hips come up after the floor; down one, or off the ground, they keep to it.
+        let ride = match self.ride {
+            Some(ride) if grounded && floor > ride && floor - ride < MOST_STEP => {
+                ride + (floor - ride) * (1.0 - (-RIDE_RATE * dt).exp())
+            }
+            _ => floor,
+        };
+        self.ride = Some(ride);
+        let lag = (ride - floor) / SCALE;
+        if self.footing.iter().all(|footing| footing.abs() < 1.0e-3) && lag.abs() < 1.0e-3 {
             return;
         }
         if self.skeleton.feet.iter().chain(&legs.thighs).chain(&legs.shins).flatten().any(|bone| !target.contains_key(bone)) {
@@ -2803,7 +3003,7 @@ impl Avatar {
         // In the model's own meters, which the root scales.
         let up = self.footing.map(|footing| footing / SCALE);
         let feet = self.skeleton.feet.each_ref().map(|chain| place(chain, |bone| target[&bone]));
-        let drop = up[0].min(up[1]).min(0.0);
+        let drop = up[0].min(up[1]).min(0.0) + lag;
         if let Some((&hips, above)) = self.skeleton.hips.split_last() {
             let parent = place(above, |bone| target[&bone]).rotation;
             if let Some(pose) = target.get_mut(&hips) {
@@ -2869,6 +3069,13 @@ impl Avatar {
                 Some(Step::Strafe(strafe)) => wanted = Some(strafe),
                 Some(Step::Back) => backwards = true,
                 _ => (),
+            }
+        }
+        // On stairs, up them or down them, a step at a time.
+        self.stairs = self.stairs_under(graph, going);
+        if wanted.is_some() {
+            if let Some(stair) = self.stair_cycle(going.posture, going.gait) {
+                wanted = Some(stair.index);
             }
         }
         // At the corner with the pistol up, it leans out round it to aim when it peeks - aiming,
@@ -3518,12 +3725,23 @@ mod tests {
     }
 
     #[test]
+    fn the_step_under_a_foot_is_read_between_frames_to_the_end_of_the_loop() {
+        let ground = [0.5, 0.25, 0.0, -0.25, -0.5];
+        assert_eq!(ground_at(&ground, 0.0), 0.5);
+        assert!((ground_at(&ground, 0.125) - 0.375).abs() < 1e-6, "halfway to frame 2");
+        assert!((ground_at(&ground, 1.0) + 0.5).abs() < 1e-6, "the last frame, a loop on");
+        assert_eq!(ground_at(&[0.3], 0.7), 0.3);
+        assert_eq!(ground_at(&[], 0.7), 0.0);
+    }
+
+    #[test]
     fn a_skid_goes_along_its_path_between_frames_and_stays_at_the_end() {
         let clip = Clip {
             fps: 10.0,
             forward_m: vec![0.0, 0.2, 0.3],
             left_m: vec![0.0, 0.0, 0.1],
             turn_left_deg: vec![0.0, 45.0, 90.0],
+            ground_m: None,
         };
         let skid = Skid::new(Handle::NONE, &clip).unwrap();
         assert!(
