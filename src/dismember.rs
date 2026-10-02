@@ -15,16 +15,16 @@
 //! part the bones of the body for stand-ins fixed to the part. The ragdoll lets the part's body go
 //! for the physics to carry off (see [`crate::ragdoll::Ragdoll::let_loose`]).
 //!
-//! As it breaks, loose voxels spill out of both ends - little glowing cubes, as big as the voxels
-//! in the ends, as many as [`MOTION`] says - tumbling out either way along the bone and bouncing
-//! off the floor, until they are swept up with the droid.
+//! As it breaks, loose voxels spill out of both ends - little glowing tetrahedra, like the voxels
+//! in the ends and as big, as many as [`MOTION`] says - tumbling out either way along the bone and
+//! bouncing off the floor, until they are swept up with the droid.
 
 use crate::fixtures::glow_strength;
 use crate::player::avatar::{MOTION, SCALE};
 use crate::ragdoll::CHARACTERS;
 use fyrox::{
     core::{
-        algebra::{Matrix3, Matrix4, UnitQuaternion, Vector3},
+        algebra::{Matrix3, Matrix4, UnitQuaternion, Vector2, Vector3},
         log::Log,
         math::Matrix4Ext,
         pool::Handle,
@@ -38,6 +38,7 @@ use fyrox::{
         graph::Graph,
         mesh::{
             surface::{SurfaceBuilder, SurfaceData, SurfaceResource},
+            vertex::StaticVertex,
             Mesh, MeshBuilder,
         },
         node::Node,
@@ -45,6 +46,7 @@ use fyrox::{
         rigidbody::RigidBodyBuilder,
         transform::TransformBuilder,
     },
+    utils::raw_mesh::RawMeshBuilder,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -439,42 +441,9 @@ impl Dismember {
         let spin = self.any_way() * SPILL_SPIN * self.roll();
         let turned =
             UnitQuaternion::from_scaled_axis(self.any_way() * std::f32::consts::PI * self.roll());
-        let groups = InteractionGroups::new(BitMask(SPILL), BitMask(!(CHARACTERS | SPILL)));
         let material = self.glows[k % self.glows.len()].clone();
-        let cube = MeshBuilder::new(BaseBuilder::new().with_cast_shadows(false))
-            .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
-                SurfaceData::make_cube(Matrix4::new_scaling(size)),
-            ))
-            .with_material(material)
-            .build()])
-            .build(graph);
-        let half = 0.5 * size;
-        let collider = ColliderBuilder::new(BaseBuilder::new())
-            .with_shape(ColliderShape::cuboid(half, half, half))
-            .with_density(Some(SPILL_DENSITY))
-            .with_friction(0.6)
-            .with_restitution(0.3)
-            .with_collision_groups(groups)
-            .build(graph);
-        let body = RigidBodyBuilder::new(
-            BaseBuilder::new()
-                .with_name("spilt voxel")
-                .with_child(cube)
-                .with_child(collider)
-                .with_local_transform(
-                    TransformBuilder::new()
-                        .with_local_position(place)
-                        .with_local_rotation(turned)
-                        .build(),
-                ),
-        )
-        // Its mass, and how hard it is to turn, come from its collider.
-        .with_mass(0.0)
-        .with_lin_vel(velocity)
-        .with_ang_vel(spin)
-        .with_ccd_enabled(true)
-        .build(graph);
-        self.spilt.push(body.to_base());
+        let body = spilt_voxel(graph, material, size, place, turned, velocity, spin);
+        self.spilt.push(body);
     }
 
     /// Takes every loose voxel spilt so far out of the scene.
@@ -485,6 +454,90 @@ impl Dismember {
             }
         }
     }
+}
+
+/// A loose glowing tetrahedron `size` across of `material` at `place`, turned `turned`, flying off
+/// at `velocity` and tumbling at `spin`: a body that bumps into the maze and the droids lying in it.
+fn spilt_voxel(
+    graph: &mut Graph,
+    material: MaterialResource,
+    size: f32,
+    place: Vector3<f32>,
+    turned: UnitQuaternion<f32>,
+    velocity: Vector3<f32>,
+    spin: Vector3<f32>,
+) -> Handle<Node> {
+    let groups = InteractionGroups::new(BitMask(SPILL), BitMask(!(CHARACTERS | SPILL)));
+    let shape = MeshBuilder::new(BaseBuilder::new().with_cast_shadows(false))
+        .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
+            tetrahedron(size),
+        ))
+        .with_material(material)
+        .build()])
+        .build(graph);
+    // The cube the tetrahedron's corners are on: every face of it holds an edge of the
+    // tetrahedron, so it lies on the floor on an edge. A cone or a convex hull would be closer,
+    // but neither keeps out of the floor at this size, and the hull can fail to be made at all.
+    let half = 0.5 * size;
+    let collider = ColliderBuilder::new(BaseBuilder::new())
+        .with_shape(ColliderShape::cuboid(half, half, half))
+        .with_density(Some(SPILL_DENSITY))
+        .with_friction(0.6)
+        .with_restitution(0.3)
+        .with_collision_groups(groups)
+        .build(graph);
+    RigidBodyBuilder::new(
+        BaseBuilder::new()
+            .with_name("spilt voxel")
+            .with_child(shape)
+            .with_child(collider)
+            .with_local_transform(
+                TransformBuilder::new()
+                    .with_local_position(place)
+                    .with_local_rotation(turned)
+                    .build(),
+            ),
+    )
+    // Its mass, and how hard it is to turn, come from its collider.
+    .with_mass(0.0)
+    .with_lin_vel(velocity)
+    .with_ang_vel(spin)
+    .with_ccd_enabled(true)
+    .build(graph)
+    .to_base()
+}
+
+/// A tetrahedron with its corners on four of the corners of a cube `size` across, flat-shaded:
+/// four triangles, where the cube took twelve.
+fn tetrahedron(size: f32) -> SurfaceData {
+    let h = 0.5 * size;
+    let corners = [
+        Vector3::new(h, h, h),
+        Vector3::new(h, -h, -h),
+        Vector3::new(-h, h, -h),
+        Vector3::new(-h, -h, h),
+    ];
+    let mut builder = RawMeshBuilder::<StaticVertex>::new(12, 12);
+    for skip in 0..4 {
+        let [a, b, c]: [Vector3<f32>; 3] = std::array::from_fn(|k| corners[(skip + 1 + k) % 4]);
+        // Wound to face away from the corner left out.
+        let normal = (b - a).cross(&(c - a)).normalize();
+        let (b, c, normal) = if normal.dot(&(a - corners[skip])) < 0.0 {
+            (c, b, -normal)
+        } else {
+            (b, c, normal)
+        };
+        for (at, uv) in [
+            (a, Vector2::new(0.0, 0.0)),
+            (b, Vector2::new(1.0, 0.0)),
+            (c, Vector2::new(0.5, 1.0)),
+        ] {
+            builder.insert(StaticVertex::from_pos_uv_normal(at, uv, normal));
+        }
+    }
+    let mut data = SurfaceData::from_raw_mesh(builder.build());
+    data.calculate_tangents().ok();
+    data
 }
 
 /// A stand-in for `bone`, fixed to `anchor` where the bone is now: it bends the skin as the bone
@@ -551,5 +604,70 @@ mod tests {
         assert_eq!(break_for("foot.R"), Some("shin.R"));
         assert_eq!(break_for("chest"), None);
         assert_eq!(break_for("clavicle.L"), None);
+    }
+
+    #[test]
+    fn a_spilt_voxel_is_four_triangles_each_facing_out() {
+        use fyrox::scene::mesh::buffer::{VertexAttributeUsage, VertexReadTrait};
+        let data = tetrahedron(2.0);
+        let triangles: Vec<_> = data.geometry_buffer.iter().collect();
+        assert_eq!(triangles.len(), 4);
+        let at = |i: u32, usage| {
+            let v = data.vertex_buffer.get(i as usize).unwrap();
+            Vector3::from(v.read_3_f32(usage).unwrap())
+        };
+        for t in triangles {
+            let [a, b, c] = t.0.map(|i| at(i, VertexAttributeUsage::Position));
+            let wound = (b - a).cross(&(c - a));
+            // The middle is at the origin, so out is away from it.
+            assert!(wound.dot(&(a + b + c)) > 0.0);
+            let normal = at(t.0[0], VertexAttributeUsage::Normal);
+            assert!((wound.normalize() - normal).norm() < 1.0e-5);
+            assert!([a, b, c].iter().all(|p| p.iter().all(|x| x.abs() == 1.0)));
+        }
+    }
+
+    #[test]
+    fn a_spilt_voxel_lands_on_the_floor_and_stays_there() {
+        use fyrox::scene::{graph::GraphUpdateSwitches, rigidbody::RigidBodyType};
+        let mut graph = Graph::new();
+        let floor = ColliderBuilder::new(
+            BaseBuilder::new().with_local_transform(
+                TransformBuilder::new()
+                    .with_local_position(Vector3::new(0.0, -0.5, 0.0))
+                    .build(),
+            ),
+        )
+        .with_shape(ColliderShape::cuboid(5.0, 0.5, 5.0))
+        .build(&mut graph);
+        RigidBodyBuilder::new(BaseBuilder::new().with_child(floor))
+            .with_body_type(RigidBodyType::Static)
+            .build(&mut graph);
+        // As big as a thigh's voxels, dropped from half a meter, turned and tumbling.
+        let size = 0.013 * SCALE;
+        let voxel = spilt_voxel(
+            &mut graph,
+            MaterialResource::default(),
+            size,
+            Vector3::new(0.0, 0.5, 0.0),
+            UnitQuaternion::from_scaled_axis(Vector3::new(0.3, 1.1, 0.7)),
+            Vector3::new(0.5, 0.0, 0.0),
+            Vector3::new(4.0, -2.0, 6.0),
+        );
+        let dt = 1.0 / 60.0;
+        for _ in 0..240 {
+            graph.update(
+                Vector2::new(800.0, 600.0),
+                dt,
+                GraphUpdateSwitches::default(),
+            );
+        }
+        let at = graph[voxel].global_position();
+        // A corner of it is at most sqrt(3)/2 of its size from its middle, and its faces at least
+        // sqrt(3)/6: resting, its middle is in between, not sunk into the floor nor held above it.
+        assert!(
+            at.y > 0.25 * size && at.y < 0.9 * size,
+            "rests on the floor: {at:?} ({size})"
+        );
     }
 }
