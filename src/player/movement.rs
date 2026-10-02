@@ -131,6 +131,13 @@ impl Player {
                 .map_or(Vector3::zeros(), |dir| dir.scale(speed))
         });
 
+        // How far the floor is under its middle: nothing, standing on it; a step's height, its
+        // middle out over the step below and its round bottom still on the edge.
+        let feet = graph[self.body].global_position() + Vector3::new(0.0, FEET + GROUND_REACH, 0.0);
+        let gap = self
+            .first_hit(graph, feet, -Vector3::y(), GROUND_REACH * 2.0 + STEP_DOWN)
+            .map(|(down, _)| (down - GROUND_REACH).max(0.0));
+
         let body = &mut graph[self.body];
         let mut velocity = body.lin_vel();
         self.fall_speed = (-velocity.y).max(0.0);
@@ -149,10 +156,15 @@ impl Player {
         velocity.x = horizontal.x;
         velocity.z = horizontal.z;
         // On its feet, down onto the step below at a walk down the stairs: its round bottom would
-        // otherwise hang on the edge of each step and then drop off it. On a floor the floor
-        // holds it up; a jump, or a step being climbed, goes its own way.
+        // otherwise hang on the edge of each step and then drop off it. No further than the floor
+        // under it, though: on a floor it would only be driven into it, as fast as it goes - a
+        // sprint pressed it through a thin floor into the void now and then. A jump, or a step
+        // being climbed, goes its own way.
         if self.grounded && self.stepping.is_none() && self.since_jump.is_none() && velocity.y <= 0.0 {
-            velocity.y = -(horizontal.norm() * DESCENT).max(LEAST_DESCENT);
+            let descent = (horizontal.norm() * DESCENT).max(LEAST_DESCENT);
+            // Nothing a step's depth under its middle - a ledge, or a seam the ray slipped
+            // through - and there is no step to go down onto: its weight does the rest.
+            velocity.y = -gap.map_or(0.0, |gap| descent.min(gap / dt));
         }
         // Every jump starts high. Let go of quickly, it is cut short into a low one.
         let mut low = false;
@@ -498,5 +510,59 @@ mod tests {
             "a jump can still be steered, barely"
         );
         assert!(air.norm() > 0.0, "but not steered at all is being on rails");
+    }
+
+    #[test]
+    fn a_sprint_never_presses_the_feet_into_a_thin_floor() {
+        use fyrox::core::algebra::Matrix4;
+        use fyrox::scene::{
+            collider::GeometrySource,
+            mesh::{
+                surface::{SurfaceBuilder, SurfaceData, SurfaceResource},
+                MeshBuilder,
+            },
+        };
+        // The maze's floor is a triangle mesh of tiles: here 2 cm thick, a meter across.
+        let thickness = 0.02;
+        for yaw in [0.0f32, 0.785, 2.0] {
+            let mut graph = Graph::new();
+            let mut tiles = Vec::new();
+            for i in -12..12 {
+                for j in -12..12 {
+                    let at = Vector3::new(i as f32 + 0.5, -thickness / 2.0, j as f32 + 0.5);
+                    let tile = MeshBuilder::new(
+                        BaseBuilder::new().with_local_transform(TransformBuilder::new().with_local_position(at).build()),
+                    )
+                    .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(SurfaceData::make_cube(
+                        Matrix4::new_nonuniform_scaling(&Vector3::new(1.0, thickness, 1.0)),
+                    )))
+                    .build()])
+                    .build(&mut graph);
+                    tiles.push(GeometrySource(tile.to_base()));
+                }
+            }
+            graph.update_hierarchical_data();
+            let floor = ColliderBuilder::new(BaseBuilder::new())
+                .with_shape(ColliderShape::trimesh(tiles))
+                .build(&mut graph);
+            RigidBodyBuilder::new(BaseBuilder::new().with_child(floor))
+                .with_body_type(RigidBodyType::Static)
+                .build(&mut graph);
+            let mut player = Player::spawn(&mut graph);
+            player.teleport(&mut graph, Vector3::new(0.3, -FEET + 0.01, 0.2), yaw);
+            player.on_key(fyrox::keyboard::KeyCode::KeyW, true);
+            crate::player::hold_shift(&mut player);
+            let mut lowest = f32::MAX;
+            // At the engine's fixed step, which it keeps to however slowly frames are drawn.
+            let dt = 1.0 / 60.0;
+            for _ in 0..150 {
+                player.update(&mut graph, dt, true);
+                graph.update(Vector2::new(800.0, 600.0), dt, GraphUpdateSwitches::default());
+                lowest = lowest.min(player.feet(&graph).y);
+            }
+            // Standing, the solver leaves them 6 mm in; pressed down as fast as it sprinted, they
+            // went 7 cm in - through a thin floor, a step at an awkward moment.
+            assert!(lowest > -0.01, "heading {yaw}: the feet went {lowest} m into the floor");
+        }
     }
 }
