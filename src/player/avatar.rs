@@ -30,8 +30,9 @@
 //! cycles made on stairs: a step at a time walking, two at a time at any faster gait, and only as
 //! fast as those go - a little faster hurrying. Each foot is still put down on the step under it,
 //! by however far that is from the step the cycle had there; and the hips come up a step after
-//! the floor, over a moment. Strafing or crouched, it takes stairs in its own cycles, each foot
-//! put down on its step all the same.
+//! the floor, over a moment. Going over to them or back, the feet go by the steps under them in
+//! the pose as far as it has gone over. Strafing any way but straight ahead, or crouched, it
+//! takes stairs in its own cycles, each foot put down on its step all the same.
 //!
 //! Sprinting or running flat out, and only then, the droid skids, with the skids for that gait;
 //! jogging, it just turns and slows down.
@@ -1444,6 +1445,10 @@ pub struct Avatar {
     stair_cycles: Vec<StairCycle>,
     /// Whether it is on stairs, walking or running along them as it faces: going up, or down.
     stairs: Option<bool>,
+    /// How high the pose as last blended has the step under each foot, from the floor the droid
+    /// stands on, in meters, like [`Avatar::stair_ground`]; and the pose it is fading from.
+    made_on: [f32; 2],
+    from_made_on: [f32; 2],
     /// The floor the hips ride on, in meters across the world: the floor it stands on, followed
     /// up a step over a moment. None until it has stood on one.
     ride: Option<f32>,
@@ -2272,6 +2277,8 @@ impl Avatar {
             footing: [0.0; 2],
             stair_cycles,
             stairs: None,
+            made_on: [0.0; 2],
+            from_made_on: [0.0; 2],
             ride: None,
             rest_hips,
             tops,
@@ -2338,12 +2345,13 @@ impl Avatar {
     }
 
     /// Whether it is on stairs going `going`, as it faces: going up them, or down. Only walking or
-    /// running ahead along the floor, standing, out of cover - where the floor ahead of it and
+    /// running ahead along the floor - strafing too, stepping straight ahead - standing, out of cover - where the floor ahead of it and
     /// the floor behind it are a stair's slope apart.
     fn stairs_under(&self, graph: &Graph, going: Going) -> Option<bool> {
+        // Strafing, only stepping straight ahead, in the cycle for its gait.
         let along = going.grounded
             && going.posture == Posture::Standing
-            && !going.strafing
+            && (!going.strafing || self.stepping == Some(Step::Ahead))
             && going.cover.is_none()
             && going.speed >= STILL
             && self.leaping.is_none()
@@ -2759,6 +2767,7 @@ impl Avatar {
             self.blended.clone()
         };
         self.fade = 0.0;
+        self.from_made_on = self.made_on;
     }
 
     /// Takes any travel built into `animation` back out of `target`: the hips stay where they
@@ -2834,6 +2843,12 @@ impl Avatar {
             }
         }
         self.blended.clone_from(&target);
+        // The steps the feet are on as blended: what the pose faded from had under them, going
+        // over to what the stairs' cycle playing now has, if it is one.
+        let now = self.stair_ground(graph).unwrap_or([0.0; 2]);
+        self.made_on = std::array::from_fn(|side| {
+            self.from_made_on[side] + (now[side] - self.from_made_on[side]) * t
+        });
         // The ball at the muzzle tumbles, the core and the shell against each other.
         self.spun += dt;
         let tumble = tumbled(self.spun);
@@ -2942,8 +2957,7 @@ impl Avatar {
             }
         }
         // Last of all, on top of the rest: on stairs, each foot down on its own step.
-        let made_on = self.stair_ground(graph);
-        self.plant_feet(graph, &mut target, made_on, dt);
+        self.plant_feet(graph, &mut target, self.made_on, dt);
         for (bone, pose) in target {
             let transform = graph[bone].local_transform_mut();
             transform.set_position(pose.position);
@@ -2958,14 +2972,14 @@ impl Avatar {
     /// to its step over a moment. On level floor, and off the ground, it changes nothing.
     ///
     /// Playing a cycle made on stairs, which has each foot on a step of its own already, `made_on`
-    /// is how high it has the step under each foot: a foot only goes up or down by how far the
-    /// step under it is from that one. And the hips follow the floor up a step over a moment,
+    /// is how high it has the step under each foot (0 for one made on level floor): a foot only
+    /// goes up or down by how far the step under it is from that one. And the hips follow the floor up a step over a moment,
     /// rather than all at once with a body lifted onto it.
     fn plant_feet(
         &mut self,
         graph: &Graph,
         target: &mut FxHashMap<Handle<Node>, Bone>,
-        made_on: Option<[f32; 2]>,
+        made_on: [f32; 2],
         dt: f32,
     ) {
         let Some(legs) = self.legs.as_ref() else {
@@ -2975,7 +2989,6 @@ impl Avatar {
         // As of the last frame: the floor the droid stands on, and where its feet were over it.
         let floor = graph[self.root].global_position().y;
         let follow = 1.0 - (-FOOTING_RATE * dt).exp();
-        let made_on = made_on.unwrap_or([0.0; 2]);
         for ((footing, chain), made_on) in self.footing.iter_mut().zip(&self.skeleton.feet).zip(made_on) {
             let wanted = match (grounded, chain.last()) {
                 (true, Some(&foot)) => {
