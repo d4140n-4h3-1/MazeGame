@@ -28,7 +28,6 @@
 
 use crate::{
     credits::Credits,
-    dismember::SPILL,
     formants::{self, Sounds},
     layout::{Rng, WalkGrid},
     notes::{self, Entry},
@@ -1202,7 +1201,7 @@ impl Computer {
                 ray_origin: Point3::from(from),
                 ray_direction: back,
                 max_len: WALL_REACH,
-                groups: InteractionGroups::new(BitMask(u32::MAX), BitMask(!(CHARACTERS | SPILL))),
+                groups: InteractionGroups::new(BitMask(u32::MAX), BitMask(!CHARACTERS)),
                 sort_results: true,
             },
             &mut hits,

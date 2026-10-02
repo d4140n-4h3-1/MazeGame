@@ -17,14 +17,17 @@
 //!
 //! As it breaks, loose voxels spill out of both ends - little glowing tetrahedra, like the voxels
 //! in the ends and as big, as many as [`MOTION`] says - tumbling out either way along the bone and
-//! bouncing off the floor, until they are swept up with the droid.
+//! bouncing off the floor, until they are swept up with the droid. They are not bodies for the
+//! physics: a hundred small fast bodies kept from passing through the floor cost it a frame's time
+//! many times over. Each is moved here instead, and feels its way along with a ray, which is as
+//! sure of the floor and costs next to nothing (see [`Dismember::fly`]).
 
 use crate::fixtures::glow_strength;
 use crate::player::avatar::{MOTION, SCALE};
 use crate::ragdoll::CHARACTERS;
 use fyrox::{
     core::{
-        algebra::{Matrix3, Matrix4, UnitQuaternion, Vector2, Vector3},
+        algebra::{Matrix3, Matrix4, Point3, UnitQuaternion, Vector2, Vector3},
         log::Log,
         math::Matrix4Ext,
         pool::Handle,
@@ -34,8 +37,8 @@ use fyrox::{
     material::MaterialResource,
     scene::{
         base::BaseBuilder,
-        collider::{BitMask, ColliderBuilder, ColliderShape, InteractionGroups},
-        graph::Graph,
+        collider::{BitMask, InteractionGroups},
+        graph::{physics::RayCastOptions, Graph},
         mesh::{
             surface::{SurfaceBuilder, SurfaceData, SurfaceResource},
             vertex::StaticVertex,
@@ -43,7 +46,6 @@ use fyrox::{
         },
         node::Node,
         pivot::PivotBuilder,
-        rigidbody::RigidBodyBuilder,
         transform::TransformBuilder,
     },
     utils::raw_mesh::RawMeshBuilder,
@@ -147,14 +149,21 @@ struct Break {
     blown: bool,
 }
 
-/// The collision group of the loose voxels, which bump into the maze and the droids lying in it,
-/// but not into each other, nor anyone's capsule.
-pub const SPILL: u32 = 1 << 30;
-/// How fast the loose voxels come out, in meters a second, slowest and fastest; how fast they
-/// tumble at most, in radians a second; and how heavy they are, in kilograms a cubic meter.
+/// How fast the loose voxels come out, in meters a second, slowest and fastest; and how fast they
+/// tumble at most, in radians a second.
 const SPILL_SPEED: (f32, f32) = (0.6, 2.2);
 const SPILL_SPIN: f32 = 12.0;
-const SPILL_DENSITY: f32 = 1500.0;
+/// A loose voxel striking something: how much of its speed into it it bounces back with, how much
+/// of its speed along it it keeps, and how much of its tumbling; and slower than this, in meters a
+/// second, on something it can lie on - facing this much up - it comes to rest.
+const BOUNCE: f32 = 0.3;
+const GLANCE: f32 = 0.6;
+const BOUNCE_SPIN: f32 = 0.5;
+const REST_SPEED: f32 = 0.4;
+const LIE_ON: f32 = 0.7;
+const GRAVITY: f32 = 9.81;
+/// A loose voxel that has fallen this far below where it came out - out of the maze - is let be.
+const LOST: f32 = 50.0;
 /// A part blown apart bursts into this many voxels, up to this many times as big across as the
 /// break's, flying out from its middle this fast, in meters a second, slowest and fastest, and
 /// carried on along the bolt by up to this much of its speed.
@@ -174,8 +183,20 @@ pub struct Dismember {
     /// The ends' glowing materials, which the loose voxels are made of; the loose voxels spilt
     /// so far; and where the voxels' dice are, which fall differently for each droid.
     glows: Vec<MaterialResource>,
-    spilt: Vec<Handle<Node>>,
+    spilt: Vec<Voxel>,
     dice: u64,
+}
+
+/// A loose voxel: its mesh, how fast it is going and tumbling, how far its corners reach from its
+/// middle, the height it came out at, and whether it has come to rest.
+#[derive(Debug, Clone, PartialEq)]
+struct Voxel {
+    node: Handle<Node>,
+    velocity: Vector3<f32>,
+    spin: Vector3<f32>,
+    reach: f32,
+    from: f32,
+    resting: bool,
 }
 
 impl Dismember {
@@ -442,55 +463,107 @@ impl Dismember {
         let turned =
             UnitQuaternion::from_scaled_axis(self.any_way() * std::f32::consts::PI * self.roll());
         let material = self.glows[k % self.glows.len()].clone();
-        let body = spilt_voxel(graph, material, size, place, turned, velocity, spin);
-        self.spilt.push(body);
+        self.spilt.push(Voxel {
+            node: spilt_voxel(graph, material, size, place, turned),
+            velocity,
+            spin,
+            reach: 0.5 * 3.0f32.sqrt() * size,
+            from: place.y,
+            resting: false,
+        });
+    }
+
+    /// Moves the loose voxels along for another `dt`: falling, tumbling, and bouncing off
+    /// whatever their way runs into - the maze and the droids lying in it, but no one's capsule -
+    /// until they come to rest on something. One ray each, from its middle along the way it goes
+    /// this frame and as far again as its corners reach, so it never passes through a floor or a
+    /// wall however fast it goes. Those resting feel below them for what they lie on, and fall
+    /// again if it has gone.
+    pub fn fly(&mut self, graph: &mut Graph, dt: f32) {
+        let groups = InteractionGroups::new(BitMask(u32::MAX), BitMask(!CHARACTERS));
+        let mut hits = Vec::new();
+        for voxel in &mut self.spilt {
+            let Ok(node) = graph.try_get(voxel.node) else {
+                continue;
+            };
+            // Its own place: it hangs off nothing.
+            let at = **node.local_transform().position();
+            if at.y < voxel.from - LOST {
+                continue;
+            }
+            let ray = |graph: &Graph, way: Vector3<f32>, length: f32, hits: &mut Vec<_>| {
+                hits.clear();
+                graph.physics.cast_ray(
+                    RayCastOptions {
+                        ray_origin: Point3::from(at),
+                        ray_direction: way,
+                        max_len: length,
+                        groups,
+                        sort_results: true,
+                    },
+                    hits,
+                );
+                // Not what it is inside - it comes out of a droid's body - only what it meets.
+                hits.iter().find(|hit| hit.toi > 0.0).cloned()
+            };
+            if voxel.resting {
+                if ray(graph, -Vector3::y(), 1.5 * voxel.reach, &mut hits).is_some() {
+                    continue;
+                }
+                voxel.resting = false;
+            }
+            voxel.velocity.y -= GRAVITY * dt;
+            let step = voxel.velocity * dt;
+            let length = step.norm();
+            let mut next = at + step;
+            if length > 1.0e-6 {
+                if let Some(hit) = ray(graph, step / length, length + voxel.reach, &mut hits) {
+                    let normal = hit.normal.try_normalize(1.0e-6).unwrap_or_else(Vector3::y);
+                    next = hit.position.coords + normal * voxel.reach;
+                    let into = voxel.velocity.dot(&normal);
+                    if into < 0.0 {
+                        let along = voxel.velocity - normal * into;
+                        voxel.velocity = along * GLANCE - normal * (into * BOUNCE);
+                        voxel.spin *= BOUNCE_SPIN;
+                    }
+                    if normal.y > LIE_ON && voxel.velocity.norm() < REST_SPEED {
+                        voxel.velocity = Vector3::zeros();
+                        voxel.spin = Vector3::zeros();
+                        voxel.resting = true;
+                    }
+                }
+            }
+            let turned = UnitQuaternion::from_scaled_axis(voxel.spin * dt)
+                * **node.local_transform().rotation();
+            graph[voxel.node]
+                .local_transform_mut()
+                .set_position(next)
+                .set_rotation(turned);
+        }
     }
 
     /// Takes every loose voxel spilt so far out of the scene.
     pub fn sweep_up(&mut self, graph: &mut Graph) {
         for voxel in self.spilt.drain(..) {
-            if graph.is_valid_handle(voxel) {
-                graph.remove_node(voxel);
+            if graph.is_valid_handle(voxel.node) {
+                graph.remove_node(voxel.node);
             }
         }
     }
 }
 
-/// A loose glowing tetrahedron `size` across of `material` at `place`, turned `turned`, flying off
-/// at `velocity` and tumbling at `spin`: a body that bumps into the maze and the droids lying in it.
+/// A loose glowing tetrahedron `size` across of `material` at `place`, turned `turned`.
 fn spilt_voxel(
     graph: &mut Graph,
     material: MaterialResource,
     size: f32,
     place: Vector3<f32>,
     turned: UnitQuaternion<f32>,
-    velocity: Vector3<f32>,
-    spin: Vector3<f32>,
 ) -> Handle<Node> {
-    let groups = InteractionGroups::new(BitMask(SPILL), BitMask(!(CHARACTERS | SPILL)));
-    let shape = MeshBuilder::new(BaseBuilder::new().with_cast_shadows(false))
-        .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
-            tetrahedron(size),
-        ))
-        .with_material(material)
-        .build()])
-        .build(graph);
-    // The cube the tetrahedron's corners are on: every face of it holds an edge of the
-    // tetrahedron, so it lies on the floor on an edge. A cone or a convex hull would be closer,
-    // but neither keeps out of the floor at this size, and the hull can fail to be made at all.
-    let half = 0.5 * size;
-    let collider = ColliderBuilder::new(BaseBuilder::new())
-        .with_shape(ColliderShape::cuboid(half, half, half))
-        .with_density(Some(SPILL_DENSITY))
-        .with_friction(0.6)
-        .with_restitution(0.3)
-        .with_collision_groups(groups)
-        .build(graph);
-    RigidBodyBuilder::new(
+    MeshBuilder::new(
         BaseBuilder::new()
             .with_name("spilt voxel")
-            .with_child(shape)
-            .with_child(collider)
+            .with_cast_shadows(false)
             .with_local_transform(
                 TransformBuilder::new()
                     .with_local_position(place)
@@ -498,11 +571,11 @@ fn spilt_voxel(
                     .build(),
             ),
     )
-    // Its mass, and how hard it is to turn, come from its collider.
-    .with_mass(0.0)
-    .with_lin_vel(velocity)
-    .with_ang_vel(spin)
-    .with_ccd_enabled(true)
+    .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
+        tetrahedron(size),
+    ))
+    .with_material(material)
+    .build()])
     .build(graph)
     .to_base()
 }
@@ -627,47 +700,131 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_spilt_voxel_lands_on_the_floor_and_stays_there() {
-        use fyrox::scene::{graph::GraphUpdateSwitches, rigidbody::RigidBodyType};
-        let mut graph = Graph::new();
-        let floor = ColliderBuilder::new(
-            BaseBuilder::new().with_local_transform(
-                TransformBuilder::new()
-                    .with_local_position(Vector3::new(0.0, -0.5, 0.0))
-                    .build(),
-            ),
+    use fyrox::scene::{
+        collider::{ColliderBuilder, ColliderShape, GeometrySource},
+        graph::GraphUpdateSwitches,
+        rigidbody::{RigidBodyBuilder, RigidBodyType},
+    };
+
+    /// A slab of the maze, `scale` big with its middle at `at`, for loose voxels to strike: a
+    /// triangle mesh, as the maze is to the physics, and thin to them.
+    fn slab(graph: &mut Graph, at: Vector3<f32>, scale: Vector3<f32>) {
+        let mesh = MeshBuilder::new(
+            BaseBuilder::new()
+                .with_local_transform(TransformBuilder::new().with_local_position(at).build()),
         )
-        .with_shape(ColliderShape::cuboid(5.0, 0.5, 5.0))
-        .build(&mut graph);
-        RigidBodyBuilder::new(BaseBuilder::new().with_child(floor))
+        .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(
+            SurfaceData::make_cube(Matrix4::new_nonuniform_scaling(&scale)),
+        ))
+        .build()])
+        .build(graph);
+        graph.update_hierarchical_data();
+        let collider = ColliderBuilder::new(BaseBuilder::new())
+            .with_shape(ColliderShape::trimesh(vec![GeometrySource(mesh.to_base())]))
+            .build(graph);
+        RigidBodyBuilder::new(BaseBuilder::new().with_child(collider))
             .with_body_type(RigidBodyType::Static)
-            .build(&mut graph);
-        // As big as a thigh's voxels, dropped from half a meter, turned and tumbling.
-        let size = 0.013 * SCALE;
-        let voxel = spilt_voxel(
-            &mut graph,
-            MaterialResource::default(),
-            size,
-            Vector3::new(0.0, 0.5, 0.0),
-            UnitQuaternion::from_scaled_axis(Vector3::new(0.3, 1.1, 0.7)),
-            Vector3::new(0.5, 0.0, 0.0),
-            Vector3::new(4.0, -2.0, 6.0),
-        );
+            .build(graph);
+    }
+
+    /// No droid's parts, only voxels let loose, `size` across, from `from` at each of `velocities`.
+    fn let_loose(
+        graph: &mut Graph,
+        size: f32,
+        from: Vector3<f32>,
+        velocities: &[Vector3<f32>],
+    ) -> Dismember {
+        let mut parts = Dismember {
+            intact: Handle::NONE,
+            parts: Vec::new(),
+            breaks: Vec::new(),
+            apart: false,
+            glows: vec![MaterialResource::default()],
+            spilt: Vec::new(),
+            dice: 0x9e37_79b9_7f4a_7c15,
+        };
+        for (k, &velocity) in velocities.iter().enumerate() {
+            parts.voxel(
+                graph,
+                k,
+                from + Vector3::new(0.0, 0.0, 0.05 * k as f32),
+                size,
+                velocity,
+            );
+        }
+        parts
+    }
+
+    fn run(graph: &mut Graph, parts: &mut Dismember, seconds: f32) {
         let dt = 1.0 / 60.0;
-        for _ in 0..240 {
+        for _ in 0..(seconds / dt) as usize {
+            parts.fly(graph, dt);
             graph.update(
                 Vector2::new(800.0, 600.0),
                 dt,
                 GraphUpdateSwitches::default(),
             );
         }
-        let at = graph[voxel].global_position();
-        // A corner of it is at most sqrt(3)/2 of its size from its middle, and its faces at least
-        // sqrt(3)/6: resting, its middle is in between, not sunk into the floor nor held above it.
-        assert!(
-            at.y > 0.25 * size && at.y < 0.9 * size,
-            "rests on the floor: {at:?} ({size})"
+    }
+
+    #[test]
+    fn a_spilt_voxel_lands_on_the_floor_and_comes_to_rest() {
+        let mut graph = Graph::new();
+        slab(
+            &mut graph,
+            Vector3::new(0.0, -0.1, 0.0),
+            Vector3::new(10.0, 0.2, 10.0),
         );
+        // As big as a thigh's voxels, dropped from half a meter, going sideways and tumbling.
+        let size = 0.013 * SCALE;
+        let mut parts = let_loose(
+            &mut graph,
+            size,
+            Vector3::new(0.0, 0.5, 0.0),
+            &[Vector3::new(0.5, 0.0, 0.0)],
+        );
+        run(&mut graph, &mut parts, 4.0);
+        let voxel = &parts.spilt[0];
+        let at = **graph[voxel.node].local_transform().position();
+        assert!(voxel.resting, "at rest: {voxel:?}");
+        assert!(
+            (at.y - voxel.reach).abs() < 1.0e-3,
+            "on the floor: {at:?} ({size})"
+        );
+        assert!(at.x > 0.0 && at.x < 0.5, "having slid a little: {at:?}");
+    }
+
+    #[test]
+    fn loose_voxels_never_pass_through_a_floor_or_a_wall() {
+        let mut graph = Graph::new();
+        // A floor 0.2 m thick with its top at 0, and a wall 0.2 m thick across x = 1, too tall and
+        // wide to go over or round.
+        slab(
+            &mut graph,
+            Vector3::new(0.0, -0.1, 0.0),
+            Vector3::new(100.0, 0.2, 100.0),
+        );
+        slab(
+            &mut graph,
+            Vector3::new(1.0, 10.0, 0.0),
+            Vector3::new(0.2, 20.0, 100.0),
+        );
+        // As fast as a head blown apart sends them, and faster, at its smallest and biggest.
+        let velocities: Vec<Vector3<f32>> = (0..40)
+            .map(|k| {
+                let t = k as f32 / 40.0 * std::f32::consts::TAU;
+                Vector3::new(8.0 * t.cos().abs(), 8.0 * t.sin(), 3.0 * (2.0 * t).sin())
+            })
+            .collect();
+        for size in [0.007 * SCALE, 0.013 * SCALE * BURST_GROWTH] {
+            let mut parts = let_loose(&mut graph, size, Vector3::new(0.0, 1.6, -1.0), &velocities);
+            run(&mut graph, &mut parts, 4.0);
+            for voxel in &parts.spilt {
+                let at = **graph[voxel.node].local_transform().position();
+                assert!(at.y > 0.0, "above the floor: {at:?}");
+                assert!(at.x < 0.9, "this side of the wall: {at:?}");
+            }
+            parts.sweep_up(&mut graph);
+        }
     }
 }

@@ -2462,6 +2462,14 @@ impl Avatar {
             .is_some_and(|parts| parts.blow_up(graph, body, middle, radius, way))
     }
 
+    /// Moves the loose voxels its breaks have spilt along for another `dt`, as
+    /// [`Dismember::fly`] does.
+    pub fn fly_voxels(&mut self, graph: &mut Graph, dt: f32) {
+        if let Some(parts) = self.dismember.as_mut() {
+            parts.fly(graph, dt);
+        }
+    }
+
     /// Takes the loose voxels its breaks have spilt out of the scene.
     pub fn sweep_up(&mut self, graph: &mut Graph) {
         if let Some(parts) = self.dismember.as_mut() {

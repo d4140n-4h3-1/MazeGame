@@ -1075,6 +1075,7 @@ impl Inhabitants {
             .map(|(n, _)| n);
         let player_going = seeing.map(|d| d.lost_going);
         for (me, droid) in self.droids.iter_mut().enumerate() {
+            droid.avatar.fly_voxels(graph, dt);
             // In the hostile droid's colours while it is after the player; it goes down in
             // whichever it had on.
             let hostile = droid.alert.is_some();
