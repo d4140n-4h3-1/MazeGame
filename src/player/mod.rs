@@ -140,6 +140,8 @@ pub struct Player {
     /// and how long ago it did, while it is still carried over the step's edge, in seconds.
     stepped: f32,
     stepping: Option<f32>,
+    /// Whether it is walking down off the edge of a step onto the one below: still on its feet.
+    descending: bool,
     /// How far the head is rolled into its movement, in radians.
     roll: f32,
     /// The yaw last frame, to see how fast the player is turning.
@@ -216,6 +218,7 @@ impl Default for Player {
             landing: 0.0,
             stepped: 0.0,
             stepping: None,
+            descending: false,
             roll: 0.0,
             last_yaw: 0.0,
             posture: Posture::Standing,
@@ -411,6 +414,10 @@ impl Player {
         // Lifted onto a stair, it is carried over the edge until it stands on the step.
         self.carry_over_step(graph, dt);
         self.grounded |= self.stepping.is_some();
+        // Walked off the edge of a step down a stair, it is still on its feet, a step lower.
+        self.descending =
+            !self.grounded && (was_grounded || self.descending) && self.step_below(graph);
+        self.grounded |= self.descending;
         // Landed: the knees take whatever the body was falling at as of last frame, since the
         // solver has already taken it out of the body by now.
         if self.grounded && !was_grounded {

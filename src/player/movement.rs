@@ -1,5 +1,5 @@
-//! Moving the body: speeding up and slowing down along the floor, jumping, stepping up stairs,
-//! and feeling for the floor under the feet.
+//! Moving the body: speeding up and slowing down along the floor, jumping, stepping up stairs and
+//! down them on its feet, and feeling for the floor under the feet.
 
 use super::{posture::Posture, Player, FEET};
 use fyrox::{
@@ -28,6 +28,8 @@ const LOW_JUMP_SPEED: f32 = 1.5;
 const GROUND_REACH: f32 = 0.15;
 /// The highest step the body walks up without a jump, in meters: a stair's, not a crate's.
 const STEP_UP: f32 = 0.4;
+/// The deepest step the body walks down without falling, in meters: as high as it walks up.
+const STEP_DOWN: f32 = STEP_UP;
 /// The lowest that is worth stepping up rather than sliding over, in meters.
 const STEP_LEAST: f32 = 0.02;
 /// How far out from its middle the body feels ahead for a step, in meters: its radius and a
@@ -68,6 +70,14 @@ fn ramp(velocity: Vector3<f32>, target: Vector3<f32>, acceleration: f32, dt: f32
     } else {
         velocity + change.scale(step / distance)
     }
+}
+
+/// Whether `collider` stands still: a floor, a wall or a step, not anyone's body.
+fn fixed(graph: &Graph, collider: Handle<Collider>) -> bool {
+    let body = graph[collider.transmute::<Node>()].parent();
+    graph
+        .try_get_of_type::<RigidBody>(body)
+        .is_ok_and(|body| body.body_type() == RigidBodyType::Static)
 }
 
 impl Player {
@@ -177,12 +187,6 @@ impl Player {
         let Some(way) = horizontal.try_normalize(0.1) else {
             return;
         };
-        let fixed = |graph: &Graph, collider: Handle<Collider>| {
-            let body = graph[collider.transmute::<Node>()].parent();
-            graph
-                .try_get_of_type::<RigidBody>(body)
-                .is_ok_and(|body| body.body_type() == RigidBodyType::Static)
-        };
         let feet = graph[self.body].global_position() + Vector3::new(0.0, FEET, 0.0);
         let reach = STEP_REACH + horizontal.norm() * dt;
         let ankle = feet + Vector3::new(0.0, ANKLE, 0.0);
@@ -218,6 +222,19 @@ impl Player {
         body.local_transform_mut().set_position(at + Vector3::new(0.0, rise, 0.0));
         self.stepped += rise;
         self.stepping = Some(0.0);
+    }
+
+    /// Whether, off the floor, the body has only walked off the edge of a step: not in a jump,
+    /// not going up, with a step that stands still no more than [`STEP_DOWN`] under its feet. It
+    /// comes down onto it of its own weight, but the feet are on the stairs all the while - it
+    /// does not fall, or land.
+    pub(super) fn step_below(&self, graph: &Graph) -> bool {
+        if self.since_jump.is_some() || graph[self.body].lin_vel().y > 0.1 {
+            return false;
+        }
+        let feet = graph[self.body].global_position() + Vector3::new(0.0, FEET + GROUND_REACH, 0.0);
+        self.first_hit(graph, feet, -Vector3::y(), GROUND_REACH * 2.0 + STEP_DOWN)
+            .is_some_and(|(_, floor)| fixed(graph, floor))
     }
 
     /// Carries the body on over the edge of the step it was lifted onto, weightless, until it
@@ -296,6 +313,47 @@ mod tests {
         assert!(feet.y > 2.9, "up to the top: {feet:?}");
         assert!(feet.z > 1.0 + 12.0 * 0.35, "and on along it: {feet:?}");
         assert!(feet.y < 3.1, "and no higher: {feet:?}");
+    }
+
+    /// Twelve steps of 0.25 m, 0.35 m deep, down from a floor 3 m up from z = 1, as from the arena;
+    /// or, `ledge`, a sheer drop there instead. The player walks forward along +z from the top for
+    /// `seconds`: where their feet end up, and how many frames they were off their feet.
+    fn walk_down(ledge: bool, seconds: f32) -> (Vector3<f32>, usize) {
+        let mut graph = Graph::new();
+        block(&mut graph, Vector3::new(-5.0, -1.0, -5.0), Vector3::new(5.0, 0.0, 20.0));
+        block(&mut graph, Vector3::new(-1.25, 0.0, -5.0), Vector3::new(1.25, 3.0, 1.0));
+        if !ledge {
+            for n in 0..12 {
+                let z = 1.0 + n as f32 * 0.35;
+                block(&mut graph, Vector3::new(-1.25, 0.0, z), Vector3::new(1.25, 3.0 - 0.25 * (n + 1) as f32, z + 0.35));
+            }
+        }
+        let mut player = Player::spawn(&mut graph);
+        player.teleport(&mut graph, Vector3::new(0.0, 3.0 - FEET + 0.01, 0.0), 0.0);
+        let dt = 1.0 / 60.0;
+        let mut off = 0;
+        for frame in 0..(seconds / dt) as usize {
+            // Settled on the top before setting off.
+            player.on_key(fyrox::keyboard::KeyCode::KeyW, frame >= 30);
+            player.update(&mut graph, dt, true);
+            graph.update(Vector2::new(800.0, 600.0), dt, GraphUpdateSwitches::default());
+            off += usize::from(frame >= 30 && !player.grounded);
+        }
+        (player.feet(&graph), off)
+    }
+
+    #[test]
+    fn it_walks_down_stairs_on_its_feet() {
+        let (feet, off) = walk_down(false, 12.0);
+        assert!(feet.y < 0.1 && feet.z > 1.0 + 12.0 * 0.35, "down to the bottom: {feet:?}");
+        assert_eq!(off, 0, "never off its feet on the way");
+    }
+
+    #[test]
+    fn walking_off_a_ledge_is_a_fall() {
+        let (feet, off) = walk_down(true, 5.0);
+        assert!(feet.y < 0.1, "down on the floor: {feet:?}");
+        assert!(off > 10, "off its feet as it fell: {off} frames");
     }
 
     #[test]
