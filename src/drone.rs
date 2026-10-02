@@ -17,7 +17,9 @@
 //!
 //! [`HITS`] bolts from the pistol bring it down: it sputters, its rings break into four pieces
 //! each, which fly apart, and it drops with them to the floor, where it lies for the rest of the
-//! round. Its body is a sensor, which bolts hit and the player passes through.
+//! round. Its body is solid, up and down: a ball the player cannot walk through, nor the droids
+//! lying in the maze tumble through, nor bolts fly through, the wreck on the floor too. Flying, it
+//! never pushes into anyone: someone in its way, it hovers where it is until they move.
 //!
 //! Its model, [`DRONE_MODEL`], is made in Blender: `drone_root`, which the animations move about,
 //! with the eye, the shell and two rings under it, and the ring pieces beside it. The rings' spin
@@ -36,6 +38,7 @@
 
 use crate::{
     ctf::Side,
+    ragdoll::CHARACTERS,
     dialogue::{screen, Mood},
     fixtures::{glow_strength, DIFFUSE_COLOR, EMISSION_STRENGTH},
     formants::Curve,
@@ -46,7 +49,7 @@ use crate::{
 };
 use fyrox::{
     core::{
-        algebra::{Point3, UnitQuaternion, Vector3},
+        algebra::{Isometry3, Point3, UnitQuaternion, Vector3},
         color::Color,
         log::Log,
         pool::Handle,
@@ -57,8 +60,11 @@ use fyrox::{
     scene::{
         animation::{Animation, AnimationPlayer},
         base::BaseBuilder,
-        collider::{Collider, ColliderBuilder, ColliderShape},
-        graph::{physics::RayCastOptions, Graph},
+        collider::{BitMask, Collider, ColliderBuilder, ColliderShape, InteractionGroups},
+        graph::{
+            physics::{geometry::Ball, QueryFilter, RayCastOptions},
+            Graph,
+        },
         light::{
             point::{PointLight, PointLightBuilder},
             BaseLightBuilder,
@@ -147,8 +153,10 @@ const FIRST_SHOT: f32 = 0.8;
 const REPLAN: f32 = 0.5;
 /// How many of the pistol's bolts bring it down.
 pub const HITS: u32 = 3;
-/// Its body, for bolts to hit: a ball this big across its middle, in meters.
+/// Its body: a ball this big across its middle, in meters.
 const BODY_RADIUS: f32 = 0.3;
+/// How near anyone it comes, flying, in meters between its body and theirs.
+const CLEARANCE: f32 = 0.05;
 /// Its lamp: where it is, in the model's own terms along the way it faces - just clear of the
 /// front of its eye, which reaches 1.4 out from the middle; how bright it is for each strength of
 /// [`glow`]; and how far it reaches, in meters.
@@ -277,7 +285,7 @@ pub struct Drone {
     /// What the animations move about, and its lamp.
     body: Handle<Node>,
     lamp: Handle<Node>,
-    /// Its body for bolts to hit, and the ball that is, while it is up.
+    /// Its body, and the ball that is, while it is in the round.
     hull: Handle<Node>,
     collider: Handle<Collider>,
     /// Its animations by name.
@@ -578,7 +586,7 @@ impl Drone {
         self.body
     }
 
-    /// Its body, for bolts to hit, while it is up.
+    /// Its body, while it is in the round.
     pub fn collider(&self) -> Handle<Collider> {
         self.collider
     }
@@ -633,10 +641,7 @@ impl Drone {
             self.state = State::Down;
             self.route.clear();
             self.speed = 0.0;
-            // Out of the way of the bolts that follow: it lies on the floor, and they fly over.
-            if graph.is_valid_handle(self.hull) {
-                graph.remove_node(self.hull);
-            }
+            // Its body goes down with it (see `update`), and lies on the floor as solid as ever.
             self.play(graph, DEATH);
             return Some(true);
         }
@@ -747,10 +752,24 @@ impl Drone {
         if live && self.placed {
             self.since += dt;
             doing.says = self.think(graph, (grid, origin), player, rng, dt);
-            self.fly((grid, origin), player, dt);
+            self.fly(graph, (grid, origin), player, dt);
             self.pose(graph);
-            if let Ok(hull) = graph.try_get_mut_of_type::<RigidBody>(self.hull) {
-                hull.set_next_kinematic_translation(self.at);
+            // Its body goes where the animations take it: bobbing as it hovers, and down to the
+            // floor when it is shot down. As of the last frame, which is as near as matters.
+            let at = match self.state {
+                State::Down => graph[self.body].global_position(),
+                _ => self.at,
+            };
+            // Moved by hand, it would push anyone in its way with no end of force - down through
+            // the floor, even, settling or falling onto them. So it never moves into anyone: it
+            // stays put until they are out of the way.
+            if graph.is_valid_handle(self.hull) {
+                let from = graph[self.hull].global_position();
+                if !blocked(graph, self.hull, from, at - from) {
+                    if let Ok(hull) = graph.try_get_mut_of_type::<RigidBody>(self.hull) {
+                        hull.set_next_kinematic_translation(at);
+                    }
+                }
             }
             // Which animation goes with what it is doing: firing and scanning play through.
             let next = match self.state {
@@ -904,7 +923,7 @@ impl Drone {
 
     /// Flies on along its route for another `dt`, turning to face the way it goes - or the player,
     /// on Alert - and hovering over the floor.
-    fn fly(&mut self, (grid, origin): (&WalkGrid, Vector3<f32>), player: &Target, dt: f32) {
+    fn fly(&mut self, graph: &Graph, (grid, origin): (&WalkGrid, Vector3<f32>), player: &Target, dt: f32) {
         if self.state == State::Down {
             return;
         }
@@ -936,7 +955,7 @@ impl Drone {
             true => (self.speed + ACCELERATION * dt).min(wanted),
             false => (self.speed - 2.0 * ACCELERATION * dt).max(wanted),
         };
-        self.at += way * self.speed * dt;
+        let mut next = self.at + way * self.speed * dt;
         // Facing the way it goes, or the player on Alert.
         let facing = match self.state {
             State::Alert => {
@@ -950,9 +969,15 @@ impl Drone {
             self.heading = wrap(self.heading + turn.clamp(-TURN_RATE * dt, TURN_RATE * dt));
         }
         // Hovering over the floor where it is, if there is floor there.
-        if let Some((x, z)) = survey::cell_at(grid, origin, self.at).filter(|&(x, z)| grid.is_walkable(x, z)) {
+        if let Some((x, z)) = survey::cell_at(grid, origin, next).filter(|&(x, z)| grid.is_walkable(x, z)) {
             let height = grid.floor(x, z) + HOVER;
-            self.at.y += (height - self.at.y) * (1.0 - (-FLOOR_EASING * dt).exp());
+            next.y += (height - next.y) * (1.0 - (-FLOOR_EASING * dt).exp());
+        }
+        // Never into anyone, sideways, up or down: it waits for them to move.
+        if blocked(graph, self.hull, self.at, next - self.at) {
+            self.speed = 0.0;
+        } else {
+            self.at = next;
         }
     }
 
@@ -988,18 +1013,48 @@ impl Drone {
     }
 }
 
-/// Its body for bolts to hit: a ball that is a sensor, which the player and the droids pass
-/// through, on a body moved by hand. The body, and the ball.
+/// Its body: a solid ball on a body moved by hand, which bumps into everyone and everything but
+/// is not one of the characters, whom it looks out for as it flies (see [`blocked`]). The body,
+/// and the ball.
 fn hull(graph: &mut Graph) -> (Handle<Node>, Handle<Collider>) {
     let collider: Handle<Collider> = ColliderBuilder::new(BaseBuilder::new())
         .with_shape(ColliderShape::ball(BODY_RADIUS))
-        .with_sensor(true)
+        .with_collision_groups(InteractionGroups::new(BitMask(!CHARACTERS), BitMask(u32::MAX)))
         .build(graph);
     let body = RigidBodyBuilder::new(BaseBuilder::new().with_child(collider))
         .with_body_type(RigidBodyType::KinematicPositionBased)
         .build(graph)
         .to_base();
     (body, collider)
+}
+
+/// Whether the drone whose body is `hull`, its middle at `at`, would run into anyone - the player
+/// or a droid - going `step`, or come nearer them than [`CLEARANCE`]. Going away from someone it
+/// touches is never blocked, so it can always get clear.
+fn blocked(graph: &Graph, hull: Handle<Node>, at: Vector3<f32>, step: Vector3<f32>) -> bool {
+    let Some(way) = step.try_normalize(1.0e-6) else {
+        return false;
+    };
+    graph
+        .physics
+        .cast_shape(
+            graph,
+            &Ball::new(BODY_RADIUS),
+            &Isometry3::translation(at.x, at.y, at.z),
+            &(way * (step.norm() + CLEARANCE)),
+            1.0,
+            false,
+            QueryFilter {
+                exclude_rigid_body: Some(hull),
+                // The characters' capsules alone: the maze and most else are in every group,
+                // the characters' among them.
+                predicate: Some(&|_, collider: &Collider| {
+                    collider.collision_groups().memberships.0 == CHARACTERS
+                }),
+                ..Default::default()
+            },
+        )
+        .is_some()
 }
 
 /// Gives the drone its own copy of each material under `nodes` that glows, so that its glow can
@@ -1112,5 +1167,149 @@ mod tests {
         let spotted = lines.lines["spotted"].len();
         assert_eq!(lines.line("spotted", spotted), lines.line("spotted", 0));
         assert_eq!(lines.line("nothing", 0), None);
+    }
+
+    /// Someone standing with their feet at the origin, as the player's capsule is - 1.7 m tall,
+    /// 0.35 m across - and a wall across the way 3 m ahead along z; and a drone's body hovering at `at`. The
+    /// drone's body.
+    fn standing_by(graph: &mut Graph, at: Vector3<f32>) -> Handle<Node> {
+        use fyrox::scene::transform::TransformBuilder;
+        let capsule = ColliderBuilder::new(BaseBuilder::new())
+            .with_shape(ColliderShape::capsule_y(0.5, 0.35))
+            .with_collision_groups(crate::ragdoll::character_groups())
+            .build(graph);
+        RigidBodyBuilder::new(
+            BaseBuilder::new()
+                .with_child(capsule)
+                .with_local_transform(TransformBuilder::new().with_local_position(Vector3::new(0.0, 0.85, 0.0)).build()),
+        )
+        .with_body_type(RigidBodyType::KinematicPositionBased)
+        .build(graph);
+        let wall = ColliderBuilder::new(BaseBuilder::new()).with_shape(ColliderShape::cuboid(2.0, 2.0, 0.1)).build(graph);
+        RigidBodyBuilder::new(
+            BaseBuilder::new()
+                .with_child(wall)
+                .with_local_transform(TransformBuilder::new().with_local_position(Vector3::new(0.0, 1.0, 3.0)).build()),
+        )
+        .with_body_type(RigidBodyType::Static)
+        .build(graph);
+        let (body, _) = hull(graph);
+        graph[body].local_transform_mut().set_position(at);
+        // The physics has its colliders by the second update.
+        for _ in 0..2 {
+            graph.update(
+                fyrox::core::algebra::Vector2::new(800.0, 600.0),
+                1.0 / 60.0,
+                Default::default(),
+            );
+        }
+        body
+    }
+
+    #[test]
+    fn a_drone_waits_for_someone_in_its_way_and_never_pushes_into_them() {
+        let mut graph = Graph::new();
+        let at = Vector3::new(-1.0, HOVER, 0.0);
+        let body = standing_by(&mut graph, at);
+        let toward = Vector3::new(0.05, 0.0, 0.0);
+        // Far off, it flies on; up against them - 0.6 m from their middle, its body 4.5 cm from
+        // the top of theirs, which curves down from the height it hovers at - it waits.
+        assert!(!blocked(&graph, body, at, toward));
+        assert!(blocked(&graph, body, Vector3::new(-0.6, HOVER, 0.0), toward));
+        // It gets clear, and goes past them where there is room.
+        assert!(!blocked(&graph, body, Vector3::new(-0.6, HOVER, 0.0), -toward));
+        assert!(!blocked(&graph, body, Vector3::new(-0.6, HOVER, 0.0), Vector3::new(0.0, 0.0, -0.05)));
+        // Over a crouching or crawling head it passes, and the maze is not someone.
+        assert!(!blocked(&graph, body, Vector3::new(-0.6, 2.4, 0.0), toward));
+        assert!(!blocked(&graph, body, Vector3::new(0.0, HOVER, 2.55), Vector3::new(0.0, 0.0, 0.05)));
+    }
+
+    #[test]
+    fn a_drone_is_solid() {
+        let mut graph = Graph::new();
+        let (_, collider) = hull(&mut graph);
+        let ball = &graph[collider];
+        assert!(!ball.is_sensor());
+        let player = crate::ragdoll::character_groups();
+        let groups = ball.collision_groups();
+        // It and the player's capsule meet, but it is not one of the characters.
+        assert!(groups.memberships.0 & player.filter.0 != 0 && player.memberships.0 & groups.filter.0 != 0);
+        assert_eq!(groups.memberships.0 & CHARACTERS, 0);
+    }
+
+    /// How low the player's feet get, standing and maybe walking forward on a thin floor of the
+    /// maze - a triangle mesh - for four seconds while a drone's body is moved by hand along
+    /// `path` over time, holding still while it would run into anyone, as `Drone::update` moves
+    /// it.
+    fn lowest_feet(path: impl Fn(f32) -> Vector3<f32>, walk: bool) -> f32 {
+        use crate::player::Player;
+        use fyrox::core::algebra::{Matrix4, Vector2};
+        use fyrox::scene::{
+            collider::GeometrySource,
+            mesh::{
+                surface::{SurfaceBuilder, SurfaceData, SurfaceResource},
+                MeshBuilder,
+            },
+            transform::TransformBuilder,
+        };
+        let mut graph = Graph::new();
+        let mesh = MeshBuilder::new(
+            BaseBuilder::new().with_local_transform(
+                TransformBuilder::new().with_local_position(Vector3::new(0.0, -0.1, 0.0)).build(),
+            ),
+        )
+        .with_surfaces(vec![SurfaceBuilder::new(SurfaceResource::new_embedded(SurfaceData::make_cube(
+            Matrix4::new_nonuniform_scaling(&Vector3::new(20.0, 0.2, 20.0)),
+        )))
+        .build()])
+        .build(&mut graph);
+        graph.update_hierarchical_data();
+        let floor = ColliderBuilder::new(BaseBuilder::new())
+            .with_shape(ColliderShape::trimesh(vec![GeometrySource(mesh.to_base())]))
+            .build(&mut graph);
+        RigidBodyBuilder::new(BaseBuilder::new().with_child(floor))
+            .with_body_type(RigidBodyType::Static)
+            .build(&mut graph);
+        let mut player = Player::spawn(&mut graph);
+        player.teleport(&mut graph, Vector3::new(0.0, 0.86, 0.0), 0.0);
+        if walk {
+            player.on_key(fyrox::keyboard::KeyCode::KeyW, true);
+        }
+        let (hull, _) = hull(&mut graph);
+        graph[hull].local_transform_mut().set_position(path(0.0));
+        let dt = 1.0 / 60.0;
+        let mut lowest = f32::MAX;
+        for k in 0..240 {
+            player.update(&mut graph, dt, true);
+            let to = path(k as f32 * dt);
+            let from = graph[hull].global_position();
+            if !blocked(&graph, hull, from, to - from) {
+                if let Ok(body) = graph.try_get_mut_of_type::<RigidBody>(hull) {
+                    body.set_next_kinematic_translation(to);
+                }
+            }
+            graph.update(Vector2::new(800.0, 600.0), dt, Default::default());
+            lowest = lowest.min(player.feet(&graph).y);
+        }
+        lowest
+    }
+
+    #[test]
+    fn a_drone_never_pushes_the_player_down_through_the_floor() {
+        // Standing, with no drone near, the feet sink this far into the floor at most.
+        let alone = lowest_feet(|_| Vector3::new(10.0, HOVER, 10.0), false);
+        let cases: [(&str, Box<dyn Fn(f32) -> Vector3<f32>>, bool); 4] = [
+            // Settling onto their head from above, as it would coming down to hover over a step,
+            // or shot down overhead: moved by hand, it would press them down through the floor.
+            ("sinking onto them", Box::new(|t| Vector3::new(0.0, (2.3 - t).max(0.3), 0.0)), false),
+            ("flying through them", Box::new(|t| Vector3::new(-2.0 + 2.0 * t, HOVER, 0.0)), false),
+            // Walking into it, under it, at its height and lower.
+            ("walked into", Box::new(|_| Vector3::new(0.0, HOVER, 1.0)), true),
+            ("walked into low", Box::new(|_| Vector3::new(0.0, 1.5, 0.6)), true),
+        ];
+        for (name, path, walk) in cases {
+            let lowest = lowest_feet(path, walk);
+            assert!(lowest > alone - 0.01, "{name}: down to {lowest} (alone {alone})");
+        }
     }
 }
