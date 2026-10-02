@@ -1404,10 +1404,12 @@ impl Inhabitants {
             if trigger {
                 droid.reload = between(rng, FIRE_EVERY);
             }
-            let look = target.map_or((0.0, 0.0), |at| {
+            // Its body is never turned - only the model's root is, by the heading - so the way to
+            // them is in the world's terms, as the heading is, not ahead of where it faces.
+            let look = target.map_or((0.0, droid.heading), |at| {
                 let from = droid.feet + Vector3::new(0.0, FACE_HEIGHT, 0.0);
                 let to = at - from;
-                (to.y.atan2(flat(to).norm()), 0.0)
+                (to.y.atan2(flat(to).norm()), to.x.atan2(to.z))
             });
             let going = Going {
                 heading: Some(droid.heading),
