@@ -32,7 +32,7 @@ use crate::{
     },
     generate::Maze,
     hud::{self, Hud, Status},
-    inhabitants::{Alert, Inhabitants, Livery, News, Threat, HOSTILE_MODEL},
+    inhabitants::{Alert, Inhabitants, Livery, News, Rival, Threat, HOSTILE_MODEL},
     layout::{self, Rng},
     level::Level,
     menu::{Choice, Game, MainMenu, PauseMenu, Start},
@@ -1100,10 +1100,20 @@ impl MazeGame {
             .join_chases(graph, self.lights_off, |character| {
                 script.is_some_and(|script| is_sentry(script, character))
             });
+        // In capture the flag, the drones on a side, for the other side's droids to fight.
+        let rivals: Vec<Rival> = self
+            .drones
+            .iter()
+            .filter_map(|drone| {
+                let body = drone.as_target()?;
+                Some(Rival { side: drone.side()?, feet: body.feet, middle: body.middle, collider: body.collider })
+            })
+            .collect();
         self.inhabitants.update(
             &mut scene.graph,
             (grid, *origin),
             player,
+            &rivals,
             rng,
             ctx.dt,
             |character| script.is_some_and(|script| is_sentry(script, character)),
@@ -1140,6 +1150,13 @@ impl MazeGame {
                     .chain(self.drones.iter().filter(|d| d.side() == Some(side)).map(Drone::collider))
                     .collect();
                 let strikes = bolts.fly(graph, ctx.dt, |graph, from, way, reach| first_hit(graph, from, way, reach, &own));
+                // A bolt that flies close by the other side's is an attack on it too.
+                let struck: Vec<Handle<Collider>> = strikes.iter().map(|strike| strike.collider).collect();
+                let passes = bolts.passed();
+                self.inhabitants.near_miss(&passes, Some(side), &struck);
+                for drone in &mut self.drones {
+                    drone.near_miss(&passes, Some(side));
+                }
                 landed.extend(strikes.into_iter().map(|strike| (side, strike)));
             }
             for (side, strike) in landed {
@@ -1147,7 +1164,9 @@ impl MazeGame {
             }
         }
         let graph = &mut ctx.scenes[self.scene].graph;
-        for strike in self.player.struck() {
+        let strikes = self.player.struck();
+        let struck: Vec<Handle<Collider>> = strikes.iter().map(|strike| strike.collider).collect();
+        for strike in strikes {
             let collider = strike.collider;
             // In capture the flag, the player's bolts pass their own side by.
             let friendly = self.inhabitants.hit(collider).and_then(|n| self.inhabitants.side(n))
@@ -1183,7 +1202,22 @@ impl MazeGame {
                 }
             }
         }
-        // A droid shot sets the drones on the player.
+        // A bolt that only flies close by is an attack all the same: the droid takes it as one
+        // that hit would, harmlessly, and so does a drone.
+        let passes = self.player.passed();
+        let fired_by = self.ctf.as_ref().map(|_| PLAYERS);
+        for n in self.inhabitants.near_miss(&passes, fired_by, &struck) {
+            droid_shot = true;
+            if self.threatened(n).is_some() && self.inhabitants.provoke(n) && !provoked.contains(&n) {
+                provoked.push(n);
+            }
+        }
+        for (n, drone) in self.drones.iter_mut().enumerate() {
+            if let Some(says) = drone.near_miss(&passes, fired_by) {
+                self.drone_says.push((n, says));
+            }
+        }
+        // A droid shot at sets the drones on the player.
         if droid_shot {
             self.alert_drone(player);
         }
@@ -1306,8 +1340,11 @@ impl MazeGame {
             Some(threatened.patience)
         };
         let player = &self.player;
+        // It has to see it to mind it: as it would see the player at all.
+        let watched = (player.feet(graph), player.posture(), self.lights_off && !player.flashlight_on());
         let stages = self.inhabitants.feel_aimed_at(
             aim,
+            watched,
             |there| player.can_see(graph, there),
             patience,
             ctx.dt,
@@ -2140,6 +2177,19 @@ impl MazeGame {
                 None => self.drones.iter().map(|drone| drone.collider()).collect(),
             };
             let hits = self.shots.as_mut().map_or_else(Vec::new, |shots| shots.update(graph, ctx.dt, &drones));
+            // In capture the flag, a shot that flies close by one of the other side is an attack
+            // on it too, as a droid's bolt is.
+            if self.ctf.is_some() {
+                let struck: Vec<Handle<Collider>> = hits.iter().map(|hit| hit.collider).collect();
+                let passed = self.shots.as_ref().map_or_else(Vec::new, |shots| shots.passed().to_vec());
+                for (by, pass) in passed {
+                    let side = self.drones.iter().find(|d| d.collider() == by).and_then(Drone::side);
+                    self.inhabitants.near_miss(&[pass], side, &struck);
+                    for drone in &mut self.drones {
+                        drone.near_miss(&[pass], side);
+                    }
+                }
+            }
             for hit in hits {
                 if self.phase != Phase::Playing {
                     break;

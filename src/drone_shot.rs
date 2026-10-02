@@ -13,7 +13,7 @@ use crate::{
     drone::{claim_glows, light_colour},
     fixtures::{DIFFUSE_COLOR, EMISSION_STRENGTH},
     formants::{self, Sounds},
-    player::PISTOL_SOUNDS,
+    player::{pistol::Pass, PISTOL_SOUNDS},
 };
 use fyrox::{
     core::{
@@ -70,8 +70,9 @@ struct Flight {
     range: f32,
     /// How much longer it glows where it hit something, in seconds, once it has.
     landed: Option<f32>,
-    /// What fired it, which it flies through.
+    /// What fired it, which it flies through, and where from.
     from: Handle<Collider>,
+    fired_at: Vector3<f32>,
 }
 
 /// Something a shot hit: its collider, where, and which way the shot was going; and what fired it.
@@ -98,6 +99,8 @@ struct Shot {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Shots {
     shots: Vec<Shot>,
+    /// Where each shot flew in the last update, and what fired it.
+    passed: Vec<(Handle<Collider>, Pass)>,
     /// The sound of a shot leaving, and how far off it is heard at full volume, if there is one.
     sound: Option<(SoundBufferResource, f32)>,
 }
@@ -176,7 +179,7 @@ impl Shots {
             })
             .collect::<Vec<_>>();
         Log::info(format!("Drone shots: {} made", shots.len()));
-        Self { shots, sound }
+        Self { shots, sound, passed: Vec::new() }
     }
 
     /// Fires a shot from `from` at `at`, glowing `colour` (strength 1 at its brightest).
@@ -197,6 +200,7 @@ impl Shots {
             return;
         };
         shot.flight = Some(Flight {
+            fired_at: from,
             position: from,
             direction,
             range: RANGE,
@@ -235,6 +239,7 @@ impl Shots {
     /// Flies every shot in the air on for another `dt`, through whatever fired it - and, in the
     /// maze, through all the `drones`' bodies. What they hit this time.
     pub fn update(&mut self, graph: &mut Graph, dt: f32, drones: &[Handle<Collider>]) -> Vec<Hit> {
+        self.passed.clear();
         let mut hits = Vec::new();
         for shot in &mut self.shots {
             let Some(flight) = shot.flight.as_mut() else {
@@ -262,7 +267,17 @@ impl Shots {
                 &mut found,
             );
             let from = flight.from;
-            if let Some(hit) = found.iter().find(|hit| hit.collider != from && !drones.contains(&hit.collider)) {
+            let hit = found.iter().find(|hit| hit.collider != from && !drones.contains(&hit.collider));
+            let reach = hit.map_or(step, |hit| (hit.position.coords - flight.position).norm());
+            self.passed.push((
+                from,
+                Pass {
+                    fired_at: flight.fired_at,
+                    start: flight.position,
+                    end: flight.position + flight.direction * reach,
+                },
+            ));
+            if let Some(hit) = hit {
                 hits.push(Hit {
                     collider: hit.collider,
                     at: hit.position.coords,
@@ -292,6 +307,11 @@ impl Shots {
                 .set_position(flight.position);
         }
         hits
+    }
+
+    /// Where each shot flew in the last update - a stretch for every shot - and what fired it.
+    pub fn passed(&self) -> &[(Handle<Collider>, Pass)] {
+        &self.passed
     }
 
     /// Puts every shot out of sight, and out of the air.

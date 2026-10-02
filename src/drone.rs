@@ -38,6 +38,7 @@
 
 use crate::{
     ctf::Side,
+    player::pistol::Pass,
     ragdoll::CHARACTERS,
     dialogue::{screen, Mood},
     fixtures::{glow_strength, DIFFUSE_COLOR, EMISSION_STRENGTH},
@@ -157,6 +158,8 @@ pub const HITS: u32 = 3;
 const BODY_RADIUS: f32 = 0.3;
 /// How near anyone it comes, flying, in meters between its body and theirs.
 const CLEARANCE: f32 = 0.05;
+/// How near a bolt has to fly past its body to be taken as shot at, in meters.
+const NEAR_MISS: f32 = 1.0;
 /// Its lamp: where it is, in the model's own terms along the way it faces - just clear of the
 /// front of its eye, which reaches 1.4 out from the middle; how bright it is for each strength of
 /// [`glow`]; and how far it reaches, in meters.
@@ -627,6 +630,22 @@ impl Drone {
                 (was == State::Patrol).then_some("alarm")
             }
         }
+    }
+
+    /// Bolts that flew `passes` this frame, fired by `fired_by`'s side - or the player in the maze,
+    /// with none: one that went within [`NEAR_MISS`] of its body, not its own side's, has it search
+    /// where it was fired from, unless it is after the player already. What it says, if anything.
+    pub fn near_miss(&mut self, passes: &[Pass], fired_by: Option<Side>) -> Option<&'static str> {
+        if !self.placed || matches!(self.state, State::Down | State::Alert) {
+            return None;
+        }
+        if fired_by.is_some() && fired_by == self.side {
+            return None;
+        }
+        let pass = passes.iter().find(|pass| pass.nearest(self.at) <= BODY_RADIUS + NEAR_MISS)?;
+        let was = self.state;
+        self.search(pass.fired_at);
+        (was == State::Patrol).then_some("searching")
     }
 
     /// A bolt that hit `collider`, fired by the player from `from`: if it hit the drone, it takes

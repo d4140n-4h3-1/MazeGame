@@ -35,8 +35,9 @@
 //! - **Caution**: it has given up, and wanders as before, but watching for the player still,
 //!   for [`CAUTION`] seconds; then it is calm again, and can be talked to once more.
 //!
-//! A droid sees only what is in front of it, in every phase, and even right next to it: it can be
-//! crept up on from behind, or slipped round (see [`Sight`]). Out of Alert it does not see as far
+//! A droid sees clearly what is in front of it, and out of the corner of its eye what is near off
+//! to the side, in every phase - but nothing behind it, even right behind it: it can be crept up
+//! on from behind, or slipped round (see [`Sight`]). Out of Alert it does not see as far
 //! as it could: a player crouched is seen from half as far, and one crawling from less than a
 //! third. With the lights off it sees a good deal less far in any phase - unless the player's
 //! flashlight is on. Seeing the player again, it is back on
@@ -66,7 +67,7 @@
 pub use hydroxus_ai::alert::{Alert, CAUTION, EVASION};
 pub(crate) use hydroxus_ai::route::{between, plan, route_to};
 use hydroxus_ai::{
-    flat, forward,
+    flat, forward, heading_of,
     hearing::Heard,
     search::SearchMap,
     sight::{Sight, Stance},
@@ -80,6 +81,7 @@ use crate::{
     player::{
         avatar::{self, Avatar, Going},
         breath,
+        pistol::Pass,
         posture::{Gait, Posture},
         Strike,
     },
@@ -161,6 +163,8 @@ const WINDUP: f32 = 1.0;
 /// How long after hearing something a droid pays no heed to another noise, in seconds, but to
 /// go on to where that one was.
 const HEARING_REST: f32 = 3.0;
+/// How near a bolt has to fly past a droid's chest for it to take it as being shot at, in meters.
+const NEAR_MISS: f32 = 1.0;
 /// How far ahead of where it last saw the player it looks for them first, in meters, the way
 /// they were going.
 const GUESS: f32 = 4.0;
@@ -193,6 +197,10 @@ const CHASE_REACH: f32 = 200.0;
 const POST_REACH: f32 = 3.0;
 const SPAWN_REACH: f32 = 1.5;
 const FOE_MEMORY: f32 = 6.0;
+/// In capture the flag, how near one of the other side has to be for a droid to notice it even
+/// out of sight of its eyes, in meters: a droid's footsteps, and a drone's hum, which carries.
+const NOTICE_DROID: f32 = 3.0;
+const NOTICE_RIVAL: f32 = 8.0;
 const ARMED_FOR: f32 = 5.0;
 /// In capture the flag, a droid shoots at whoever it sees of the other side - the player too,
 /// for the enemy's - from as far as [`FIRE_RANGE`], in meters, coming on to [`ENGAGE`] and standing
@@ -346,13 +354,15 @@ struct Inhabitant {
     down: bool,
     /// Its body gone limp, once it has been stopped, if it has a ragdoll.
     ragdoll: Option<Ragdoll>,
-    /// In capture the flag, its side, and where it keeps to (see [`crate::ctf`]); the droid of
-    /// the other side it is after, if any, how long since it last saw it, in seconds, and how
-    /// long before it can strike again.
+    /// In capture the flag, its side, and where it keeps to (see [`crate::ctf`]); whom of the
+    /// other side it is after, if anyone, and how long since it last saw them, in seconds; and
+    /// where it was last shot at from by someone it did not see, to go after, and for how much
+    /// longer, in seconds.
     side: Option<Side>,
     post: Option<Vector3<f32>>,
-    foe: Option<usize>,
+    foe: Option<Foe>,
     foe_unseen: f32,
+    shot_from: Option<(Vector3<f32>, f32)>,
     /// How long it has left speaking to the player, its head turned to them, in seconds.
     speaking: f32,
     /// How long before it can fire again, and before it puts its pistol away, in seconds; and
@@ -634,6 +644,48 @@ fn in_sight_of(graph: &Graph, watcher: &Inhabitant, seen: &Inhabitant) -> bool {
         .is_none_or(|hit| hit.collider == seen.collider)
 }
 
+/// Someone of the other side in capture the flag who is not one of the droids - a drone: where it
+/// is over the floor, the middle of its body, and its body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rival {
+    pub side: Side,
+    pub feet: Vector3<f32>,
+    pub middle: Vector3<f32>,
+    pub collider: Handle<Collider>,
+}
+
+/// Whom of the other side a droid in capture the flag is after: one of the droids, or a
+/// [`Rival`], by its body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Foe {
+    Droid(usize),
+    Rival(Handle<Collider>),
+}
+
+/// Whether nothing is in the way from `watcher`'s eyes to `at`, but the body `seen`.
+fn in_sight_of_point(graph: &Graph, watcher: &Inhabitant, at: Vector3<f32>, seen: Handle<Collider>) -> bool {
+    let from = watcher.feet + Vector3::new(0.0, FACE_HEIGHT, 0.0);
+    let way = at - from;
+    let length = way.norm();
+    if length < 1.0e-3 {
+        return true;
+    }
+    let mut hits = Vec::new();
+    graph.physics.cast_ray(
+        RayCastOptions {
+            ray_origin: Point3::from(from),
+            ray_direction: way / length,
+            max_len: length,
+            groups: Default::default(),
+            sort_results: true,
+        },
+        &mut hits,
+    );
+    hits.iter()
+        .find(|hit| hit.collider != watcher.collider)
+        .is_none_or(|hit| hit.collider == seen)
+}
+
 /// Whether the middle of a view from `eye`, looking `ahead` - one meter long - is on `target`:
 /// in front, not too far off, and not too far to its side.
 fn pointed_at(eye: Vector3<f32>, ahead: Vector3<f32>, target: Vector3<f32>) -> bool {
@@ -884,6 +936,7 @@ impl Inhabitants {
             post: None,
             foe: None,
             foe_unseen: 0.0,
+            shot_from: None,
             speaking: 0.0,
             reload: 0.0,
             armed_left: 0.0,
@@ -970,6 +1023,7 @@ impl Inhabitants {
         graph: &mut Graph,
         (grid, origin): (&WalkGrid, Vector3<f32>),
         player: Vector3<f32>,
+        rivals: &[Rival],
         rng: &mut Rng,
         dt: f32,
         sentry: impl Fn(usize) -> bool,
@@ -994,26 +1048,51 @@ impl Inhabitants {
         let the_player = everyone.len() - 1;
         // Those lying where they went down are in no one's way.
         let down: Vec<bool> = self.droids.iter().map(|droid| droid.down).collect();
-        // In capture the flag, which of the other side each is after, and whether it sees it:
-        // the nearest it sees, or else the one it was after, for a while after losing sight of it.
-        let foes: Vec<(Option<usize>, bool)> = (0..self.droids.len())
+        // In capture the flag, whom of the other side each is after, and whether it sees them:
+        // the nearest it sees - or, near enough, hears - or else the one it was after, for a while
+        // after losing sight of them. The other side's droids and drones alike.
+        // Where each droid is standing, as of the start of this frame.
+        let placed: Vec<Option<(Vector3<f32>, Vector3<f32>)>> = self
+            .droids
+            .iter()
+            .map(|droid| (!droid.down).then(|| (droid.feet, droid.feet + Vector3::new(0.0, CHEST, 0.0))))
+            .collect();
+        let foe_place = |foe: Foe| -> Option<(Vector3<f32>, Vector3<f32>)> {
+            match foe {
+                Foe::Droid(n) => placed.get(n).copied().flatten(),
+                Foe::Rival(body) => rivals.iter().find(|r| r.collider == body).map(|r| (r.feet, r.middle)),
+            }
+        };
+        let foes: Vec<(Option<Foe>, bool)> = (0..self.droids.len())
             .map(|m| {
                 let droid = &self.droids[m];
                 let Some(side) = droid.side.filter(|_| !droid.down) else {
                     return (None, false);
                 };
-                let enemy = |n: usize| !self.droids[n].down && self.droids[n].side == Some(side.other());
-                let away = |n: usize| flat(self.droids[n].feet - droid.feet).norm();
-                let seen = (0..self.droids.len())
-                    .filter(|&n| enemy(n))
-                    .filter(|&n| {
-                        could_see_droid(Some(Alert::Alert), droid.feet, droid.heading, self.droids[n].feet, false)
-                            && in_sight_of(graph, droid, &self.droids[n])
+                let enemy = |foe: Foe| match foe {
+                    Foe::Droid(n) => !self.droids[n].down && self.droids[n].side == Some(side.other()),
+                    Foe::Rival(body) => rivals.iter().any(|r| r.collider == body && r.side == side.other()),
+                };
+                let candidates = (0..self.droids.len())
+                    .map(Foe::Droid)
+                    .chain(rivals.iter().map(|r| Foe::Rival(r.collider)))
+                    .filter(|&foe| enemy(foe));
+                let seen = candidates
+                    .filter_map(|foe| {
+                        let (feet, middle) = foe_place(foe)?;
+                        let away = (middle - (droid.feet + Vector3::new(0.0, CHEST, 0.0))).norm();
+                        let (body, notice) = match foe {
+                            Foe::Droid(n) => (self.droids[n].collider, NOTICE_DROID),
+                            Foe::Rival(body) => (body, NOTICE_RIVAL),
+                        };
+                        let looks = could_see_droid(Some(Alert::Alert), droid.feet, droid.heading, feet, false);
+                        ((looks || away <= notice) && in_sight_of_point(graph, droid, middle, body)).then_some((foe, away))
                     })
-                    .min_by(|&a, &b| away(a).total_cmp(&away(b)));
-                match (seen, droid.foe.filter(|&n| enemy(n))) {
-                    (Some(n), _) => (Some(n), true),
-                    (None, Some(n)) if droid.foe_unseen < FOE_MEMORY => (Some(n), false),
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(foe, _)| foe);
+                match (seen, droid.foe.filter(|&foe| enemy(foe))) {
+                    (Some(foe), _) => (Some(foe), true),
+                    (None, Some(foe)) if droid.foe_unseen < FOE_MEMORY => (Some(foe), false),
                     _ => (None, false),
                 }
             })
@@ -1103,8 +1182,18 @@ impl Inhabitants {
                 }
             }
             let (foe, sees_foe) = foes[me];
+            // Shot at by someone it has not seen, it goes after where from for a while.
+            if let Some((_, left)) = droid.shot_from.as_mut() {
+                *left -= dt;
+            }
+            if sees_foe || droid.shot_from.is_some_and(|(_, left)| left <= 0.0) {
+                droid.shot_from = None;
+            }
             if foe.is_some() && droid.foe.is_none() {
                 engaged.push(me);
+                if matches!(foe, Some(Foe::Rival(_))) {
+                    Log::info(format!("Capture the flag: droid {me} goes after a drone"));
+                }
             }
             droid.foe = foe;
             droid.foe_unseen = if sees_foe { 0.0 } else { droid.foe_unseen + dt };
@@ -1121,14 +1210,14 @@ impl Inhabitants {
                     other != me
                         && !down.get(other).copied().unwrap_or(false)
                         && !(hunting && other == the_player)
-                        && Some(other) != fighting
+                        && Some(Foe::Droid(other)) != fighting
                 })
                 .map(|(_, &other)| other);
             // In capture the flag, whoever of the other side it sees to shoot at: the player
             // first, for the enemy's; and near enough, it stands to shoot.
             let target = match droid.side {
                 Some(_) if hunting && droid.sees_player => Some(player + Vector3::new(0.0, PLAYER_CHEST, 0.0)),
-                Some(_) if sees_foe => fighting.map(|n| everyone[n].0 + Vector3::new(0.0, CHEST, 0.0)),
+                Some(_) if sees_foe => fighting.and_then(foe_place).map(|(_, middle)| middle),
                 _ => None,
             }
             .filter(|&at| flat(at - droid.feet).norm() < FIRE_RANGE);
@@ -1193,12 +1282,19 @@ impl Inhabitants {
                         .filter(|&ahead| (1..=4).all(|i| floor_at(player + (ahead - player) * (i as f32 / 4.0))));
                     droid.route = route_to((grid, origin), droid.feet, cut_off.unwrap_or(player), CHASE_REACH);
                 }
-            } else if let Some(foe) = fighting {
+            } else if let Some((feet, _)) = fighting.and_then(foe_place) {
                 // After one of the other side, the way to it worked out again every so often.
                 droid.replan -= dt;
                 if droid.replan <= 0.0 || droid.route.is_empty() {
                     droid.replan = REPLAN;
-                    droid.route = route_to((grid, origin), droid.feet, everyone[foe].0, CHASE_REACH);
+                    droid.route = route_to((grid, origin), droid.feet, feet, CHASE_REACH);
+                }
+            } else if let Some((from, _)) = droid.shot_from.filter(|_| droid.side.is_some()) {
+                // Shot at by someone it did not see: after them, where the shot came from.
+                droid.replan -= dt;
+                if droid.replan <= 0.0 || droid.route.is_empty() {
+                    droid.replan = REPLAN;
+                    droid.route = route_to((grid, origin), droid.feet, from, CHASE_REACH);
                 }
             } else if droid.alert == Some(Alert::Evasion) {
                 if droid.route.is_empty() {
@@ -1529,13 +1625,17 @@ impl Inhabitants {
     }
 
     /// Has each droid that is not hostile feel the pistol pointed at it for another `dt`, or
-    /// not: by the player looking from `eye` along `ahead` with it out, if they are, as long as
-    /// `in_sight` says nothing is in the way from the player to the droid. `patience` says how
+    /// not: by the player looking from `eye` along `ahead` with it out, if they are - and only
+    /// if it can see them do it. They are at `watched`: their feet, how they hold themselves and
+    /// whether it is too dark to see them far; it sees them as a calm droid sees anyone (see
+    /// [`Sight`]), facing them, as long as `in_sight` says nothing is in the way from the player
+    /// to the droid. Its back to them, it never knows. `patience` says how
     /// long each kind of droid - as an index into the conversations' characters - stands for
     /// it; none, it pays it no heed. Which droids went on to another stage.
     pub fn feel_aimed_at(
         &mut self,
         aim: Option<(Vector3<f32>, Vector3<f32>)>,
+        watched: (Vector3<f32>, Posture, bool),
         in_sight: impl Fn(Vector3<f32>) -> bool,
         patience: impl Fn(usize) -> Option<f32>,
         dt: f32,
@@ -1547,8 +1647,10 @@ impl Inhabitants {
             };
             let minding = droid.alert.is_none() && !droid.down && !droid.talking;
             let chest = droid.feet + Vector3::new(0.0, CHEST, 0.0);
+            let (player, posture, in_the_dark) = watched;
             let aimed = minding
                 && aim.is_some_and(|(eye, ahead)| pointed_at(eye, ahead, chest))
+                && Sight::default().could_see(None, droid.feet, droid.heading, player, posture.into(), in_the_dark)
                 && in_sight(droid.feet);
             if !minding {
                 droid.threat = 0.0;
@@ -1673,6 +1775,55 @@ impl Inhabitants {
             // Where the noise was is where the search starts from.
             self.search_from = Some(at);
         }
+    }
+
+    /// Bolts that flew `passes` this frame, fired by `fired_by`'s side - or the player in the
+    /// maze, with none - and struck the bodies in `struck`. A droid one went within [`NEAR_MISS`]
+    /// of, that it did not strike, and not of its own side's, takes it as being shot at, missed:
+    /// in capture the flag it turns to where it was fired from, and goes after whoever fired it
+    /// unless it sees them, unless it is fighting already; a
+    /// hostile one searches from there, unless it is after the player already, as one hit
+    /// does (see [`Inhabitants::shot`]). Every droid shot at like that is handed back: those not
+    /// hostile yet are to be provoked as if hit (see [`Inhabitants::provoke`]).
+    pub fn near_miss(
+        &mut self,
+        passes: &[Pass],
+        fired_by: Option<Side>,
+        struck: &[Handle<Collider>],
+    ) -> Vec<usize> {
+        let mut missed = Vec::new();
+        if passes.is_empty() {
+            return missed;
+        }
+        for (n, droid) in self.droids.iter_mut().enumerate() {
+            if droid.down || droid.talking || struck.contains(&droid.collider) {
+                continue;
+            }
+            if droid.side.is_some() && droid.side == fired_by {
+                continue;
+            }
+            let chest = droid.feet + Vector3::new(0.0, CHEST, 0.0);
+            let Some(pass) = passes.iter().find(|pass| pass.nearest(chest) <= NEAR_MISS) else {
+                continue;
+            };
+            missed.push(n);
+            if droid.alert == Some(Alert::Alert) {
+                continue;
+            }
+            if droid.side.is_some() {
+                if let Some(heading) = heading_of(pass.fired_at - droid.feet) {
+                    droid.heading = heading;
+                }
+                droid.shot_from = Some((pass.fired_at, FOE_MEMORY));
+            } else if droid.alert.is_some() && droid.hunts_player() {
+                droid.deaf = HEARING_REST;
+                droid.lost_at = pass.fired_at;
+                droid.lost_going = Vector3::zeros();
+                droid.alert = None;
+                droid.enter(n, Some(Alert::Evasion), &mut self.alerts);
+            }
+        }
+        missed
     }
 
     /// The most urgent phase any droid is in, and the longest any of them in it has left to
@@ -1807,10 +1958,12 @@ impl Inhabitants {
         droid.hits += 1;
         if droid.hits < HITS && headshot.is_none() {
             if droid.side.is_some() {
-                // In capture the flag, it turns to whoever it was, to see them.
+                // In capture the flag, it turns to whoever it was, to see them, and goes after
+                // them if it does not.
                 let to = flat(player - droid.feet);
                 if to.norm() > 1.0e-3 && droid.alert != Some(Alert::Alert) {
                     droid.heading = to.x.atan2(to.z);
+                    droid.shot_from = Some((player, FOE_MEMORY));
                 }
             } else if droid.alert != Some(Alert::Alert) {
                 // After whoever fired, paying no heed to the bolt's own noise hitting it.
@@ -2009,10 +2162,12 @@ mod tests {
         let sees = |alert, x: f32, z: f32, dark| {
             could_see_droid(alert, Vector3::zeros(), 0.0, Vector3::new(x, 0.0, z), dark)
         };
-        // Calm, it looks about it as it does wary: ahead, and not behind or off to the side.
+        // Calm, it looks about it as it does wary: ahead, off to the side only near, out of the
+        // corner of its eye, and not behind.
         assert!(sees(None, 0.0, 20.0, false), "ahead");
         assert!(!sees(None, 0.0, -10.0, false), "behind");
-        assert!(!sees(None, 10.0, 1.0, false), "off to the side");
+        assert!(sees(None, 5.0, 1.0, false), "near, off to the side");
+        assert!(!sees(None, 15.0, 1.0, false), "far off to the side");
         assert!(!sees(None, 0.0, 20.0, true), "far off, in the dark");
         // Searching or after the player, the same: only in front.
         assert!(!sees(Some(Alert::Evasion), 0.0, -10.0, false));

@@ -78,9 +78,29 @@ pub struct Strike {
     pub way: Vector3<f32>,
 }
 
+/// The stretch a bolt flew in one frame, from `start` to `end`, and where it was fired from:
+/// for anyone it went close by to take notice.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pass {
+    pub fired_at: Vector3<f32>,
+    pub start: Vector3<f32>,
+    pub end: Vector3<f32>,
+}
+
+impl Pass {
+    /// How near it went to `point`, in meters.
+    pub fn nearest(&self, point: Vector3<f32>) -> f32 {
+        let along = self.end - self.start;
+        let t = (point - self.start).dot(&along) / along.norm_squared().max(1.0e-12);
+        (self.start + along * t.clamp(0.0, 1.0) - point).norm()
+    }
+}
+
 /// A bolt in the air.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Bolt {
+    /// Where it was fired from.
+    fired_at: Vector3<f32>,
     position: Vector3<f32>,
     /// Which way it flies, one meter long.
     direction: Vector3<f32>,
@@ -102,8 +122,9 @@ pub struct Bolts {
     hums: Vec<Handle<Node>>,
     /// The sound of a shot, and how far off it is heard at full volume, if there is one.
     shot: Option<(SoundBufferResource, f32)>,
-    /// What bolts have hit since the game last asked.
+    /// What bolts have hit since the game last asked, and where they flew in their last flight.
     struck: Vec<Strike>,
+    passed: Vec<Pass>,
 }
 
 /// The sound called `name` in `sounds`, made to play, with how far off it is heard at full
@@ -195,6 +216,7 @@ impl Bolts {
             hums,
             shot,
             struck: Vec::new(),
+            passed: Vec::new(),
         }
     }
 
@@ -239,6 +261,7 @@ impl Bolts {
             return;
         };
         *bolt = Some(Bolt {
+            fired_at: from,
             position: from,
             direction,
             range: range.min(BOLT_RANGE),
@@ -275,6 +298,7 @@ impl Bolts {
         dt: f32,
         first_hit: impl Fn(&Graph, Vector3<f32>, Vector3<f32>, f32) -> Option<(f32, Handle<Collider>)>,
     ) -> Vec<Strike> {
+        self.passed.clear();
         let mut struck = Vec::new();
         // How far each bolt gets this frame, and what it hits, if it does.
         let flights: Vec<Option<(f32, Option<Handle<Collider>>, bool)>> = self
@@ -308,6 +332,11 @@ impl Bolts {
             let Some((reach, hit, stopped)) = flight else {
                 continue;
             };
+            self.passed.push(Pass {
+                fired_at: flying.fired_at,
+                start: flying.position,
+                end: flying.position + flying.direction * reach,
+            });
             struck.extend(hit.map(|collider| Strike {
                 collider,
                 at: flying.position + flying.direction * reach,
@@ -351,9 +380,16 @@ impl Bolts {
         struck
     }
 
+    /// Where the bolts flew in their last flight - the last [`Bolts::fly`] - a stretch for every
+    /// bolt, unless this has been asked since.
+    pub fn passed(&mut self) -> Vec<Pass> {
+        std::mem::take(&mut self.passed)
+    }
+
     /// Puts every bolt out of sight, and out of the air.
     pub fn clear(&mut self, graph: &mut Graph) {
         self.struck.clear();
+        self.passed.clear();
         for index in 0..self.bolts.len() {
             let (mesh, bolt) = &mut self.bolts[index];
             if bolt.take().is_some() {
@@ -415,6 +451,11 @@ impl Player {
         std::mem::take(&mut self.bolts.struck)
     }
 
+    /// Where the pistol's bolts flew this frame, unless this has been asked since.
+    pub fn passed(&mut self) -> Vec<Pass> {
+        self.bolts.passed()
+    }
+
     /// Puts the muzzle's glow where the muzzle is that can be seen - the pistol held in first
     /// person, or the droid's - as of the last frame, or puts it out while neither is.
     pub(super) fn light_muzzle(&self, graph: &mut Graph) {
@@ -471,6 +512,35 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pass_says_how_near_it_went() {
+        let pass = Pass {
+            fired_at: Vector3::zeros(),
+            start: Vector3::new(0.0, 1.0, 0.0),
+            end: Vector3::new(0.0, 1.0, 4.0),
+        };
+        // Beside the stretch it flew, before it, and past where it got to this frame.
+        assert!((pass.nearest(Vector3::new(0.8, 1.0, 2.0)) - 0.8).abs() < 1.0e-6);
+        assert!((pass.nearest(Vector3::new(0.0, 1.0, -3.0)) - 3.0).abs() < 1.0e-6);
+        assert!((pass.nearest(Vector3::new(0.0, 2.0, 5.0)) - 2.0f32.sqrt()).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn bolts_say_where_they_flew_each_frame() {
+        let mut graph = Graph::new();
+        let mut bolts = Bolts::new(&mut graph);
+        bolts.fire(&mut graph, Vector3::new(1.0, 1.0, 1.0), Vector3::z());
+        bolts.fly(&mut graph, 0.02, |_, _, _, _| None);
+        let passed = bolts.passed();
+        assert_eq!(passed.len(), 1);
+        assert_eq!(passed[0].fired_at, Vector3::new(1.0, 1.0, 1.0));
+        assert_eq!(passed[0].start, Vector3::new(1.0, 1.0, 1.0));
+        assert!((passed[0].end.z - (1.0 + BOLT_SPEED * 0.02)).abs() < 1.0e-4);
+        assert!(bolts.passed().is_empty(), "each once");
+        bolts.fly(&mut graph, 0.02, |_, _, _, _| None);
+        assert_eq!(bolts.passed()[0].fired_at, Vector3::new(1.0, 1.0, 1.0), "still from where it was fired");
+    }
 
     #[test]
     fn a_bolt_flies_stops_at_what_it_hits_and_lands_where_it_was_sent() {
