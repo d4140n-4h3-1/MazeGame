@@ -378,6 +378,36 @@ mod tests {
     }
 
     #[test]
+    fn the_view_goes_up_stairs_smoothly() {
+        // The flight from `it_walks_up_stairs`, walked up: the most the eyes' height - the
+        // body's, less how far the head has yet to follow it - changes in a frame.
+        let mut graph = Graph::new();
+        block(&mut graph, Vector3::new(-5.0, -1.0, -5.0), Vector3::new(5.0, 0.0, 20.0));
+        for n in 0..12 {
+            let z = 1.0 + n as f32 * 0.35;
+            block(&mut graph, Vector3::new(-1.25, 0.0, z), Vector3::new(1.25, 0.25 * (n + 1) as f32, 20.0));
+        }
+        let mut player = Player::spawn(&mut graph);
+        player.teleport(&mut graph, Vector3::new(0.0, -FEET + 0.01, 0.0), 0.0);
+        player.on_key(fyrox::keyboard::KeyCode::KeyW, true);
+        let dt = 1.0 / 60.0;
+        let (mut eyes, mut jolt) = (None, 0.0_f32);
+        for _ in 0..(12.0 / dt) as usize {
+            player.update(&mut graph, dt, true);
+            graph.update(Vector2::new(800.0, 600.0), dt, GraphUpdateSwitches::default());
+            let now = player.feet(&graph).y - player.stepped;
+            if let Some(before) = eyes {
+                jolt = jolt.max((now - before as f32).abs());
+            }
+            eyes = Some(now);
+        }
+        assert!(player.feet(&graph).y > 2.9, "up to the top");
+        // Walking up at about 0.4 m/s, the eyes go up under a centimetre a frame; easing after
+        // each step as it is lifted onto it, five the moment it is.
+        assert!(jolt < 0.015, "up the stairs smoothly: {jolt} m in a frame");
+    }
+
+    #[test]
     fn a_crate_is_not_a_step() {
         let feet = walk_into(|graph| block(graph, Vector3::new(-1.25, 0.0, 1.0), Vector3::new(1.25, 1.0, 2.0)), 2.0);
         assert!(feet.y < 0.1 && feet.z < 1.0, "stopped against it: {feet:?}");

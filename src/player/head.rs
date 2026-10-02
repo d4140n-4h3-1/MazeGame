@@ -37,10 +37,16 @@ fn bob(phase: f32, swing: f32) -> (f32, f32) {
     )
 }
 
-/// How quickly the head comes up after the body steps up a stair, or down after it steps down
-/// one, like a rate: the body goes up at once, or drops onto the step below, the eyes over a
-/// moment, so that taking stairs does not jolt the view.
-const STEP_EASING: f32 = 14.0;
+/// How fast the head comes up after the body steps up a stair, or down after it steps down one:
+/// as many meters a second as the body goes along the floor, a little steeper than any stairs,
+/// and at least the least, standing still. The body goes up a step at once, or drops onto the
+/// one below; the eyes go on up or down at a steady pace, as up a slope, rather than in a rush
+/// at each step - so that taking stairs, a step at a time or at a run, does not jolt the view.
+const STEP_PACE: f32 = 0.8;
+const LEAST_STEP_PACE: f32 = 0.5;
+/// How far behind the body the head may fall, in meters, at the most: stairs steeper than
+/// [`STEP_PACE`], or a run up them, would otherwise leave it further behind with every step.
+const MOST_STEPPED: f32 = 0.35;
 /// How far the knees give on landing, in meters per meter per second of fall, and the most they
 /// can give however far the drop.
 const LANDING_DIP: f32 = 0.03;
@@ -128,7 +134,9 @@ impl Player {
         };
         self.swing += (wanted - self.swing) * (1.0 - (-BOB_EASING * dt).exp());
         self.landing *= (-LANDING_EASING * dt).exp();
-        self.stepped *= (-STEP_EASING * dt).exp();
+        let catch_up = (speed * STEP_PACE).max(LEAST_STEP_PACE) * dt;
+        self.stepped -= self.stepped.clamp(-catch_up, catch_up);
+        self.stepped = self.stepped.clamp(-MOST_STEPPED, MOST_STEPPED);
 
         let yaw_rate = if dt > 0.0 {
             (self.yaw - self.last_yaw) / dt

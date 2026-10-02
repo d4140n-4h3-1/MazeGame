@@ -322,11 +322,16 @@ const STAIR_LOOK: f32 = 0.35;
 const STAIR_SLOPE: (f32, f32) = (0.3, 0.15);
 /// How much faster than the run's stair cycle the droid takes stairs running, and sprinting.
 const STAIR_HURRY: (f32, f32) = (1.15, 1.3);
-/// How quickly the hips follow the floor up or down a step, like a rate, so that a body lifted a
-/// step at a time, or dropping onto each one below, does not jolt them; and how far above the
-/// floor they may stay following it down, in meters, no further than the legs reach down to it.
-const RIDE_RATE: f32 = 10.0;
+/// How fast the hips follow the floor up or down a step - as many meters a second as the droid goes
+/// along the floor, a little steeper than any stairs, and at least the least - so that a body
+/// lifted a step at a time, or dropping onto each one below, carries them up or down at a steady
+/// pace rather than in a rush at each step. And how far above the floor they may stay following
+/// it down, in meters, no further than the legs reach down to it; and below it, following it up,
+/// no lower than the knees bend.
+const RIDE_PACE: f32 = 0.8;
+const LEAST_RIDE_PACE: f32 = 0.5;
 const RIDE_ABOVE: f32 = 0.1;
+const RIDE_BELOW: f32 = 0.3;
 /// The pistol in its right hand, which everything on it hangs off, as long as [`MOTION`] does not
 /// say otherwise.
 const PISTOL: &str = "pistol";
@@ -1451,6 +1456,8 @@ pub struct Avatar {
     /// stands on, in meters, like [`Avatar::stair_ground`]; and the pose it is fading from.
     made_on: [f32; 2],
     from_made_on: [f32; 2],
+    /// How fast it is going along the floor, as of the last frame, in meters per second.
+    speed: f32,
     /// The floor the hips ride on, in meters across the world: the floor it stands on, followed
     /// up a step over a moment. None until it has stood on one.
     ride: Option<f32>,
@@ -2281,6 +2288,7 @@ impl Avatar {
             stairs: None,
             made_on: [0.0; 2],
             from_made_on: [0.0; 2],
+            speed: 0.0,
             ride: None,
             rest_hips,
             tops,
@@ -3001,12 +3009,13 @@ impl Avatar {
             };
             *footing += (wanted - *footing) * follow;
         }
-        // Up or down a step, the hips come after the floor - down, never far above it; off the
-        // ground, they keep to it.
+        // Up or down a step, the hips come after the floor at a steady pace - never far from
+        // it; off the ground, they keep to it.
         let ride = match self.ride {
             Some(ride) if grounded && (floor - ride).abs() < MOST_STEP => {
-                let ride = ride + (floor - ride) * (1.0 - (-RIDE_RATE * dt).exp());
-                ride.min(floor + RIDE_ABOVE)
+                let catch_up = (self.speed * RIDE_PACE).max(LEAST_RIDE_PACE) * dt;
+                let ride = ride + (floor - ride).clamp(-catch_up, catch_up);
+                ride.clamp(floor - RIDE_BELOW, floor + RIDE_ABOVE)
             }
             _ => floor,
         };
@@ -3042,6 +3051,7 @@ impl Avatar {
         self.arm(graph, going, dt);
         self.squaring = going.strafing;
         self.look = going.look;
+        self.speed = going.speed;
         if self.skidding.is_some() || self.start_skid(graph, going) {
             if self.skid(graph, going, dt) {
                 return;
